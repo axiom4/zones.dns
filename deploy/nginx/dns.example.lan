@@ -1,0 +1,128 @@
+# Virtual host for Zones.dns: GUI (Angular) + API and Django admin (Django) on one address. One self-contained file.
+#
+#   sudo cp deploy/nginx/dns.example.lan /etc/nginx/sites-available/dns.example.lan     (rename it to your host name)
+#   sudo ln -s /etc/nginx/sites-available/dns.example.lan /etc/nginx/sites-enabled/
+#   edit: server_name (twice), the two ssl_* paths, root and the /static/ alias if you put the files elsewhere
+#   sudo nginx -t && sudo systemctl reload nginx
+#
+# Files to publish:
+#   ng build                                  -> copy frontend/dist/frontend/browser to /var/www/dns/frontend
+#   python manage.py collectstatic --noinput  -> copy backend/staticfiles to /var/www/dns/static
+#   gunicorn dnsadmin.wsgi -b 127.0.0.1:8000 --workers 1 --threads 8      (ONE worker: the login key lives in process memory)
+#
+# https is required: passkeys and secure cookies do not work over plain http (except on localhost).
+#
+# HTTP/3 (QUIC) + HTTP/2 + HTTP/1.1 on the same port: needs nginx >= 1.25 built with http_v3 (check: nginx -V 2>&1 | grep http_v3)
+# and UDP port 443 open in the firewall (QUIC runs over UDP). Browsers learn about h3 from the Alt-Svc header and fall back to h2 by themselves.
+# "reuseport" may appear only once per address:port in the whole nginx configuration: remove it here if another server already has it.
+# Without the sites-available layout (conf.d only), copy the file there as it is: the top of the file is valid in the http context.
+
+# Login and second-factor requests are limited per address (10/min + burst); every other URL has an empty key and is not limited.
+map $uri $dns_login_key {
+    ~^/api/(token|mfa)/  $binary_remote_addr;
+    default              "";
+}
+limit_req_zone $dns_login_key zone=dns_login:10m rate=10r/m;
+
+upstream dns_backend {
+    server 127.0.0.1:8000;
+    keepalive 16;
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name dns.example.lan;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl;                   # HTTP/1.1 and HTTP/2 over TCP
+    listen [::]:443 ssl;
+    listen 443 quic reuseport;        # HTTP/3 over UDP
+    listen [::]:443 quic reuseport;
+    http2 on;
+    http3 on;
+    quic_retry on;                    # address validation: protects against spoofed-source floods
+    server_name dns.example.lan;
+
+    ssl_certificate     /etc/ssl/certs/dns.example.lan.pem;
+    ssl_certificate_key /etc/ssl/private/dns.example.lan.key;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "DENY" always;
+    add_header Referrer-Policy "same-origin" always;
+    add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    # Note: a location with its own add_header does not inherit the ones above, so HSTS and Alt-Svc are repeated there.
+
+    server_tokens off;
+    client_max_body_size 5m;          # zone import
+    gzip on;
+    gzip_types text/css application/javascript application/json image/svg+xml;
+    gzip_min_length 1024;
+
+    access_log /var/log/nginx/dns.example.lan.access.log;
+    error_log  /var/log/nginx/dns.example.lan.error.log;
+
+    # Never serve hidden files (.env, .git...).
+    location ~ /\. { deny all; }
+
+    # ---- API and Django admin -> Django
+    location ~ ^/(api|admin)/ {
+        limit_req zone=dns_login burst=15 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://dns_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;   # Django: BEHIND_PROXY=true trusts this
+        proxy_read_timeout 120s;                      # the domain audit can take a while
+    }
+
+    # Django admin CSS/JS (collectstatic)
+    location /static/ {
+        alias /var/www/dns/static/;
+        expires 30d;
+        add_header Cache-Control "public";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    }
+
+    # ---- GUI
+    root /var/www/dns/frontend;
+    index index.html;
+
+    # Angular build files carry a hash in their name: cache for good.
+    location ~* "-[A-Za-z0-9]{8}\.(js|css)$" {
+        expires 1y;
+        add_header Cache-Control "public, immutable";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Alt-Svc 'h3=":443"; ma=86400' always;
+        try_files $uri =404;
+    }
+
+    # The page that points to those files must always be fresh.
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+        add_header X-Frame-Options "DENY" always;
+        add_header Referrer-Policy "same-origin" always;
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    }
+
+    # Everything else (routes like /zones/3, /blacklist/lists) is the single-page app.
+    location / {
+        try_files $uri $uri/ /index.html;
+    }
+}

@@ -1,0 +1,43 @@
+# Secrets and local data
+.env
+*.env.local
+backend/db.sqlite3
+backend/geoip-data/
+backend/staticfiles/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Node / Angular
+node_modules/
+frontend/dist/
+frontend/.angular/
+frontend/out-tsc/
+npm-debug.log*
+yarn-error.log
+
+# Editors and OS
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.swp
+.DS_Store
+Thumbs.db
+
+# Logs, scratch and certificates
+*.log
+*.pid
+*.pem
+*.key
+
+# Release artifacts
+release/

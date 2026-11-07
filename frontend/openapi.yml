@@ -1,0 +1,2840 @@
+openapi: 3.0.3
+info:
+  title: Zones.dns API
+  version: 1.0.0
+paths:
+  /api/admin-ticket/:
+    post:
+      operationId: admin_ticket_create
+      description: 'One-use ticket (60 s) that opens the Django admin: the GUI posts
+        it to /admin/sso/.'
+      tags:
+      - admin-ticket
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AdminTicket'
+          description: ''
+  /api/audit/:
+    post:
+      operationId: audit_create
+      description: Collect public information about a domain and flag common problems.
+        Takes ~5-15 s; deep=true adds slower checks (up to ~40 s).
+      tags:
+      - audit
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AuditRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuditReport'
+          description: ''
+  /api/blocked/:
+    get:
+      operationId: blocked_list
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BlockedDomain'
+          description: ''
+    post:
+      operationId: blocked_create
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockedDomainRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedDomain'
+          description: ''
+  /api/blocked/{id}/:
+    get:
+      operationId: blocked_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this blocked domain.
+        required: true
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedDomain'
+          description: ''
+    put:
+      operationId: blocked_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this blocked domain.
+        required: true
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlockedDomainRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedDomain'
+          description: ''
+    patch:
+      operationId: blocked_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this blocked domain.
+        required: true
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBlockedDomainRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlockedDomain'
+          description: ''
+    delete:
+      operationId: blocked_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this blocked domain.
+        required: true
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/blocked/imported/:
+    get:
+      operationId: blocked_imported_retrieve
+      description: 'Domains imported from public blocklists (read-only, searchable,
+        paged: there can be tens of thousands).'
+      parameters:
+      - in: query
+        name: limit
+        schema:
+          type: integer
+      - in: query
+        name: offset
+        schema:
+          type: integer
+      - in: query
+        name: q
+        schema:
+          type: string
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ImportedBlocked'
+          description: ''
+  /api/geo/destinations/:
+    get:
+      operationId: geo_destinations_retrieve
+      description: Where the answers of the DNS queries point, by country and network.
+      parameters:
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Time window in hours (default 24, max 720)
+      tags:
+      - geo
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Destinations'
+          description: ''
+  /api/geo/ips/:
+    get:
+      operationId: geo_ips_retrieve
+      description: Country and network of some addresses (cached; unknown ones are
+        looked up).
+      parameters:
+      - in: query
+        name: ips
+        schema:
+          type: string
+        description: Comma separated IP addresses (max 50)
+      tags:
+      - geo
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeoIpsResult'
+          description: ''
+  /api/login-key/:
+    get:
+      operationId: login_key_retrieve
+      description: Public key for the encrypted login. A new key pair is made at every
+        server start.
+      tags:
+      - login-key
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginKey'
+          description: ''
+  /api/logs/:
+    get:
+      operationId: logs_list
+      parameters:
+      - in: query
+        name: answer
+        schema:
+          type: string
+        description: Text contained in the answer records, e.g. an IP address
+      - in: query
+        name: client
+        schema:
+          type: string
+        description: Exact client IP
+      - in: query
+        name: domain
+        schema:
+          type: string
+        description: Exact registrable domain, e.g. example.com
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: Exact name
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: outcome
+        schema:
+          type: string
+          enum:
+          - blocked
+          - error
+          - forwarded
+          - local
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Name contains (case-insensitive)
+      - in: query
+        name: rcode
+        schema:
+          type: string
+        description: Response code, e.g. NXDOMAIN
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: Exact query type, e.g. A
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQueryLogList'
+          description: ''
+  /api/logs/{id}/:
+    get:
+      operationId: logs_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this query log.
+        required: true
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QueryLog'
+          description: ''
+  /api/logs/answers/:
+    get:
+      operationId: logs_answers_list
+      description: Answer records for some queries, loaded on demand.
+      parameters:
+      - in: query
+        name: ids
+        schema:
+          type: string
+        description: Comma separated query ids (max 200)
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueryLogAnswers'
+          description: ''
+  /api/logs/grouped/:
+    get:
+      operationId: logs_grouped_list
+      description: Same filters as the list, one row per registrable domain (or per
+        host name with by=name).
+      parameters:
+      - in: query
+        name: answer
+        schema:
+          type: string
+        description: Text contained in the answer records, e.g. an IP address
+      - in: query
+        name: by
+        schema:
+          type: string
+          enum:
+          - domain
+          - name
+        description: Group by registrable domain (default) or by full host name
+      - in: query
+        name: client
+        schema:
+          type: string
+        description: Exact client IP
+      - in: query
+        name: domain
+        schema:
+          type: string
+        description: Exact registrable domain, e.g. example.com
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: Exact name
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: ordering
+        schema:
+          type: string
+          enum:
+          - count
+          - last
+        description: Most recent (default) or most requested first
+      - in: query
+        name: outcome
+        schema:
+          type: string
+          enum:
+          - blocked
+          - error
+          - forwarded
+          - local
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Name contains (case-insensitive)
+      - in: query
+        name: rcode
+        schema:
+          type: string
+        description: Response code, e.g. NXDOMAIN
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: Exact query type, e.g. A
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedQueryLogGroupList'
+          description: ''
+  /api/logs/purge/:
+    post:
+      operationId: logs_purge_create
+      description: 'Delete old queries (not filtered by the list filters: it ages
+        the whole log).'
+      tags:
+      - logs
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurgeRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PurgeResult'
+          description: ''
+  /api/logs/resolved/:
+    get:
+      operationId: logs_resolved_list
+      description: Recent distinct answers (A/AAAA/CNAME, at most 4) for some groups,
+        loaded on demand.
+      parameters:
+      - in: query
+        name: by
+        schema:
+          type: string
+          enum:
+          - domain
+          - name
+        description: 'What the names are: registrable domains (default) or host names'
+      - in: query
+        name: names
+        schema:
+          type: string
+        description: Comma separated names (max 50)
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GroupResolved'
+          description: ''
+  /api/me/:
+    get:
+      operationId: me_retrieve
+      description: Who is logged in, to show only what they can use.
+      tags:
+      - me
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Me'
+          description: ''
+  /api/mfa/:
+    get:
+      operationId: mfa_retrieve
+      description: Second factors of the logged-in user.
+      tags:
+      - mfa
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaStatus'
+          description: ''
+  /api/mfa/encrypted/:
+    post:
+      operationId: mfa_encrypted_create
+      description: 'Every second-factor step inside the encrypted channel: payload
+        {a: step, d: its data}, reply = the step''s body. Nothing readable on the
+        wire.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPacketRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncryptedPacket'
+          description: ''
+  /api/mfa/passkey/{id}/remove/:
+    delete:
+      operationId: mfa_passkey_remove_destroy
+      description: Remove a passkey (not if it is the last factor and MFA is required).
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - mfa
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/mfa/passkey/options/:
+    post:
+      operationId: mfa_passkey_options_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaTicketRequest'
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaOptions'
+          description: ''
+  /api/mfa/passkey/register/:
+    post:
+      operationId: mfa_passkey_register_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaCredentialRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResult'
+          description: ''
+  /api/mfa/passkey/register-options/:
+    post:
+      operationId: mfa_passkey_register_options_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaTicketRequest'
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaOptions'
+          description: ''
+  /api/mfa/passkey/verify/:
+    post:
+      operationId: mfa_passkey_verify_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaCredentialRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResult'
+          description: ''
+  /api/mfa/totp/:
+    post:
+      operationId: mfa_totp_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaCodeRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResult'
+          description: ''
+  /api/mfa/totp/confirm/:
+    post:
+      operationId: mfa_totp_confirm_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaCodeRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TokenResult'
+          description: ''
+  /api/mfa/totp/remove/:
+    delete:
+      operationId: mfa_totp_remove_destroy
+      description: Remove the authenticator app (not if it is the last factor and
+        MFA is required).
+      tags:
+      - mfa
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/mfa/totp/setup/:
+    post:
+      operationId: mfa_totp_setup_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfaTicketRequest'
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TotpSetup'
+          description: ''
+  /api/records/:
+    get:
+      operationId: records_list
+      parameters:
+      - in: query
+        name: zone
+        schema:
+          type: integer
+        description: Filter by zone id
+      tags:
+      - records
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Record'
+          description: ''
+    post:
+      operationId: records_create
+      tags:
+      - records
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+          description: ''
+  /api/records/{id}/:
+    get:
+      operationId: records_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this record.
+        required: true
+      tags:
+      - records
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+          description: ''
+    put:
+      operationId: records_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this record.
+        required: true
+      tags:
+      - records
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RecordRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+          description: ''
+    patch:
+      operationId: records_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this record.
+        required: true
+      tags:
+      - records
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedRecordRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Record'
+          description: ''
+    delete:
+      operationId: records_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this record.
+        required: true
+      tags:
+      - records
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/records/bulk/:
+    post:
+      operationId: records_bulk_create
+      tags:
+      - records
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BulkActionRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BulkResult'
+          description: ''
+  /api/stats/:
+    get:
+      operationId: stats_retrieve
+      parameters:
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Time window in hours (default 24, max 720)
+      tags:
+      - stats
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Stats'
+          description: ''
+  /api/token/:
+    post:
+      operationId: token_create
+      description: Plain login. Refused when LOGIN_ENCRYPTION=required. Answers with
+        the token, or with a ticket when a second factor is needed.
+      tags:
+      - token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TokenCredentialsRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LoginResult'
+          description: ''
+  /api/token/encrypted/:
+    post:
+      operationId: token_encrypted_create
+      description: Encrypted password login.
+      tags:
+      - token
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EncryptedPacketRequest'
+        required: true
+      security:
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EncryptedPacket'
+          description: ''
+  /api/zones/:
+    get:
+      operationId: zones_list
+      tags:
+      - zones
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Zone'
+          description: ''
+    post:
+      operationId: zones_create
+      tags:
+      - zones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZoneRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+          description: ''
+  /api/zones/{id}/:
+    get:
+      operationId: zones_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+          description: ''
+    put:
+      operationId: zones_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZoneRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+          description: ''
+    patch:
+      operationId: zones_partial_update
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedZoneRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+          description: ''
+    delete:
+      operationId: zones_destroy
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/zones/{id}/export/:
+    get:
+      operationId: zones_export_retrieve
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            text/plain:
+              schema:
+                type: string
+          description: ''
+  /api/zones/{id}/import/:
+    post:
+      operationId: zones_import_create
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ZoneImportRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ZoneImportResult'
+          description: ''
+  /api/zones/{id}/sync-ptr/:
+    post:
+      operationId: zones_sync_ptr_create
+      description: Create the missing PTR records in this reverse zone from all A/AAAA
+        records.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this zone.
+        required: true
+      tags:
+      - zones
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncPtrResult'
+          description: ''
+  /api/zones/reverse/:
+    post:
+      operationId: zones_reverse_create
+      description: Create the reverse zone for a network (CIDR).
+      tags:
+      - zones
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReverseZoneRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Zone'
+          description: ''
+components:
+  schemas:
+    ActionEnum:
+      enum:
+      - delete
+      - enable
+      - disable
+      type: string
+      description: |-
+        * `delete` - delete
+        * `enable` - enable
+        * `disable` - disable
+    AdminTicket:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: One-use ticket (60 s) for POST /admin/sso/
+      required:
+      - ticket
+    Answer:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        value:
+          type: string
+        ttl:
+          type: integer
+      required:
+      - name
+      - ttl
+      - type
+      - value
+    AuditReport:
+      type: object
+      properties:
+        domain:
+          type: string
+        checked_at:
+          type: string
+          format: date-time
+        deep:
+          type: boolean
+        duration_ms:
+          type: integer
+        summary:
+          $ref: '#/components/schemas/AuditSummary'
+        findings:
+          type: array
+          items:
+            $ref: '#/components/schemas/Finding'
+        dns:
+          type: array
+          items:
+            $ref: '#/components/schemas/DnsRecords'
+        soa:
+          allOf:
+          - $ref: '#/components/schemas/Soa'
+          nullable: true
+        nameservers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Nameserver'
+        dnssec:
+          $ref: '#/components/schemas/Dnssec'
+        wildcard:
+          type: boolean
+        mail:
+          $ref: '#/components/schemas/Mail'
+        registration:
+          allOf:
+          - $ref: '#/components/schemas/Registration'
+          nullable: true
+        hosts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Host'
+        tls:
+          allOf:
+          - $ref: '#/components/schemas/Tls'
+          nullable: true
+        web:
+          $ref: '#/components/schemas/Web'
+        services:
+          type: array
+          items:
+            $ref: '#/components/schemas/Service'
+        subdomains:
+          allOf:
+          - $ref: '#/components/schemas/Subdomains'
+          nullable: true
+      required:
+      - checked_at
+      - deep
+      - dns
+      - dnssec
+      - domain
+      - duration_ms
+      - findings
+      - hosts
+      - mail
+      - nameservers
+      - registration
+      - services
+      - soa
+      - subdomains
+      - summary
+      - tls
+      - web
+      - wildcard
+    AuditRequestRequest:
+      type: object
+      properties:
+        domain:
+          type: string
+          minLength: 1
+          description: Domain or host name, e.g. example.com or www.example.com
+        deep:
+          type: boolean
+          default: false
+          description: 'Slower, more thorough: TLS protocol probing, exact SPF lookup
+            count, MTA-STS policy, subdomains from certificate logs'
+      required:
+      - domain
+    AuditSummary:
+      type: object
+      properties:
+        ok:
+          type: integer
+        info:
+          type: integer
+        warn:
+          type: integer
+        bad:
+          type: integer
+      required:
+      - bad
+      - info
+      - ok
+      - warn
+    BlockedDomain:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 253
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - name
+    BlockedDomainRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+      required:
+      - name
+    BulkActionRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          items:
+            type: integer
+        action:
+          $ref: '#/components/schemas/ActionEnum'
+      required:
+      - action
+      - ids
+    BulkResult:
+      type: object
+      properties:
+        count:
+          type: integer
+      required:
+      - count
+    Cookie:
+      type: object
+      properties:
+        name:
+          type: string
+        secure:
+          type: boolean
+        httponly:
+          type: boolean
+        samesite:
+          type: string
+          nullable: true
+      required:
+      - httponly
+      - name
+      - samesite
+      - secure
+    Count:
+      type: object
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+      required:
+      - count
+      - name
+    DestinationCountry:
+      type: object
+      properties:
+        country:
+          type: string
+          description: ISO code; PRIV = internal addresses, ?? = unknown
+        queries:
+          type: integer
+        ips:
+          type: integer
+        domains:
+          type: integer
+        top_domains:
+          type: array
+          items:
+            type: string
+        asns:
+          type: array
+          items:
+            type: string
+        cities:
+          type: array
+          items:
+            type: string
+      required:
+      - asns
+      - cities
+      - country
+      - domains
+      - ips
+      - queries
+      - top_domains
+    DestinationNetwork:
+      type: object
+      properties:
+        asn:
+          type: string
+        as_name:
+          type: string
+          nullable: true
+        country:
+          type: string
+        queries:
+          type: integer
+        ips:
+          type: integer
+      required:
+      - as_name
+      - asn
+      - country
+      - ips
+      - queries
+    DestinationPoint:
+      type: object
+      properties:
+        latitude:
+          type: number
+          format: double
+        longitude:
+          type: number
+          format: double
+        city:
+          type: string
+        country:
+          type: string
+        queries:
+          type: integer
+        ips:
+          type: integer
+        domains:
+          type: array
+          items:
+            type: string
+      required:
+      - city
+      - country
+      - domains
+      - ips
+      - latitude
+      - longitude
+      - queries
+    Destinations:
+      type: object
+      properties:
+        scanned:
+          type: integer
+          description: Answered queries examined
+        ips_total:
+          type: integer
+        ips_located:
+          type: integer
+        pending:
+          type: integer
+          description: 'Addresses still to locate: ask again in a moment'
+        countries:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationCountry'
+        networks:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationNetwork'
+        points:
+          type: array
+          items:
+            $ref: '#/components/schemas/DestinationPoint'
+          description: Map points (needs a local city database)
+        geoip:
+          $ref: '#/components/schemas/GeoIpStatus'
+      required:
+      - countries
+      - geoip
+      - ips_located
+      - ips_total
+      - networks
+      - pending
+      - points
+      - scanned
+    Dmarc:
+      type: object
+      properties:
+        record:
+          type: string
+        policy:
+          type: string
+          nullable: true
+        subdomain_policy:
+          type: string
+          nullable: true
+        pct:
+          type: integer
+        rua:
+          type: array
+          items:
+            type: string
+        ruf:
+          type: array
+          items:
+            type: string
+        adkim:
+          type: string
+        aspf:
+          type: string
+      required:
+      - adkim
+      - aspf
+      - pct
+      - policy
+      - record
+      - rua
+      - ruf
+      - subdomain_policy
+    DnsRecords:
+      type: object
+      properties:
+        type:
+          type: string
+        values:
+          type: array
+          items:
+            type: string
+      required:
+      - type
+      - values
+    Dnssec:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        algorithms:
+          type: array
+          items:
+            type: string
+      required:
+      - algorithms
+      - enabled
+    EncryptedPacket:
+      type: object
+      properties:
+        p:
+          type: string
+          description: Base64 encrypted packet (see zones/login_crypto.py)
+          maxLength: 32768
+      required:
+      - p
+    EncryptedPacketRequest:
+      type: object
+      properties:
+        p:
+          type: string
+          minLength: 1
+          description: Base64 encrypted packet (see zones/login_crypto.py)
+          maxLength: 32768
+      required:
+      - p
+    Finding:
+      type: object
+      properties:
+        severity:
+          $ref: '#/components/schemas/SeverityEnum'
+        category:
+          type: string
+        title:
+          type: string
+        detail:
+          type: string
+        output:
+          type: string
+          description: Raw data the test was based on (records, headers, ...)
+      required:
+      - category
+      - detail
+      - output
+      - severity
+      - title
+    GeoIp:
+      type: object
+      properties:
+        ip:
+          type: string
+        private:
+          type: boolean
+          description: 'Not a public address: nothing to locate'
+        country:
+          type: string
+          description: ISO 3166 alpha-2, empty if unknown
+        asn:
+          type: string
+          nullable: true
+        as_name:
+          type: string
+          nullable: true
+        prefix:
+          type: string
+          nullable: true
+        city:
+          type: string
+          nullable: true
+        region:
+          type: string
+          nullable: true
+        latitude:
+          type: number
+          format: double
+          nullable: true
+        longitude:
+          type: number
+          format: double
+          nullable: true
+        source:
+          allOf:
+          - $ref: '#/components/schemas/SourceEnum'
+          description: |-
+            Where the location came from
+
+            * `local` - local
+            * `cymru` - cymru
+            * `none` - none
+            * `private` - private
+      required:
+      - as_name
+      - asn
+      - city
+      - country
+      - ip
+      - latitude
+      - longitude
+      - prefix
+      - private
+      - region
+      - source
+    GeoIpDb:
+      type: object
+      properties:
+        type:
+          type: string
+        built:
+          type: string
+        file:
+          type: string
+      required:
+      - built
+      - file
+      - type
+    GeoIpStatus:
+      type: object
+      properties:
+        city:
+          allOf:
+          - $ref: '#/components/schemas/GeoIpDb'
+          nullable: true
+        asn:
+          allOf:
+          - $ref: '#/components/schemas/GeoIpDb'
+          nullable: true
+        configured_city:
+          type: boolean
+          description: GEOIP_CITY_DB is set (it may still be unreadable)
+        configured_asn:
+          type: boolean
+        online_fallback:
+          type: boolean
+      required:
+      - asn
+      - city
+      - configured_asn
+      - configured_city
+      - online_fallback
+    GeoIpsResult:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/GeoIp'
+        pending:
+          type: integer
+          description: Addresses not located yet (ask again)
+      required:
+      - pending
+      - results
+    GroupResolved:
+      type: object
+      properties:
+        name:
+          type: string
+        resolved:
+          type: array
+          items:
+            $ref: '#/components/schemas/Resolved'
+      required:
+      - name
+      - resolved
+    Host:
+      type: object
+      properties:
+        ip:
+          type: string
+        ptr:
+          type: string
+          nullable: true
+        network:
+          type: string
+          nullable: true
+        org:
+          type: string
+          nullable: true
+        country:
+          type: string
+          nullable: true
+        asn:
+          type: string
+          nullable: true
+        as_name:
+          type: string
+          nullable: true
+        prefix:
+          type: string
+          nullable: true
+        registry:
+          type: string
+          nullable: true
+      required:
+      - as_name
+      - asn
+      - country
+      - ip
+      - network
+      - org
+      - prefix
+      - ptr
+      - registry
+    Hour:
+      type: object
+      properties:
+        hour:
+          type: string
+          format: date-time
+        count:
+          type: integer
+      required:
+      - count
+      - hour
+    Hsts:
+      type: object
+      properties:
+        max_age:
+          type: integer
+        include_subdomains:
+          type: boolean
+        preload:
+          type: boolean
+      required:
+      - include_subdomains
+      - max_age
+      - preload
+    ImportedBlocked:
+      type: object
+      properties:
+        count:
+          type: integer
+        names:
+          type: array
+          items:
+            type: string
+      required:
+      - count
+      - names
+    LoginKey:
+      type: object
+      properties:
+        key:
+          type: string
+          description: Public key (base64) to encrypt the login packet to; new after
+            every server restart
+      required:
+      - key
+    LoginResult:
+      type: object
+      description: Either token (logged in) or mfa + ticket + methods (a second step
+        is needed).
+      properties:
+        token:
+          type: string
+        mfa:
+          allOf:
+          - $ref: '#/components/schemas/MfaEnum'
+          description: |-
+            verify: prove a factor; setup: enrol the first factor
+
+            * `verify` - verify
+            * `setup` - setup
+        ticket:
+          type: string
+          description: Short-lived signed ticket for the next step
+        methods:
+          type: array
+          items:
+            $ref: '#/components/schemas/MethodsEnum'
+    Mail:
+      type: object
+      properties:
+        mx:
+          type: array
+          items:
+            $ref: '#/components/schemas/Mx'
+        spf:
+          allOf:
+          - $ref: '#/components/schemas/Spf'
+          nullable: true
+        dmarc:
+          allOf:
+          - $ref: '#/components/schemas/Dmarc'
+          nullable: true
+        dkim_selectors:
+          type: array
+          items:
+            type: string
+        mta_sts:
+          allOf:
+          - $ref: '#/components/schemas/MtaSts'
+          nullable: true
+        tls_rpt:
+          type: string
+          nullable: true
+        bimi:
+          type: string
+          nullable: true
+      required:
+      - bimi
+      - dkim_selectors
+      - dmarc
+      - mta_sts
+      - mx
+      - spf
+      - tls_rpt
+    Me:
+      type: object
+      properties:
+        username:
+          type: string
+        is_superuser:
+          type: boolean
+        default_zone:
+          type: string
+          description: Name of the zone the GUI opens by default (DEFAULT_ZONE)
+      required:
+      - default_zone
+      - is_superuser
+      - username
+    MethodsEnum:
+      enum:
+      - totp
+      - passkey
+      type: string
+      description: |-
+        * `totp` - totp
+        * `passkey` - passkey
+    MfaCodeRequest:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Login ticket; not needed when already logged in
+        code:
+          type: string
+          minLength: 1
+          maxLength: 10
+      required:
+      - code
+    MfaCredentialRequest:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Login ticket; not needed when already logged in
+        credential:
+          description: PublicKeyCredential.toJSON() from the browser
+        name:
+          type: string
+          maxLength: 80
+      required:
+      - credential
+    MfaEnum:
+      enum:
+      - verify
+      - setup
+      type: string
+      description: |-
+        * `verify` - verify
+        * `setup` - setup
+    MfaOptions:
+      type: object
+      properties:
+        options:
+          description: WebAuthn options for PublicKeyCredential.parse*OptionsFromJSON()
+      required:
+      - options
+    MfaStatus:
+      type: object
+      properties:
+        required:
+          type: boolean
+        totp:
+          type: boolean
+        passkeys:
+          type: array
+          items:
+            $ref: '#/components/schemas/PasskeyInfo'
+      required:
+      - passkeys
+      - required
+      - totp
+    MfaTicketRequest:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Login ticket; not needed when already logged in
+    MtaSts:
+      type: object
+      properties:
+        txt:
+          type: string
+        mode:
+          type: string
+          nullable: true
+        max_age:
+          type: integer
+          nullable: true
+        mx:
+          type: array
+          items:
+            type: string
+      required:
+      - max_age
+      - mode
+      - mx
+      - txt
+    Mx:
+      type: object
+      properties:
+        priority:
+          type: integer
+        host:
+          type: string
+        ips:
+          type: array
+          items:
+            type: string
+        cname:
+          type: boolean
+          description: True if the host is an alias, which is not allowed for an MX
+      required:
+      - cname
+      - host
+      - ips
+      - priority
+    Nameserver:
+      type: object
+      properties:
+        name:
+          type: string
+        ips:
+          type: array
+          items:
+            type: string
+        ms:
+          type: integer
+          nullable: true
+          description: Response time of a SOA query
+        serial:
+          type: integer
+          nullable: true
+        responds:
+          type: boolean
+        authoritative:
+          type: boolean
+        asn:
+          type: string
+          nullable: true
+        as_name:
+          type: string
+          nullable: true
+      required:
+      - as_name
+      - asn
+      - authoritative
+      - ips
+      - ms
+      - name
+      - responds
+      - serial
+    OutcomeEnum:
+      enum:
+      - local
+      - forwarded
+      - blocked
+      - error
+      type: string
+      description: |-
+        * `local` - local
+        * `forwarded` - forwarded
+        * `blocked` - blocked
+        * `error` - error
+    PaginatedQueryLogGroupList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryLogGroup'
+    PaginatedQueryLogList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/QueryLog'
+    PasskeyInfo:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        created:
+          type: string
+          format: date-time
+      required:
+      - created
+      - id
+      - name
+    PatchedBlockedDomainRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+    PatchedRecordRequest:
+      type: object
+      properties:
+        zone:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        type:
+          $ref: '#/components/schemas/TypeEnum'
+        value:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        ttl:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        enabled:
+          type: boolean
+        note:
+          type: string
+          maxLength: 255
+        create_ptr:
+          type: boolean
+          writeOnly: true
+          default: false
+          description: Create the reverse PTR (A/AAAA only)
+    PatchedZoneRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+    PurgeRequestRequest:
+      type: object
+      properties:
+        older_than_hours:
+          type: integer
+          minimum: 0
+          description: Delete queries older than this many hours; 0 = everything
+        dry_run:
+          type: boolean
+          default: false
+          description: Only count what would be deleted
+      required:
+      - older_than_hours
+    PurgeResult:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Queries deleted (or that would be, with dry_run)
+        dry_run:
+          type: boolean
+      required:
+      - count
+      - dry_run
+    QueryLog:
+      type: object
+      description: List item. The answer records are heavy, so they are served separately
+        (see QueryLogAnswersSerializer).
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        time:
+          type: string
+          format: date-time
+          readOnly: true
+        name:
+          type: string
+          maxLength: 253
+        domain:
+          type: string
+          maxLength: 253
+        type:
+          type: string
+          maxLength: 10
+        outcome:
+          $ref: '#/components/schemas/OutcomeEnum'
+        client:
+          type: string
+          maxLength: 45
+        ms:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        rcode:
+          type: string
+          maxLength: 10
+        via:
+          type: string
+          maxLength: 300
+      required:
+      - client
+      - id
+      - ms
+      - name
+      - outcome
+      - time
+      - type
+    QueryLogAnswers:
+      type: object
+      properties:
+        id:
+          type: integer
+        answers:
+          type: array
+          items:
+            $ref: '#/components/schemas/Answer'
+      required:
+      - answers
+      - id
+    QueryLogGroup:
+      type: object
+      properties:
+        name:
+          type: string
+        names:
+          type: integer
+          description: Distinct host names in the group
+        count:
+          type: integer
+        last:
+          type: string
+          format: date-time
+          description: Time of the most recent query
+        avg_ms:
+          type: number
+          format: double
+        clients:
+          type: integer
+          description: Distinct client IPs
+        local:
+          type: integer
+        forwarded:
+          type: integer
+        blocked:
+          type: integer
+        error:
+          type: integer
+      required:
+      - avg_ms
+      - blocked
+      - clients
+      - count
+      - error
+      - forwarded
+      - last
+      - local
+      - name
+      - names
+    Record:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        zone:
+          type: integer
+        name:
+          type: string
+          maxLength: 253
+        type:
+          $ref: '#/components/schemas/TypeEnum'
+        value:
+          type: string
+          maxLength: 1024
+        ttl:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        enabled:
+          type: boolean
+        note:
+          type: string
+          maxLength: 255
+      required:
+      - id
+      - type
+      - value
+      - zone
+    RecordRequest:
+      type: object
+      properties:
+        zone:
+          type: integer
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        type:
+          $ref: '#/components/schemas/TypeEnum'
+        value:
+          type: string
+          minLength: 1
+          maxLength: 1024
+        ttl:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        enabled:
+          type: boolean
+        note:
+          type: string
+          maxLength: 255
+        create_ptr:
+          type: boolean
+          writeOnly: true
+          default: false
+          description: Create the reverse PTR (A/AAAA only)
+      required:
+      - type
+      - value
+      - zone
+    Redirect:
+      type: object
+      properties:
+        url:
+          type: string
+        status:
+          type: integer
+          nullable: true
+        location:
+          type: string
+          nullable: true
+        ip:
+          type: string
+          nullable: true
+      required:
+      - ip
+      - location
+      - status
+      - url
+    Registration:
+      type: object
+      properties:
+        name:
+          type: string
+          description: Registered domain the data refers to
+        registrar:
+          type: string
+          nullable: true
+        created:
+          type: string
+          nullable: true
+        expires:
+          type: string
+          nullable: true
+        updated:
+          type: string
+          nullable: true
+        status:
+          type: array
+          items:
+            type: string
+        nameservers:
+          type: array
+          items:
+            type: string
+        age_days:
+          type: integer
+          nullable: true
+        dnssec_signed:
+          type: boolean
+          nullable: true
+        abuse_email:
+          type: string
+          nullable: true
+      required:
+      - abuse_email
+      - age_days
+      - created
+      - dnssec_signed
+      - expires
+      - name
+      - nameservers
+      - registrar
+      - status
+      - updated
+    Resolved:
+      type: object
+      properties:
+        type:
+          type: string
+        value:
+          type: string
+      required:
+      - type
+      - value
+    ReverseZoneRequestRequest:
+      type: object
+      properties:
+        cidr:
+          type: string
+          minLength: 1
+          description: Network, e.g. 10.0.0.0/24 or fd00:1234::/48
+      required:
+      - cidr
+    Service:
+      type: object
+      properties:
+        category:
+          type: string
+        name:
+          type: string
+        evidence:
+          type: string
+      required:
+      - category
+      - evidence
+      - name
+    SeverityEnum:
+      enum:
+      - ok
+      - info
+      - warn
+      - bad
+      type: string
+      description: |-
+        * `ok` - ok
+        * `info` - info
+        * `warn` - warn
+        * `bad` - bad
+    Soa:
+      type: object
+      properties:
+        mname:
+          type: string
+          description: Primary name server
+        rname:
+          type: string
+          description: Responsible mailbox (dots instead of @)
+        serial:
+          type: integer
+        refresh:
+          type: integer
+        retry:
+          type: integer
+        expire:
+          type: integer
+        minimum:
+          type: integer
+          description: Negative-caching TTL
+      required:
+      - expire
+      - minimum
+      - mname
+      - refresh
+      - retry
+      - rname
+      - serial
+    SourceEnum:
+      enum:
+      - local
+      - cymru
+      - none
+      - private
+      type: string
+      description: |-
+        * `local` - local
+        * `cymru` - cymru
+        * `none` - none
+        * `private` - private
+    Spf:
+      type: object
+      properties:
+        record:
+          type: string
+        mechanisms:
+          type: array
+          items:
+            type: string
+        includes:
+          type: array
+          items:
+            type: string
+        all:
+          type: string
+          nullable: true
+          description: 'Qualifier of "all": - ~ ? +'
+        redirect:
+          type: string
+          nullable: true
+        lookups:
+          type: integer
+          description: DNS lookups SPF needs (limit 10)
+        lookups_exact:
+          type: boolean
+          description: False when only the first level was counted
+      required:
+      - all
+      - includes
+      - lookups
+      - lookups_exact
+      - mechanisms
+      - record
+      - redirect
+    Stats:
+      type: object
+      properties:
+        total:
+          type: integer
+        avg_ms:
+          type: number
+          format: double
+        by_outcome:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+        by_type:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+        top_domains:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+        top_blocked:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+        top_clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+        per_hour:
+          type: array
+          items:
+            $ref: '#/components/schemas/Hour'
+      required:
+      - avg_ms
+      - by_outcome
+      - by_type
+      - per_hour
+      - top_blocked
+      - top_clients
+      - top_domains
+      - total
+    Subdomains:
+      type: object
+      properties:
+        source:
+          type: string
+        total:
+          type: integer
+        names:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+          nullable: true
+      required:
+      - error
+      - names
+      - source
+      - total
+    SyncPtrResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        skipped:
+          type: integer
+          description: PTR already present
+      required:
+      - created
+      - skipped
+    Tls:
+      type: object
+      properties:
+        host:
+          type: string
+        ip:
+          type: string
+        valid:
+          type: boolean
+        error:
+          type: string
+          nullable: true
+        version:
+          type: string
+          nullable: true
+        cipher:
+          type: string
+          nullable: true
+        subject:
+          type: string
+          nullable: true
+        issuer:
+          type: string
+          nullable: true
+        not_before:
+          type: string
+          nullable: true
+        not_after:
+          type: string
+          nullable: true
+        days_left:
+          type: integer
+          nullable: true
+        serial:
+          type: string
+          nullable: true
+        wildcard:
+          type: boolean
+        san:
+          type: array
+          items:
+            type: string
+        ocsp:
+          type: array
+          items:
+            type: string
+        alpn_h2:
+          type: boolean
+        protocols:
+          type: array
+          items:
+            $ref: '#/components/schemas/TlsProtocol'
+      required:
+      - alpn_h2
+      - cipher
+      - days_left
+      - error
+      - host
+      - ip
+      - issuer
+      - not_after
+      - not_before
+      - ocsp
+      - protocols
+      - san
+      - serial
+      - subject
+      - valid
+      - version
+      - wildcard
+    TlsProtocol:
+      type: object
+      properties:
+        name:
+          type: string
+        supported:
+          type: boolean
+          nullable: true
+          description: null = could not be tested from this machine
+      required:
+      - name
+      - supported
+    TokenCredentialsRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          minLength: 1
+        password:
+          type: string
+          minLength: 1
+      required:
+      - password
+      - username
+    TokenResult:
+      type: object
+      properties:
+        token:
+          type: string
+      required:
+      - token
+    TotpSetup:
+      type: object
+      properties:
+        secret:
+          type: string
+        uri:
+          type: string
+          description: otpauth:// URI (shown as QR code)
+      required:
+      - secret
+      - uri
+    TypeEnum:
+      enum:
+      - A
+      - AAAA
+      - CNAME
+      - MX
+      - NS
+      - PTR
+      - TXT
+      - SRV
+      - CAA
+      - SSHFP
+      - TLSA
+      - NAPTR
+      - HTTPS
+      type: string
+      description: |-
+        * `A` - A
+        * `AAAA` - AAAA
+        * `CNAME` - CNAME
+        * `MX` - MX
+        * `NS` - NS
+        * `PTR` - PTR
+        * `TXT` - TXT
+        * `SRV` - SRV
+        * `CAA` - CAA
+        * `SSHFP` - SSHFP
+        * `TLSA` - TLSA
+        * `NAPTR` - NAPTR
+        * `HTTPS` - HTTPS
+    Web:
+      type: object
+      properties:
+        redirects:
+          type: array
+          items:
+            $ref: '#/components/schemas/Redirect'
+        https_status:
+          type: integer
+          nullable: true
+        headers:
+          type: object
+          additionalProperties:
+            type: string
+        cookies:
+          type: array
+          items:
+            $ref: '#/components/schemas/Cookie'
+        hsts:
+          allOf:
+          - $ref: '#/components/schemas/Hsts'
+          nullable: true
+        security_txt:
+          type: boolean
+          nullable: true
+        robots_txt:
+          type: boolean
+          nullable: true
+      required:
+      - cookies
+      - headers
+      - hsts
+      - https_status
+      - redirects
+      - robots_txt
+      - security_txt
+    Zone:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 253
+        reverse:
+          type: boolean
+          readOnly: true
+          description: True for in-addr.arpa / ip6.arpa zones
+        cidr:
+          type: string
+          nullable: true
+          readOnly: true
+          description: Network covered by a reverse zone, e.g. 10.0.0.0/24
+      required:
+      - cidr
+      - id
+      - name
+      - reverse
+    ZoneImportRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+        replace:
+          type: boolean
+          default: false
+          description: Delete existing records first
+        dry_run:
+          type: boolean
+          default: false
+          description: Only report what would happen
+      required:
+      - text
+    ZoneImportResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        skipped:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: string
+      required:
+      - created
+      - errors
+      - skipped
+    ZoneRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+      required:
+      - name
+  securitySchemes:
+    tokenAuth:
+      type: apiKey
+      in: header
+      name: Authorization
+      description: Token-based authentication with required prefix "Token"

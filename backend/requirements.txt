@@ -1,0 +1,11 @@
+Django==6.1.3
+djangorestframework==3.18.3
+dnslib==0.9.26
+dj-database-url==3.1.2
+python-dotenv==1.2.4
+drf-spectacular==0.30.0
+publicsuffix2==2.20191221
+pynacl==1.6.2
+maxminddb==3.2.0
+redis==8.1.0
+webauthn==3.0.1
