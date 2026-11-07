@@ -141,22 +141,11 @@ DNS_CACHE=true                       # upstream answers cached for their TTL
 
 The DNS daemon remembers upstream answers (at most `DNS_CACHE_MAX_TTL`, 300 s; NXDOMAIN and empty answers `DNS_CACHE_NEG_TTL`, 60 s; errors never). The blacklist, suspicious-query checks and internal zones are applied **before** the cache. If Redis does not answer, the daemon asks the upstream directly. With `REDIS_URL` set, the sign-in replay protection also uses Redis.
 
-## Production with nginx
+## Production deployment
 
-A ready virtual host is in `deploy/nginx/dns.example.lan` (one file, to copy into `sites-available` and link in `sites-enabled`; the steps are in the comments at the top):
+The full, step-by-step guide is in **[INSTALL.md](INSTALL.md)**: prerequisites, TLS, PostgreSQL or MySQL/MariaDB, Redis, nginx (HTTP/3), supervisor, port 53 without root, firewall, verification, client setup, backup, hardening, updates and troubleshooting.
 
-- static GUI with a fallback for the Angular routes; `/api/` and `/admin/` to Django; `/static/` for the admin;
-- https with HSTS, **HTTP/3 (QUIC)**, HTTP/2 and HTTP/1.1 on the same port (needs nginx ≥ 1.25 with `http_v3` and UDP port 443 open);
-- request limits on sign-in and second factor; long caching only for hashed files.
-
-```sh
-cd frontend && npx ng build                      # -> dist/frontend/browser  (copy to /var/www/dns/frontend)
-cd ../backend && ../.venv/bin/python manage.py collectstatic --noinput    # -> staticfiles/  (copy to /var/www/dns/static)
-pip install gunicorn                                                      # not in requirements.txt
-gunicorn dnsadmin.wsgi -b 127.0.0.1:8000 --workers 1 --threads 8          # ONE worker only
-```
-
-In the backend `.env`: `DEBUG=false`, a long `SECRET_KEY`, `BEHIND_PROXY=true` (https, HSTS, secure cookies), `CSRF_TRUSTED_ORIGINS`, `GUI_URL`, `WEBAUTHN_RP_ID` and `WEBAUTHN_ORIGINS` with the public https address. The `.gitignore` excludes `.env`, the GeoIP databases, `staticfiles/` and the build folders.
+Summary: gunicorn (**one worker only**, the sign-in key lives in process memory) behind nginx, `manage.py rundns` as a second supervisor program, `DEBUG=false`, a long `SECRET_KEY`, `BEHIND_PROXY=true`, `DATABASE_URL` and `REDIS_URL` set, then `migrate` and `collectstatic`. The virtual host is `deploy/nginx/dns.example.lan`.
 
 ## Tests
 

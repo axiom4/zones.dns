@@ -14,7 +14,8 @@ class TotpDevice(models.Model):
 class Passkey(models.Model):
     """A WebAuthn credential (security key, Touch ID, Windows Hello, phone...)."""
     user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='passkeys')
-    credential_id = models.CharField(max_length=1024, unique=True)  # base64url
+    # base64url. shortcut: 255 is the MariaDB limit for unique CharFields; real authenticators use 16-128 byte ids (<= 171 chars), longer ones are refused at registration
+    credential_id = models.CharField(max_length=255, unique=True)
     public_key = models.TextField()  # base64url COSE key
     sign_count = models.BigIntegerField(default=0)
     name = models.CharField(max_length=80, blank=True)

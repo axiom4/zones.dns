@@ -159,6 +159,8 @@ def register_passkey(user, credential, name):
                                          expected_origin=settings.WEBAUTHN_ORIGINS)
     except Exception:
         raise MfaError('bad_passkey')
+    if len(_b64(v.credential_id)) > 255:
+        raise MfaError('bad_passkey')
     return Passkey.objects.create(user=user, credential_id=_b64(v.credential_id), public_key=_b64(v.credential_public_key),
                                   sign_count=v.sign_count, name=(name or 'Passkey').strip()[:80])
 
