@@ -23,7 +23,7 @@ def _enrol_user(d, auth):
     """Already logged in (Security page) or holding the 'setup' ticket of the password step."""
     if auth and auth.is_authenticated:
         if not auth.is_staff:
-            raise mfa.MfaError('Not authorised.')
+            raise mfa.MfaError('forbidden')
         return auth
     return mfa.read_ticket(d.get('ticket'), 'setup')
 
@@ -40,7 +40,7 @@ def totp_verify(d, auth):
 def passkey_options(d, auth):
     user = _login_user(d, auth)
     if not user.passkeys.exists():
-        raise mfa.MfaError('Nessuna passkey registrata.')
+        raise mfa.MfaError('no_passkey')
     return {'options': mfa.authentication_options(user)}
 
 
@@ -64,7 +64,7 @@ def totp_confirm(d, auth):
     mfa.guard(user)
     secret = cache.get(f'totp-new:{user.pk}')
     if not secret:
-        raise mfa.MfaError('Request expired: start the setup again.')
+        raise mfa.MfaError('setup_expired')
     dev = TotpDevice(user=user, secret=secret, confirmed=True)
     if not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
@@ -101,7 +101,7 @@ class _Plain(APIView):
         try:
             return Response(ACTIONS[self.action](request.data, request.user))
         except mfa.MfaError as e:
-            return Response({'detail': str(e)}, status=400)
+            return Response({'detail': e.text}, status=400)
 
 
 def _plain(action, req, res, doc):
@@ -132,7 +132,7 @@ class MfaEncryptedView(EncryptedView):
         try:
             return step(data, request.user), 200
         except mfa.MfaError as e:
-            return {'error': str(e)}, 400
+            return {'error': e.text}, 400
 
 
 class MfaStatusView(APIView):

@@ -22,8 +22,27 @@ TICKET_AGE = 600  # seconds
 MAX_FAILS = 5  # wrong codes per user per FAIL_WINDOW
 
 
+# Text shown to the user for each failure. MfaError carries only the key, so no exception text can reach a response.
+MESSAGES = {
+    'expired': 'Sign-in session expired: sign in again.',
+    'locked': 'Too many wrong attempts: try again in a few minutes.',
+    'wrong_code': 'Wrong code.',
+    'request_expired': 'Request expired: try again.',
+    'setup_expired': 'Request expired: start the setup again.',
+    'bad_passkey': 'Invalid passkey or domain not allowed (check WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS).',
+    'no_passkey': 'No passkey registered.',
+    'forbidden': 'Not authorised.',
+}
+
+
 class MfaError(Exception):
-    pass
+    def __init__(self, key):
+        super().__init__(key)
+        self.key = key
+
+    @property
+    def text(self):
+        return MESSAGES[self.key]
 
 
 # ---- tickets and brute-force guard
@@ -39,12 +58,12 @@ def read_ticket(ticket, kind):
             raise signing.BadSignature
         return get_user_model().objects.get(pk=d['u'], is_staff=True, is_active=True)
     except (signing.BadSignature, get_user_model().DoesNotExist):
-        raise MfaError('Sign-in session expired: sign in again.')
+        raise MfaError('expired')
 
 
 def guard(user):
     if cache.get(f'mfa-fail:{user.pk}', 0) >= MAX_FAILS:
-        raise MfaError('Too many wrong attempts: try again in a few minutes.')
+        raise MfaError('locked')
 
 
 def fail(user):
@@ -52,8 +71,8 @@ def fail(user):
     try:
         cache.incr(f'mfa-fail:{user.pk}')
     except ValueError:
-        pass
-    raise MfaError('Wrong code.')
+        pass  # the counter expired between add() and incr(): the attempt just is not counted
+    raise MfaError('wrong_code')
 
 
 # ---- TOTP
@@ -133,13 +152,13 @@ def register_passkey(user, credential, name):
     from webauthn import verify_registration_response
     challenge = cache.get(f'webauthn-reg:{user.pk}')
     if not challenge:
-        raise MfaError('Request expired: try again.')
+        raise MfaError('request_expired')
     cache.delete(f'webauthn-reg:{user.pk}')
     try:
         v = verify_registration_response(credential=credential, expected_challenge=challenge, expected_rp_id=settings.WEBAUTHN_RP_ID,
                                          expected_origin=settings.WEBAUTHN_ORIGINS)
     except Exception:
-        raise MfaError('Invalid passkey or domain not allowed (check WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS).')
+        raise MfaError('bad_passkey')
     return Passkey.objects.create(user=user, credential_id=_b64(v.credential_id), public_key=_b64(v.credential_public_key),
                                   sign_count=v.sign_count, name=(name or 'Passkey').strip()[:80])
 
