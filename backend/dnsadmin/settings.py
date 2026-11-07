@@ -139,6 +139,9 @@ if BEHIND_PROXY:
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = True  # nginx already redirects; this covers direct hits on the backend port
     SECURE_HSTS_SECONDS = 31536000
+    # Off by default: browsers remember them for a year (preload: practically for ever). Turn on only if every subdomain is https-only.
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('HSTS_INCLUDE_SUBDOMAINS', 'false').lower() in ('1', 'true', 'yes', 'on')
+    SECURE_HSTS_PRELOAD = os.environ.get('HSTS_PRELOAD', 'false').lower() in ('1', 'true', 'yes', 'on')
 CSRF_TRUSTED_ORIGINS = [o.strip() for o in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if o.strip()]  # e.g. https://dns.example.lan
 
 
