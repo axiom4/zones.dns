@@ -236,6 +236,135 @@ paths:
               schema:
                 $ref: '#/components/schemas/GeoIpsResult'
           description: ''
+  /api/hosts/:
+    get:
+      operationId: hosts_list
+      description: 'Static hosts (like /etc/hosts): a name answered with a fixed address.'
+      tags:
+      - hosts
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/StaticHost'
+          description: ''
+    post:
+      operationId: hosts_create
+      description: 'Static hosts (like /etc/hosts): a name answered with a fixed address.'
+      tags:
+      - hosts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaticHostRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticHost'
+          description: ''
+  /api/hosts/{id}/:
+    get:
+      operationId: hosts_retrieve
+      description: 'Static hosts (like /etc/hosts): a name answered with a fixed address.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this static host.
+        required: true
+      tags:
+      - hosts
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticHost'
+          description: ''
+    put:
+      operationId: hosts_update
+      description: 'Static hosts (like /etc/hosts): a name answered with a fixed address.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this static host.
+        required: true
+      tags:
+      - hosts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StaticHostRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticHost'
+          description: ''
+    patch:
+      operationId: hosts_partial_update
+      description: 'Static hosts (like /etc/hosts): a name answered with a fixed address.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this static host.
+        required: true
+      tags:
+      - hosts
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedStaticHostRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StaticHost'
+          description: ''
+    delete:
+      operationId: hosts_destroy
+      description: 'Static hosts (like /etc/hosts): a name answered with a fixed address.'
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this static host.
+        required: true
+      tags:
+      - hosts
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/login-key/:
     get:
       operationId: login_key_retrieve
@@ -2145,6 +2274,26 @@ components:
           writeOnly: true
           default: false
           description: Create the reverse PTR (A/AAAA only)
+    PatchedStaticHostRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        address:
+          type: string
+          minLength: 1
+        ttl:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        enabled:
+          type: boolean
+        note:
+          type: string
+          maxLength: 255
     PatchedZoneRequest:
       type: object
       properties:
@@ -2520,6 +2669,59 @@ components:
       - mechanisms
       - record
       - redirect
+    StaticHost:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        name:
+          type: string
+          maxLength: 253
+        address:
+          type: string
+        ttl:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        enabled:
+          type: boolean
+        note:
+          type: string
+          maxLength: 255
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - address
+      - created
+      - id
+      - name
+    StaticHostRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 253
+        address:
+          type: string
+          minLength: 1
+        ttl:
+          type: integer
+          maximum: 9223372036854775807
+          minimum: 0
+          format: int64
+        enabled:
+          type: boolean
+        note:
+          type: string
+          maxLength: 255
+      required:
+      - address
+      - name
     Stats:
       type: object
       properties:

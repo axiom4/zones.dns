@@ -6,12 +6,12 @@ from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
-from dnslib import QTYPE, RCODE, DNSRecord
+from dnslib import AAAA, QTYPE, RCODE, RR, A, DNSRecord
 from dnslib.server import BaseResolver
 
 from .domains import main_domain
 from . import suspicious
-from .models import BlockedDomain, DataVersion, QueryLog, Record, Zone
+from .models import BlockedDomain, DataVersion, QueryLog, Record, StaticHost, Zone
 
 
 # The zones, their enabled records and the blacklist answers stay in memory until the data changes. The API runs in another process, so every
@@ -20,7 +20,7 @@ from .models import BlockedDomain, DataVersion, QueryLog, Record, Zone
 # counter in the database at most once per DNS_DATA_CHECK seconds.
 # DNS_DATA_TTL is the upper bound for a copy, in case a change slipped through without raising the counter (raw SQL, a restored backup).
 _data_lock = threading.Lock()
-_data = None  # (zone names longest first, {(zone name, record name): [Record]})
+_data = None  # (zone names longest first, {(zone name, record name): [Record]}, {host name: [(address, ttl)]})
 _data_at = 0.0  # when the copy was made
 _data_checked = 0.0  # when the counter was last read
 _data_version = None
@@ -33,12 +33,15 @@ def _shared():
 
 
 def _build():
-    """The data as plain values (these are what Redis stores): ([zone names], {(zone, name): [(type, value, ttl)]})."""
+    """The data as plain values (these are what Redis stores): ([zone names], {(zone, name): [(type, value, ttl)]}, {host: [(address, ttl)]})."""
     zones = [z.name for z in Zone.objects.all()]
     recs = defaultdict(list)
     for r in Record.objects.filter(enabled=True).select_related('zone'):
         recs[(r.zone.name, r.name)].append((r.type, r.value, r.ttl))
-    return zones, dict(recs)
+    hosts = defaultdict(list)
+    for h in StaticHost.objects.filter(enabled=True):
+        hosts[h.name].append((h.address, h.ttl))
+    return zones, dict(recs), dict(hosts)
 
 
 def _load():
@@ -47,19 +50,19 @@ def _load():
     plain = None
     if _shared():
         try:
-            plain = cache.get(f'data:{version}')
+            plain = cache.get(f'snap:{version}')
         except Exception:
             pass
     if plain is None:
         plain = _build()
         if _shared():
             try:
-                cache.set(f'data:{version}', plain, settings.DNS_DATA_TTL)
+                cache.set(f'snap:{version}', plain, settings.DNS_DATA_TTL)
             except Exception:
                 pass
-    names, plain_recs = plain
+    names, plain_recs, hosts = plain
     by_name = {key: [Record(name=key[1], type=t, value=v, ttl=ttl, zone=Zone(name=key[0])) for t, v, ttl in rows] for key, rows in plain_recs.items()}
-    _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name), time.monotonic(), version
+    _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name, hosts), time.monotonic(), version
     _blocked.clear()
 
 
@@ -82,13 +85,29 @@ def _snapshot():
     return _data
 
 
+def static_hosts(qname):
+    """[(address, ttl)] of the static host with this exact name, or None if there is none."""
+    return _snapshot()[2].get(qname.rstrip('.').lower())
+
+
+def static_reply(request, qtype, hosts):
+    """Answer from a static host: A gets the IPv4 addresses, AAAA the IPv6 ones, every other type an empty answer (nothing leaks from the real DNS)."""
+    reply = request.reply()
+    reply.header.aa = 1
+    want, rdata = {'A': (4, A), 'AAAA': (6, AAAA)}.get(qtype, (None, None))
+    for address, ttl in hosts:
+        if want and (':' in address) == (want == 6):
+            reply.add_answer(RR(request.q.qname, request.q.qtype, rdata=rdata(address), ttl=ttl))
+    return reply
+
+
 def lookup(qname, qtype):
     """Return (records, via_wildcard) from the longest matching internal zone, or None to ask upstream.
 
     Exact name wins; otherwise the closest wildcard (a.b.zone -> *.b.zone, then *.zone).
     """
     q = qname.rstrip('.').lower()
-    zones, by_name = _snapshot()
+    zones, by_name, _ = _snapshot()
     for zname in zones:
         if q == zname or q.endswith('.' + zname):
             rel = '@' if q == zname else q[: -len(zname) - 1]
@@ -161,8 +180,11 @@ class Resolver(BaseResolver):
         t0 = time.monotonic()
         qname, qtype = str(request.q.qname).rstrip('.').lower(), QTYPE[request.q.qtype]
         try:
-            found = lookup(qname, qtype)
-            if found is not None:
+            hosts = static_hosts(qname)
+            found = None if hosts else lookup(qname, qtype)
+            if hosts:
+                outcome, reply, via = 'local', static_reply(request, qtype, hosts), 'static host'
+            elif found is not None:
                 recs, wild = found
                 outcome, reply = 'local', request.reply()
                 via = f'zone {recs[0].zone.name}' + (f' (wildcard {recs[0].name})' if wild else '')

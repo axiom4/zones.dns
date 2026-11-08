@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Static hosts (like `/etc/hosts`): exact names answered with fixed IPv4/IPv6 addresses before zones, blacklist and upstream; GUI page, API (`/api/hosts/`) and Django admin; loaded in the in-memory/Redis copy and refreshed on every change. Needs `manage.py migrate`.
 - Prefetch: cached answers that are about to expire and still asked for are renewed in the background (`DNS_PREFETCH*`); cached TTLs now count down.
 - Query log written in batches by a background thread (`DNS_LOG_FLUSH`, `DNS_LOG_QUEUE`): answers no longer wait for the database write. Needs `manage.py migrate`.
 - Persistent database connections: the DNS daemon uses a fixed pool of worker threads (`DNS_WORKERS`) that keep their connection open, `DB_CONN_MAX_AGE` and connection health checks for the API.

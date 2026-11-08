@@ -3,9 +3,10 @@ from .ip_geo import IpGeoAdmin
 from .mfa import PasskeyAdmin, TotpDeviceAdmin
 from .query_log import QueryLogAdmin
 from .record import RecordAdmin
+from .static_host import StaticHostAdmin
 from .zone import ZoneAdmin
 
-__all__ = ['PasskeyAdmin', 'TotpDeviceAdmin', 'IpGeoAdmin', 'PersonalBlockAdmin', 'PublicBlocklistAdmin', 'QueryLogAdmin', 'RecordAdmin', 'ZoneAdmin']
+__all__ = ['PasskeyAdmin', 'TotpDeviceAdmin', 'IpGeoAdmin', 'PersonalBlockAdmin', 'PublicBlocklistAdmin', 'QueryLogAdmin', 'RecordAdmin', 'StaticHostAdmin', 'ZoneAdmin']
 
 
 from django.contrib import admin as _admin  # noqa: E402

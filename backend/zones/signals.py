@@ -1,11 +1,11 @@
-"""Any change to zones, records or the blacklist raises DataVersion, which tells the DNS daemon to reload its in-memory copy.
+"""Any change to zones, records, static hosts or the blacklist raises DataVersion, which tells the DNS daemon to reload its in-memory copy.
 
 Queryset.update() and bulk_create() send no signals: callers that use them call DataVersion.bump() themselves.
 """
 from django.db import connection, transaction
 from django.db.models.signals import post_delete, post_save
 
-from .models import BlockedDomain, DataVersion, PersonalBlock, PublicBlocklistEntry, Record, Zone
+from .models import BlockedDomain, DataVersion, PersonalBlock, PublicBlocklistEntry, Record, StaticHost, Zone
 
 
 def _bump():
@@ -19,6 +19,6 @@ def changed(sender=None, **kwargs):
 
 
 def connect():
-    for model in (Zone, Record, BlockedDomain, PersonalBlock, PublicBlocklistEntry):
+    for model in (Zone, Record, StaticHost, BlockedDomain, PersonalBlock, PublicBlocklistEntry):
         post_save.connect(changed, sender=model, dispatch_uid=f'dv-save-{model.__name__}')
         post_delete.connect(changed, sender=model, dispatch_uid=f'dv-delete-{model.__name__}')

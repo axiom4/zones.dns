@@ -548,3 +548,7 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
   aside { position: sticky; box-shadow: 0 6px 20px rgba(27,21,53,.25); }
   .welcome { min-height: 100dvh; }
 }
+
+/* inline edit row (Hosts) */
+.records li.editing { display: block; }
+.records li.editing .composer { margin: 0; padding: 0; box-shadow: none; background: none; }

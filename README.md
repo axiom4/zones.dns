@@ -26,6 +26,7 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 | Section | What it does |
 |---|---|
 | **Zones** | Forward and reverse zones (from a CIDR), records with a guided form for 13 types (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, NAPTR, HTTPS, CAA, SSHFP, TLSA), wildcards, enable/disable, notes, bulk actions, zone file import/export, automatic PTR records. `DEFAULT_ZONE` picks the zone opened by default. |
+| **Hosts** | Static host names, like `/etc/hosts`: a name is answered with the IPv4/IPv6 address you set, whatever the real DNS says. Several addresses per name, TTL, note, enable/disable. |
 | **Blacklist** | *Personal blocks* (domains you block by hand, editable) and *Public lists* (imported, read-only, searchable). Blocked domains and their subdomains answer NXDOMAIN. |
 | **Query log** | Search and filters, grouping by domain (with subdomains), the full answer of every query, one-click blocking, a button to purge old entries. |
 | **Geolocation** | Where DNS answers point: countries, networks, cities and a map (see below). |
@@ -148,6 +149,8 @@ The DNS daemon remembers upstream answers (at most `DNS_CACHE_MAX_TTL`, 300 s; N
 - **Without Redis:** the daemon keeps the copy in its own memory and looks at the counter in the database once per `DNS_DATA_CHECK` seconds (1).
 
 As a safety net a copy older than `DNS_DATA_TTL` seconds (300) is reloaded anyway, which covers changes made behind the app's back (raw SQL, a restored backup). Run `manage.py migrate` after updating: the counter is a new table.
+
+**Static hosts.** A name in **Hosts** is answered with your address and never reaches the zones, the blacklist or the upstream: `A` queries get the IPv4 addresses, `AAAA` the IPv6 ones, and any other type (HTTPS, MX, …) an empty answer, so nothing real leaks through (like a hosts file). Matching is exact (no wildcards, no subdomains); put several rows for several addresses. The hosts are loaded with zones and records into the in-memory/Redis copy (`snap:<n>` in Redis) and every add, edit, enable/disable or delete raises the same change counter, so the daemon uses it at once (within `DNS_DATA_CHECK` seconds without Redis). A name with only an IPv6 row answers `A` with an empty answer. The Query log shows these answers as `local` / `static host`.
 
 **Persistent database connections.** Connections to MySQL/MariaDB or PostgreSQL stay open and are reused (`DB_CONN_MAX_AGE`, 600 s, with a ping before reuse, so one the database dropped is replaced). The DNS daemon answers on a fixed set of worker threads (`DNS_WORKERS`, 16 per protocol) instead of a thread per query, and each worker keeps its connection: the workers are the pool, and `rundns` opens a few at start. The API does the same per gunicorn thread. Set the database's `max_connections` above `DNS_WORKERS * 2` plus the 8 gunicorn threads and a few for management commands. Queries beyond `DNS_WORKERS * 8` waiting are dropped (flood protection).
 

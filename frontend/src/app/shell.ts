@@ -19,6 +19,7 @@ import { ZonesStore } from './zones-store';
         <p class="brand"><img src="logo.svg" alt="" width="30" height="30"><i>Zones<span>.dns</span></i></p>
         <div class="tabs">
           <a routerLink="/zones" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: false }">Zones</a>
+          <a routerLink="/hosts" routerLinkActive="on">Hosts</a>
           <a routerLink="/blacklist" routerLinkActive="on">Blacklist</a>
           <a routerLink="/logs" routerLinkActive="on">Query log</a>
           <a routerLink="/geo" routerLinkActive="on">Geolocation</a>

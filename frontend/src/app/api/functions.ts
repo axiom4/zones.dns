@@ -23,6 +23,18 @@ export type { GeoDestinationsRetrieve$Params as GeoDestinationsRetrieve$Params }
 export { geoDestinationsRetrieve as geoDestinationsRetrieve } from './fn/geo/geo-destinations-retrieve';
 export type { GeoIpsRetrieve$Params as GeoIpsRetrieve$Params } from './fn/geo/geo-ips-retrieve';
 export { geoIpsRetrieve as geoIpsRetrieve } from './fn/geo/geo-ips-retrieve';
+export type { HostsList$Params as HostsList$Params } from './fn/hosts/hosts-list';
+export { hostsList as hostsList } from './fn/hosts/hosts-list';
+export type { HostsCreate$Params as HostsCreate$Params } from './fn/hosts/hosts-create';
+export { hostsCreate as hostsCreate } from './fn/hosts/hosts-create';
+export type { HostsRetrieve$Params as HostsRetrieve$Params } from './fn/hosts/hosts-retrieve';
+export { hostsRetrieve as hostsRetrieve } from './fn/hosts/hosts-retrieve';
+export type { HostsUpdate$Params as HostsUpdate$Params } from './fn/hosts/hosts-update';
+export { hostsUpdate as hostsUpdate } from './fn/hosts/hosts-update';
+export type { HostsDestroy$Params as HostsDestroy$Params } from './fn/hosts/hosts-destroy';
+export { hostsDestroy as hostsDestroy } from './fn/hosts/hosts-destroy';
+export type { HostsPartialUpdate$Params as HostsPartialUpdate$Params } from './fn/hosts/hosts-partial-update';
+export { hostsPartialUpdate as hostsPartialUpdate } from './fn/hosts/hosts-partial-update';
 export type { LoginKeyRetrieve$Params as LoginKeyRetrieve$Params } from './fn/login-key/login-key-retrieve';
 export { loginKeyRetrieve as loginKeyRetrieve } from './fn/login-key/login-key-retrieve';
 export type { LogsList$Params as LogsList$Params } from './fn/logs/logs-list';
