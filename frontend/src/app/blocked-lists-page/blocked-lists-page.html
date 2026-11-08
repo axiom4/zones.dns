@@ -1,0 +1,20 @@
+<header>
+  <div>
+    <h2>Public lists</h2>
+    <p class="soft">{{ count() }} domains {{ q ? 'found' : 'imported' }}. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
+  </div>
+</header>
+<form class="composer" (ngSubmit)="search()">
+  <input class="grow" name="q" [(ngModel)]="q" placeholder="search the imported lists" autocomplete="off" aria-label="Search the imported lists">
+  <button class="primary">Search</button>
+</form>
+<ul class="records">
+  @for (n of names(); track n) {
+    <li><span class="rvalue">{{ n }}</span></li>
+  } @empty {
+    <li class="empty">{{ q ? 'No results.' : 'No list imported. Run import_blocklist.' }}</li>
+  }
+  @if (names().length < count()) {
+    <li><button (click)="more()">Show more</button></li>
+  }
+</ul>

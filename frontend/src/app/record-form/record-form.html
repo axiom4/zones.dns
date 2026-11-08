@@ -1,0 +1,121 @@
+<dialog #dlg class="confirm form-dialog" (click)="$event.target === dlg ? dlg.close() : null">
+  <form (ngSubmit)="save(false)" novalidate>
+    <h3>{{ editingId() === null ? 'New record' : 'Edit record' }} <span class="soft">in {{ zoneName() }}</span></h3>
+
+    <fieldset>
+      <legend>{{ editingId() === null ? 'What do you want to create?' : 'Record type' }}</legend>
+      <div class="typepick">
+        @for (g of groups; track g.name) {
+          <div class="tgroup">
+            <span class="tglabel">{{ g.name }}</span>
+            <div class="tgrid">
+              @for (s of g.specs; track s.type) {
+                <button type="button" class="tchip" [class.on]="type() === s.type" (click)="pickType(s.type)" [attr.aria-pressed]="type() === s.type">
+                  <b>{{ s.type }}</b><span>{{ s.title }}</span>
+                </button>
+              }
+            </div>
+          </div>
+        }
+      </div>
+    </fieldset>
+
+    <div class="about">
+      <p>{{ spec().about }}</p>
+      <p class="soft">Example: <code>{{ spec().example }}</code></p>
+    </div>
+
+    <label class="field">
+      <span class="lbl">Name</span>
+      <input name="name" list="fnames" autocomplete="off" [(ngModel)]="name" placeholder="www" aria-describedby="h-name">
+      <small id="h-name" class="help">
+        @if (reverse()) {
+          The last part of the IP address: for <code>10.0.0.7</code> in a /24 enter <code>7</code>.
+        } @else {
+          The part to the left of the zone. <code>www</code> becomes <code>www.{{ zoneName() }}</code>;
+          <code>&#64;</code> is the zone itself; <code>*</code> answers every subdomain that has no record of its own.
+        }
+      </small>
+      @if (submitted() && !name.trim()) { <small class="bad">Required field.</small> }
+      <small class="full">Full name: <b>{{ fqdn() }}</b>@if (ip(); as a) { · address <b>{{ a }}</b> }</small>
+    </label>
+
+    @if (!raw()) {
+      @for (f of spec().fields; track f.key) {
+        <label class="field">
+          <span class="lbl">{{ f.label }}@if (f.optional) { <em> · optional</em> }</span>
+          @switch (f.kind) {
+            @case ('select') {
+              <select [name]="f.key" [(ngModel)]="vals[f.key]" [attr.aria-describedby]="'h-' + f.key">
+                @for (o of f.options; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
+              </select>
+            }
+            @case ('textarea') {
+              <textarea [name]="f.key" rows="3" [(ngModel)]="vals[f.key]" [placeholder]="f.placeholder ?? ''" [attr.aria-describedby]="'h-' + f.key"></textarea>
+            }
+            @default {
+              <input [name]="f.key" [type]="f.kind === 'number' ? 'number' : 'text'" autocomplete="off"
+                     [attr.list]="f.key === 'target' || f.key === 'replacement' ? 'fhosts' : null"
+                     [min]="f.min ?? null" [max]="f.max ?? null"
+                     [(ngModel)]="vals[f.key]" [placeholder]="f.placeholder ?? ''" [attr.aria-describedby]="'h-' + f.key">
+            }
+          }
+          <small [id]="'h-' + f.key" class="help">{{ f.help }}</small>
+          @if (error(f); as e) { <small class="bad">{{ e }}</small> }
+        </label>
+      }
+      @if (type() === 'TXT') {
+        <div class="presets">Templates:
+          @for (t of txtTemplates; track t.label) { <button type="button" class="mini" (click)="vals['text'] = t.text">{{ t.label }}</button> }
+        </div>
+      }
+      <button type="button" class="link small" (click)="toRaw()">Edit as text (advanced)</button>
+    } @else {
+      <label class="field">
+        <span class="lbl">Value (text)</span>
+        <textarea name="raw" rows="3" [(ngModel)]="rawText" aria-describedby="h-raw"></textarea>
+        <small id="h-raw" class="help">BIND zone file format. The guided fields do not recognise this value, so it is edited as text.</small>
+        @if (submitted() && !rawText.trim()) { <small class="bad">Required field.</small> }
+      </label>
+      @if (parse_(rawText)) { <button type="button" class="link small" (click)="fromRaw()">Back to the guided fields</button> }
+    }
+
+    <label class="field">
+      <span class="lbl">TTL (seconds)</span>
+      <input name="ttl" type="number" min="0" [(ngModel)]="ttl" aria-describedby="h-ttl">
+      <span class="presets">
+        @for (p of ttlPresets; track p.value) { <button type="button" class="mini" [class.on]="+ttl === p.value" (click)="ttl = p.value">{{ p.label }}</button> }
+      </span>
+      <small id="h-ttl" class="help">How long clients may reuse the answer without asking again. Low = changes show up quickly; high = less traffic.</small>
+      @if (submitted() && !(Number.isInteger(+ttl) && +ttl >= 0)) { <small class="bad">Enter a whole number greater than or equal to 0.</small> }
+    </label>
+
+    <label class="field">
+      <span class="lbl">Note <em>· optional</em></span>
+      <input name="note" [(ngModel)]="note" autocomplete="off" placeholder="What is this record for?" aria-describedby="h-note">
+      <small id="h-note" class="help">Only for you: it is never sent in DNS answers.</small>
+    </label>
+
+    <div class="opts">
+      <label class="check"><input type="checkbox" name="enabled" [(ngModel)]="enabled"> Enabled
+        <small class="help">when disabled it stays saved but DNS does not serve it</small></label>
+      @if (editingId() === null && (type() === 'A' || type() === 'AAAA')) {
+        <label class="check"><input type="checkbox" name="ptr" [(ngModel)]="createPtr"> Also create the reverse record (PTR)
+          <small class="help">lets you go from the address back to the name</small></label>
+      }
+    </div>
+
+    <div class="preview"><span class="soft">Will be saved as</span><code>{{ previewLine() }}</code></div>
+
+    @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+
+    <div class="actions">
+      <button type="button" class="ghost" (click)="dlg.close()">Cancel</button>
+      @if (editingId() === null) { <button type="button" class="ghost" (click)="save(true)">Save and new</button> }
+      <button class="primary">Save</button>
+    </div>
+
+    <datalist id="fnames">@for (n of nameOptions(); track n) { <option [value]="n"></option> }</datalist>
+    <datalist id="fhosts">@for (h of hostOptions(); track h) { <option [value]="h"></option> }</datalist>
+  </form>
+</dialog>

@@ -1,0 +1,43 @@
+<div class="welcome">
+  <section class="hero">
+    <p class="brand"><img src="logo.svg" alt="" width="34" height="34"><i>Zones<span>.dns</span></i></p>
+    <h1>Your network's names, under control.</h1>
+    <p>Create zones and records in seconds. Anything that isn't yours is resolved upstream, no thinking required.</p>
+  </section>
+  @switch (step()?.mfa) {
+    @case ('verify') {
+      <form (ngSubmit)="verifyTotp()">
+        <h2>Two-step verification</h2>
+        <p class="soft">Confirm it's you with a second factor.</p>
+        @if (step()!.methods.includes('passkey')) {
+          <button type="button" class="primary big" (click)="verifyPasskey()">Use your passkey</button>
+        }
+        @if (step()!.methods.includes('totp')) {
+          <label>Authenticator app code <input name="c" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" [attr.autofocus]="step()!.methods.includes('passkey') ? null : ''"></label>
+          <button class="primary big" [class.ghost]="step()!.methods.includes('passkey')">Verify code</button>
+        }
+        @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+        <button type="button" class="link" (click)="back()">Back to sign in</button>
+      </form>
+    }
+    @case ('setup') {
+      <div class="form">
+        <h2>Protect your account</h2>
+        <p class="soft">A second factor is required to use the app. Choose how you want to confirm future sign-ins.</p>
+        <app-mfa-enrol [ticket]="step()!.ticket" (done)="finish($event)" />
+        @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+        <button type="button" class="link" (click)="back()">Back to sign in</button>
+      </div>
+    }
+    @default {
+      <form (ngSubmit)="login()">
+        <h2>Welcome back</h2>
+        @if (key.active()) { <p class="soft secure">Encrypted sign-in: your credentials never travel in clear text.</p> }
+        <label>Username <input name="u" [(ngModel)]="user" autocomplete="username" required autofocus></label>
+        <label>Password <input name="p" [(ngModel)]="pass" type="password" autocomplete="current-password" required></label>
+        @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+        <button class="primary big">Sign in</button>
+      </form>
+    }
+  }
+</div>

@@ -1,0 +1,223 @@
+<header>
+  <div>
+    <h2>Query log</h2>
+    <p class="soft">{{ grouped ? gCount() + ' domains' : count() + ' results' }}</p>
+  </div>
+  <div class="actions">
+    <label class="live"><input type="checkbox" [(ngModel)]="grouped" name="grouped" (ngModelChange)="reset()"> Group by domain</label>
+    <label class="live"><input type="checkbox" [(ngModel)]="live" name="live" (ngModelChange)="toggleLive()"> Refresh automatically</label>
+    <button class="ghost" (click)="openPurge()">Purge log…</button>
+  </div>
+</header>
+@if (notice()) { <p class="notice" role="status">{{ notice() }}</p> }
+
+<div class="composer filters">
+  <input class="grow" type="search" name="q" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search by domain name" aria-label="Search by name">
+  <select name="o" [(ngModel)]="outcome" (ngModelChange)="reset()" aria-label="Outcome">
+    <option value="">All outcomes</option>
+    <option value="local">Internal zones</option>
+    <option value="forwarded">Forwarded</option>
+    <option value="blocked">Blocked</option>
+    <option value="error">Errors</option>
+  </select>
+  <select name="t" [(ngModel)]="type" (ngModelChange)="reset()" aria-label="Type">
+    <option value="">All types</option>
+    @for (t of types; track t) { <option>{{ t }}</option> }
+  </select>
+  <select name="rc" [(ngModel)]="rcode" (ngModelChange)="reset()" aria-label="Response code">
+    <option value="">All responses</option>
+    <option value="NOERROR">NOERROR</option>
+    <option value="NXDOMAIN">NXDOMAIN</option>
+    <option value="SERVFAIL">SERVFAIL</option>
+    <option value="REFUSED">REFUSED</option>
+  </select>
+  <input class="ip" name="ans" [(ngModel)]="answer" (ngModelChange)="search()" placeholder="Search the answer (e.g. IP)" aria-label="Search the answer">
+  <input class="ip" name="c" [(ngModel)]="client" (ngModelChange)="search()" placeholder="IP client" aria-label="IP client">
+  <select name="h" [(ngModel)]="hours" (ngModelChange)="reset()" aria-label="Period">
+    <option [ngValue]="1">Last hour</option>
+    <option [ngValue]="24">Last 24 hours</option>
+    <option [ngValue]="168">Last 7 days</option>
+    <option [ngValue]="0">All time</option>
+  </select>
+  @if (grouped) {
+    <select name="ord" [(ngModel)]="ordering" (ngModelChange)="reset()" aria-label="Order">
+      <option value="last">Most recent</option>
+      <option value="count">Most requested</option>
+    </select>
+  }
+</div>
+
+@if (grouped) {
+  <ul class="records logs">
+    @for (g of groups(); track g.name) {
+      <ng-container *ngTemplateOutlet="grp; context: { $implicit: g, level: 0 }" />
+      @if (domains()[g.name]; as d) {
+        <li class="sub">
+          @if (d.subs) {
+            <ul class="records logs">
+              @for (s of d.subs; track s.name) {
+                <ng-container *ngTemplateOutlet="grp; context: { $implicit: s, level: 1 }" />
+                @if (names()[s.name]; as o) {
+                  <li class="sub sub2">
+                    <ul class="records logs">
+                      @for (l of o.rows; track l.id) { <ng-container *ngTemplateOutlet="row; context: { $implicit: l, sub: true }" /> }
+                    </ul>
+                    @if (o.rows.length < o.count) {
+                      <div class="more"><button class="ghost" (click)="moreOf(s.name)">Show more ({{ o.count - o.rows.length }})</button></div>
+                    }
+                  </li>
+                }
+              }
+            </ul>
+            @if (d.subs.length < d.total) {
+              <div class="more"><button class="ghost" (click)="moreSubs(g)">Show more subdomains ({{ d.total - d.subs.length }})</button></div>
+            }
+          } @else {
+            <ul class="records logs">
+              @for (l of d.rows; track l.id) { <ng-container *ngTemplateOutlet="row; context: { $implicit: l, sub: true }" /> }
+            </ul>
+            @if (d.rows.length < d.count) {
+              <div class="more"><button class="ghost" (click)="moreDirect(g)">Show more ({{ d.count - d.rows.length }})</button></div>
+            }
+          }
+        </li>
+      }
+    } @empty {
+      <li class="empty">No queries match these filters.</li>
+    }
+  </ul>
+  @if (groups().length < gCount()) { <div class="more"><button class="ghost" (click)="more()">Show more domains</button></div> }
+} @else {
+  <ul class="records logs">
+    @for (l of rows(); track l.id) { <ng-container *ngTemplateOutlet="row; context: { $implicit: l, sub: false }" /> }
+    @empty { <li class="empty">No queries match these filters.</li> }
+  </ul>
+  @if (rows().length < count()) { <div class="more"><button class="ghost" (click)="more()">Show {{ PAGE }} more</button></div> }
+}
+
+<dialog #det class="confirm detail" (click)="$event.target === det ? det.close() : null">
+  @if (detail(); as d) {
+    @if (d.kind === 'q') {
+      <h3><span class="type" [attr.data-t]="d.row.type">{{ d.row.type }}</span> {{ d.row.name }}</h3>
+      <dl>
+        <dt>Time</dt><dd>{{ time(d.row.time) }}</dd>
+        <dt>Client</dt><dd class="mono">{{ d.row.client }}</dd>
+        <dt>Outcome</dt><dd><span class="out" [attr.data-o]="d.row.outcome">{{ labels[d.row.outcome] }}</span></dd>
+        <dt>Response code</dt><dd><span class="rc" [attr.data-rc]="d.row.rcode">{{ d.row.rcode }}</span></dd>
+        <dt>Resolved by</dt><dd>{{ d.row.via || '—' }}</dd>
+        <dt>Response time</dt><dd>{{ d.row.ms }} ms</dd>
+        <dt>Main domain</dt><dd>{{ d.row.domain }}</dd>
+      </dl>
+      <h4>Records returned</h4>
+      @if (d.answers; as list) {
+        @if (list.length) {
+          <table class="anstable">
+            <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Location</th></tr></thead>
+            <tbody>
+              @for (a of list; track $index) {
+                <tr><td class="mono">{{ a.name }}</td><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ a.ttl }} s</td><td>{{ place(a.type, a.value) }}</td></tr>
+              }
+            </tbody>
+          </table>
+        } @else {
+          <p class="soft">{{ d.row.rcode === 'NOERROR' ? 'The answer is valid but has no records of this type.' : 'No records: the response is ' + d.row.rcode + '.' }}</p>
+        }
+      } @else { <p class="soft">Loading the answer…</p> }
+    } @else {
+      <h3>{{ d.g.name }}</h3>
+      <dl>
+        <dt>Query</dt><dd>{{ d.g.count }}</dd>
+        @if (d.level === 0) { <dt>Distinct hosts</dt><dd>{{ d.g.names }}</dd> }
+        <dt>Distinct clients</dt><dd>{{ d.g.clients }}</dd>
+        <dt>Outcomes</dt>
+        <dd class="mix">
+          @if (d.g.local) { <span class="out sm" data-o="local">Internal {{ d.g.local }}</span> }
+          @if (d.g.forwarded) { <span class="out sm" data-o="forwarded">Forwarded {{ d.g.forwarded }}</span> }
+          @if (d.g.blocked) { <span class="out sm" data-o="blocked">Blocked {{ d.g.blocked }}</span> }
+          @if (d.g.error) { <span class="out sm" data-o="error">Error {{ d.g.error }}</span> }
+        </dd>
+        <dt>Average time</dt><dd>{{ d.g.avg_ms | number: '1.0-0' }} ms</dd>
+        <dt>Last request</dt><dd>{{ time(d.g.last) }}</dd>
+      </dl>
+      <h4>Recently resolved to</h4>
+      @if (d.resolved; as list) {
+        @if (list.length) {
+          <table class="anstable">
+            <thead><tr><th>Type</th><th>Value</th><th>Location</th></tr></thead>
+            <tbody>@for (a of list; track $index) { <tr><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ place(a.type, a.value) }}</td></tr> }</tbody>
+          </table>
+        } @else { <p class="soft">No address recorded for this group.</p> }
+      } @else { <p class="soft">Loading addresses…</p> }
+    }
+  }
+  <div class="actions"><button class="ghost" (click)="det.close()">Close</button></div>
+</dialog>
+
+<dialog #pg class="confirm" (click)="$event.target === pg ? pg.close() : null">
+  <h3>Purge the log</h3>
+  <p class="soft pl">Permanently deletes queries older than the chosen period. It applies to the whole log, not only the active filters.</p>
+  <label class="field">
+    <span class="lbl">Delete queries older than</span>
+    <select name="ph" [(ngModel)]="purgeHours" (ngModelChange)="previewPurge()" aria-label="Period to keep">
+      <option [ngValue]="24">1 day</option>
+      <option [ngValue]="168">7 days</option>
+      <option [ngValue]="720">30 days</option>
+      <option [ngValue]="2160">90 days</option>
+      <option [ngValue]="0">Everything: empty the log</option>
+    </select>
+    <small class="help">The daemon already deletes queries older than the days set in <code>QUERY_LOG_DAYS</code>.</small>
+  </label>
+  <p class="purgecount">@if (purgeCount() === null) { Counting queries… } @else { <b>{{ purgeCount() }}</b> queries will be deleted. This cannot be undone. }</p>
+  @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+  <div class="actions">
+    <button class="ghost" (click)="pg.close()">Cancel</button>
+    <button class="danger" (click)="doPurge()" [disabled]="!purgeCount()">Delete</button>
+  </div>
+</dialog>
+
+<ng-template #grp let-g let-level="level">
+  <li class="grp" [class.open]="isOpen(g.name, level)" [class.l1]="level === 1">
+    <button class="chev" (click)="level === 0 ? toggleDomain(g) : toggleName(g)" [attr.aria-expanded]="isOpen(g.name, level)"
+            [attr.aria-label]="(isOpen(g.name, level) ? 'Hide' : 'Show') + (level === 0 && g.names > 1 ? ' the subdomains of ' : ' the queries of ') + g.name">▸</button>
+    <button class="rvalue linkish" (click)="level === 0 ? toggleDomain(g) : toggleName(g)">{{ g.name }}</button>
+    @if (level === 0 && g.names > 1) { <span class="hosts" title="Distinct hosts queried">{{ g.names }} host</span> }
+    <span class="mix">
+      @if (g.local) { <span class="out sm" data-o="local" title="Internal zones">{{ g.local }}</span> }
+      @if (g.forwarded) { <span class="out sm" data-o="forwarded" title="Forwarded">{{ g.forwarded }}</span> }
+      @if (g.blocked) { <span class="out sm" data-o="blocked" title="Blocked">{{ g.blocked }}</span> }
+      @if (g.error) { <span class="out sm" data-o="error" title="Errors">{{ g.error }}</span> }
+    </span>
+    <span class="ttlv wide"><b>{{ g.count }}</b> queries</span>
+    <span class="ttlv wide">{{ g.clients }} client</span>
+    <span class="when">{{ time(g.last) }}</span>
+    @if (g.blocked < g.count) {
+      <button class="mini" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name">Answer</button>
+    }
+    <a class="mini" routerLink="/audit" [queryParams]="{ domain: g.name }" [attr.aria-label]="'Analyse ' + g.name">Audit</a>
+    @if (blockedNow().has(g.name)) {
+      <span class="out sm" data-o="blocked">Blocked</span>
+    } @else if (g.forwarded) {
+      <button class="mini" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
+              [title]="level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
+    }
+  </li>
+</ng-template>
+
+<ng-template #row let-l let-sub="sub">
+  <li [class.subrow]="sub">
+    <span class="when">{{ time(l.time) }}</span>
+    <span class="out" [attr.data-o]="l.outcome">{{ labels[l.outcome] }}</span>
+    <span class="type" [attr.data-t]="l.type">{{ l.type }}</span>
+    @if (!sub) { <button class="rvalue linkish" (click)="q = l.name; reset()" title="Filter by this name">{{ l.name }}</button> }
+    @else { <span class="rvalue"></span> }
+    <button class="ttlv linkish" (click)="client = l.client; reset()" title="Filter by this client">{{ l.client }}</button>
+    <span class="ttlv">{{ l.ms }} ms</span>
+    @if (l.rcode) {
+      <button class="mini" (click)="openQuery(l)" [attr.aria-label]="'Show the answer of ' + l.name">Answer</button>
+    }
+    @if (!sub && l.outcome === 'forwarded') {
+      @if (blockedNow().has(l.name)) { <span class="out sm" data-o="blocked">Blocked</span> }
+      @else { <button class="mini" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
+    }
+  </li>
+</ng-template>

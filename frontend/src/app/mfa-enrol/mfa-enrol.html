@@ -1,0 +1,23 @@
+@if (mode() === 'choose') {
+  <div class="choices">
+    <button type="button" class="choice" (click)="startTotp()">
+      <b>Authenticator app</b>
+      <span class="soft">6-digit code from Google Authenticator, 1Password, Authy…</span>
+    </button>
+    <button type="button" class="choice" (click)="addPasskey()" [disabled]="!supported">
+      <b>Passkey</b>
+      <span class="soft">{{ supported ? 'Fingerprint, face, PIN or security key.' : 'Not supported by this browser.' }}</span>
+    </button>
+  </div>
+} @else {
+  <form (ngSubmit)="confirmTotp()" class="totp">
+    <p class="soft">1. Scan the code with your authenticator app.</p>
+    @if (qr()) { <img class="qr" [src]="qr()" width="176" height="176" alt="QR code for the authenticator app"> }
+    <details><summary class="soft">Can't scan it?</summary><p class="soft">Enter this key by hand: <code>{{ secret() }}</code></p></details>
+    <label>2. Type the code the app shows <input name="c" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></label>
+    <div class="actions">
+      <button type="button" class="ghost" (click)="mode.set('choose')">Back</button>
+      <button class="primary">Activate</button>
+    </div>
+  </form>
+}

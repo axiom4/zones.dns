@@ -1,0 +1,89 @@
+@if (zone(); as z) {
+  <header>
+    <div>
+      <h2>{{ z.name }}</h2>
+      <p class="soft">{{ records().length }} records</p>
+    </div>
+    <div class="actions">
+      <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records">
+      <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
+        <option value="">Sort: default (IP)</option>
+        <option value="type">Sort: type</option>
+        <option value="name">{{ z.reverse ? 'Sort: IP' : 'Sort: host' }}</option>
+        <option value="value">{{ z.reverse ? 'Sort: host' : 'Sort: IP / value' }}</option>
+        <option value="ttl">Sort: TTL</option>
+      </select>
+      <button class="ghost" (click)="desc.set(!desc())" [attr.aria-label]="desc() ? 'Descending' : 'Ascending'" [title]="desc() ? 'Descending' : 'Ascending'">{{ desc() ? '↓' : '↑' }}</button>
+      <button class="primary" (click)="form.open()">New record</button>
+      <button class="ghost" (click)="openImport()">Import</button>
+      <button class="ghost" (click)="exportZone()">Export</button>
+    </div>
+  </header>
+
+  @if (z.reverse) {
+    <div class="about rev">
+      <p><b>Reverse zone</b> for the network <code>{{ z.cidr }}</code>. Here PTR records link an address to its name: the record name is the last part of the address (for <code>10.0.0.7</code> in a /24 it is <code>7</code>).</p>
+      <div class="actions">
+        <button class="ghost" (click)="syncPtr()">Generate PTR from A/AAAA records</button>
+        @if (syncMsg()) { <span class="soft">{{ syncMsg() }}</span> }
+      </div>
+    </div>
+  }
+
+  <app-record-form #form [zoneId]="z.id" [zoneName]="z.name" [reverse]="z.reverse" [records]="records()" (saved)="onSaved($event)" />
+
+  @if (selected().size) {
+    <div class="bulk" role="toolbar" aria-label="Actions on the selected records">
+      <b>{{ selected().size }} selected</b>
+      <button class="mini" (click)="bulk('enable')">Enable</button>
+      <button class="mini" (click)="bulk('disable')">Disable</button>
+      <button class="mini danger-o" (click)="bulkDelete()">Delete</button>
+      <button class="mini" (click)="selected.set(empty)">Deselect</button>
+    </div>
+  }
+
+  <ul class="records">
+    @if (shown().length) {
+      <li class="head">
+        <input type="checkbox" [checked]="allSelected()" (change)="toggleAll()" aria-label="Select all">
+        <span class="soft">Select all</span>
+      </li>
+    }
+    @for (r of shown(); track r.id) {
+      <li [class.off]="r.enabled === false">
+        <input type="checkbox" [checked]="selected().has(r.id)" (change)="toggle(r.id)" [attr.aria-label]="'Select ' + r.name">
+        <span class="type" [attr.data-t]="r.type">{{ r.type }}</span>
+        <span class="rname">{{ r.name }}@if (ipOf(r); as ip) {<small class="note-t">{{ ip }}</small>}</span>
+        <span class="rvalue">{{ r.value }}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
+        <span class="ttlv">{{ r.ttl }}s</span>
+        <button class="switch" role="switch" [attr.aria-checked]="r.enabled !== false" (click)="toggleOne(r)"
+                [title]="r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
+        <button class="icon edit" (click)="form.open(r)" [attr.aria-label]="'Edit ' + r.name">✎</button>
+        <button class="icon" (click)="del(r)" [attr.aria-label]="'Delete ' + r.name">✕</button>
+      </li>
+    } @empty {
+      <li class="empty">{{ records().length ? 'No results for your search.' : 'This zone is empty. Create the first record with “New record” or import a zone file.' }}</li>
+    }
+  </ul>
+
+  <dialog #imp class="confirm wide" (click)="$event.target === imp ? imp.close() : null">
+    <h3>Import a zone file</h3>
+    <p class="soft">BIND format, one record per line. SOA and out-of-zone records are ignored.</p>
+    <input type="file" accept=".zone,.txt,text/plain" (change)="pickFile($event)" aria-label="Zone file">
+    <textarea [(ngModel)]="importText" name="it" rows="9" placeholder="www 300 IN A 10.0.0.5" aria-label="Zone file content" (ngModelChange)="importResult.set(null)"></textarea>
+    <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Replace the existing records</label>
+    @if (importResult(); as r) {
+      <div class="result">
+        <b>{{ r.created }}</b> to create, <b>{{ r.skipped }}</b> already present
+        @for (e of r.errors; track e) { <p class="error">{{ e }}</p> }
+      </div>
+    }
+    <div class="actions">
+      <button class="ghost" (click)="imp.close()">Close</button>
+      <button class="ghost" (click)="runImport(true)" [disabled]="!importText.trim()">Preview</button>
+      <button class="primary" (click)="confirmImport()" [disabled]="!importText.trim()">Import</button>
+    </div>
+  </dialog>
+} @else if (store.loaded()) {
+  <div class="blank"><p class="big-hint">Zone not found</p><p class="soft">Pick another one from the list.</p></div>
+}
