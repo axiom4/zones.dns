@@ -21,15 +21,13 @@ import { ZonesStore } from './zones-store';
         <div class="actions">
           <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records">
           <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
-            <option value="">Sort: default</option>
+            <option value="">Sort: default (IP)</option>
             <option value="type">Sort: type</option>
             <option value="name">{{ z.reverse ? 'Sort: IP' : 'Sort: host' }}</option>
             <option value="value">{{ z.reverse ? 'Sort: host' : 'Sort: IP / value' }}</option>
             <option value="ttl">Sort: TTL</option>
           </select>
-          @if (sortBy()) {
-            <button class="ghost" (click)="desc.set(!desc())" [attr.aria-label]="desc() ? 'Descending' : 'Ascending'" [title]="desc() ? 'Descending' : 'Ascending'">{{ desc() ? '↓' : '↑' }}</button>
-          }
+          <button class="ghost" (click)="desc.set(!desc())" [attr.aria-label]="desc() ? 'Descending' : 'Ascending'" [title]="desc() ? 'Descending' : 'Ascending'">{{ desc() ? '↓' : '↑' }}</button>
           <button class="primary" (click)="form.open()">New record</button>
           <button class="ghost" (click)="openImport()">Import</button>
           <button class="ghost" (click)="exportZone()">Export</button>
@@ -127,8 +125,7 @@ export class ZonePage {
   shown = computed(() => {
     const f = this.filter().trim().toLowerCase();
     const list = f ? this.records().filter(r => `${r.name} ${r.type} ${r.value} ${r.note}`.toLowerCase().includes(f)) : this.records();
-    const by = this.sortBy();
-    if (!by) return list;
+    const by = this.sortBy() || (this.zone()?.reverse ? 'name' : 'value'); // default: by IP
     const dir = this.desc() ? -1 : 1;
     const text = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
     const ip4 = (v: string) => /^\d+\.\d+\.\d+\.\d+$/.test(v) ? v.split('.').reduce((n, o) => n * 256 + +o, 0) : null;
