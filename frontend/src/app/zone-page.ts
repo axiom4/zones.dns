@@ -23,8 +23,8 @@ import { ZonesStore } from './zones-store';
           <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
             <option value="">Sort: default</option>
             <option value="type">Sort: type</option>
-            <option value="name">Sort: host</option>
-            <option value="value">Sort: IP / value</option>
+            <option value="name">{{ z.reverse ? 'Sort: IP' : 'Sort: host' }}</option>
+            <option value="value">{{ z.reverse ? 'Sort: host' : 'Sort: IP / value' }}</option>
             <option value="ttl">Sort: TTL</option>
           </select>
           @if (sortBy()) {
