@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { blockedImportedRetrieve } from '../api/functions';
+import { blockedImportedRetrieve, blockedPublicPartialUpdate, blockedPublicRetrieve } from '../api/functions';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -16,7 +16,15 @@ export class BlockedListsPage {
   names = signal<string[]>([]);
   count = signal(0);
 
-  constructor() { this.search(); }
+  active = signal(true); // master switch: off = the imported domains are kept but ignored
+
+  constructor() {
+    this.search();
+    this.ui.run(async () => this.active.set((await this.api.invoke(blockedPublicRetrieve)).enabled));
+  }
+  switchAll() {
+    return this.ui.run(async () => { this.active.set((await this.api.invoke(blockedPublicPartialUpdate, { body: { enabled: !this.active() } })).enabled); });
+  }
 
   search() { return this.fetch(0); }
   more() { return this.fetch(this.names().length); }

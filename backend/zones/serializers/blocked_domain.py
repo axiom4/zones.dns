@@ -15,6 +15,10 @@ class BlockedDomainSerializer(serializers.ModelSerializer):
         return v
 
 
+class PersonalSwitchSerializer(serializers.Serializer):
+    enabled = serializers.BooleanField()
+
+
 class ImportedBlockedSerializer(serializers.Serializer):
     count = serializers.IntegerField()
     names = serializers.ListField(child=serializers.CharField())

@@ -11,7 +11,7 @@ from dnslib.server import BaseResolver
 
 from .domains import main_domain
 from . import suspicious
-from .models import BlockedDomain, DataVersion, QueryLog, Record, StaticHost, Zone
+from .models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, DataVersion, QueryLog, Record, Setting, StaticHost, Zone
 
 
 # The zones, their enabled records and the blacklist answers stay in memory until the data changes. The API runs in another process, so every
@@ -24,6 +24,7 @@ _data = None  # (zone names longest first, {(zone name, record name): [Record]},
 _data_at = 0.0  # when the copy was made
 _data_checked = 0.0  # when the counter was last read
 _data_version = None
+_off_sources = frozenset()  # sources whose master switch is off (Setting): 'manual' = Personal blocks, 'list' = Public lists; read at every reload
 _blocked = {}  # name -> blacklist entry or None; emptied when the data changes
 _NONE = ''  # a name that is not blocked, as stored in Redis (a missing key means "not asked yet")
 
@@ -45,7 +46,7 @@ def _build():
 
 
 def _load():
-    global _data, _data_at, _data_version
+    global _data, _data_at, _data_version, _off_sources
     version = DataVersion.version()  # read before the data: a change during the load makes the next check reload again
     plain = None
     if _shared():
@@ -63,6 +64,7 @@ def _load():
     names, plain_recs, hosts = plain
     by_name = {key: [Record(name=key[1], type=t, value=v, ttl=ttl, zone=Zone(name=key[0])) for t, v, ttl in rows] for key, rows in plain_recs.items()}
     _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name, hosts), time.monotonic(), version
+    _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if not Setting.flag(key))
     _blocked.clear()
 
 
@@ -182,7 +184,10 @@ def blocked_match(qname):
             pass
     labels = qname.rstrip('.').lower().split('.')
     suffixes = ['.'.join(labels[i:]) for i in range(len(labels))]
-    hit = BlockedDomain.objects.filter(enabled=True, name__in=suffixes).order_by('-name').first()
+    found = BlockedDomain.objects.filter(enabled=True, name__in=suffixes)
+    if _off_sources:
+        found = found.exclude(source__in=_off_sources)  # a feature that is switched off blocks nothing
+    hit = found.order_by('-name').first()
     if len(_blocked) > 20000:  # bounded: names that were asked once are the bulk
         _blocked.clear()
     _blocked[qname] = match = hit.name if hit else None

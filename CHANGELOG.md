@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- Master switch for the Public lists too (`GET`/`PATCH /api/blocked/public/`): off = the imported domains are kept but ignored and shown as disabled; the Personal blocks keep working. At once, no new migration beyond 0016.
+- Master switch for the Personal blocks (GUI, top of the page; `GET`/`PATCH /api/blocked/personal/`): off = the blocks added by hand are kept but ignored, the imported public lists keep blocking. Takes effect at once. Needs `manage.py migrate` (0016).
 - Personal blocks can be switched off and on (`enabled` flag, GUI switch and Django admin): a disabled block is kept but does not block. Needs `manage.py migrate` (0015).
 - Internal zones are authoritative: a name missing from a zone gets NXDOMAIN, a name without that record type gets NODATA (empty NOERROR), both with `aa` and a generated SOA (RFC 2308) instead of going to the upstream; `SOA` queries at the zone apex are answered. **Behaviour change:** names under an internal zone that have no record are no longer forwarded; `DNS_AUTHORITATIVE=false` brings the forwarding back.
 - A CNAME that points to a name in our own zones now also returns the target's records (e.g. `www CNAME @` answers with the apex A record).

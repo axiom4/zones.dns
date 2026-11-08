@@ -555,3 +555,8 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
 /* inline edit row (Hosts) */
 .records li.editing { display: block; }
 .records li.editing .composer { margin: 0; padding: 0; box-shadow: none; background: none; }
+
+/* title with a switch next to it (Personal blocks) */
+.title-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+.title-row h2 { margin: 0; }
+.records button:disabled { opacity: .45; cursor: not-allowed; }

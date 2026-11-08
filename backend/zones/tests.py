@@ -71,3 +71,26 @@ class BlocklistEnabledTests(TestCase):
         b.save()  # signals bump the data version, which empties the memory copy
         resolver._blocked.clear()
         self.assertIsNone(blocked_match('x.ads.example.com'))
+
+    def test_master_switch_off_ignores_personal_blocks_only(self):
+        from .models import PERSONAL_BLOCKS, BlockedDomain, Setting
+        from .resolver import blocked_match
+        BlockedDomain.objects.create(name='mine.example')
+        BlockedDomain.objects.create(name='listed.example', source='list')
+        Setting.set_flag(PERSONAL_BLOCKS, False)
+        resolver._data = None
+        self.assertIsNone(blocked_match('mine.example'))
+        self.assertEqual(blocked_match('listed.example'), 'listed.example')
+        Setting.set_flag(PERSONAL_BLOCKS, True)
+        resolver._data = None
+        self.assertEqual(blocked_match('mine.example'), 'mine.example')
+
+    def test_master_switch_off_ignores_public_lists_only(self):
+        from .models import PUBLIC_LISTS, BlockedDomain, Setting
+        from .resolver import blocked_match
+        BlockedDomain.objects.create(name='mine.example')
+        BlockedDomain.objects.create(name='listed.example', source='list')
+        Setting.set_flag(PUBLIC_LISTS, False)
+        resolver._data = None
+        self.assertIsNone(blocked_match('listed.example'))
+        self.assertEqual(blocked_match('mine.example'), 'mine.example')

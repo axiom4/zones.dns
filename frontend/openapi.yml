@@ -193,6 +193,78 @@ paths:
               schema:
                 $ref: '#/components/schemas/ImportedBlocked'
           description: ''
+  /api/blocked/personal/:
+    get:
+      operationId: blocked_personal_retrieve
+      description: 'The master switch of the Personal blocks: off = the domains added
+        by hand are kept but ignored.'
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalSwitch'
+          description: ''
+    patch:
+      operationId: blocked_personal_partial_update
+      description: 'The master switch of the Personal blocks: off = the domains added
+        by hand are kept but ignored.'
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPersonalSwitchRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalSwitch'
+          description: ''
+  /api/blocked/public/:
+    get:
+      operationId: blocked_public_retrieve
+      description: 'The master switch of the Public lists: off = the imported domains
+        are kept but ignored.'
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalSwitch'
+          description: ''
+    patch:
+      operationId: blocked_public_partial_update
+      description: 'The master switch of the Public lists: off = the imported domains
+        are kept but ignored.'
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPersonalSwitchRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PersonalSwitch'
+          description: ''
   /api/geo/destinations/:
     get:
       operationId: geo_destinations_retrieve
@@ -2258,6 +2330,11 @@ components:
           maxLength: 253
         enabled:
           type: boolean
+    PatchedPersonalSwitchRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
     PatchedRecordRequest:
       type: object
       properties:
@@ -2315,6 +2392,13 @@ components:
           type: string
           minLength: 1
           maxLength: 253
+    PersonalSwitch:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+      required:
+      - enabled
     PurgeRequestRequest:
       type: object
       properties:

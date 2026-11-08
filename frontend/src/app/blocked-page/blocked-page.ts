@@ -1,7 +1,7 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { blockedCreate, blockedDestroy, blockedList, blockedPartialUpdate } from '../api/functions';
+import { blockedCreate, blockedDestroy, blockedList, blockedPartialUpdate, blockedPersonalPartialUpdate, blockedPersonalRetrieve } from '../api/functions';
 import { BlockedDomain } from '../api/models';
 import { Ui } from '../services/ui';
 
@@ -20,9 +20,20 @@ export class BlockedPage {
   editing = signal<number | null>(null);
   draft = '';
 
+  active = signal(true); // master switch: off = the blocks below are kept but ignored
+
   constructor() { this.load(); }
 
-  load() { return this.ui.run(async () => this.blocked.set(await this.api.invoke(blockedList))); }
+  load() {
+    return this.ui.run(async () => {
+      this.blocked.set(await this.api.invoke(blockedList));
+      this.active.set((await this.api.invoke(blockedPersonalRetrieve)).enabled);
+    });
+  }
+  switchAll() {
+    this.editing.set(null); // an edit in progress is dropped when the feature goes off
+    return this.ui.run(async () => { this.active.set((await this.api.invoke(blockedPersonalPartialUpdate, { body: { enabled: !this.active() } })).enabled); });
+  }
   edit(b: BlockedDomain) { this.draft = b.name; this.editing.set(b.id); }
   save(b: BlockedDomain) {
     return this.ui.run(async () => { await this.api.invoke(blockedPartialUpdate, { id: b.id, body: { name: this.draft } }); this.editing.set(null); await this.load(); });

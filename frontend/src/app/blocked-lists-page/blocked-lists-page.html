@@ -1,6 +1,11 @@
 <header>
   <div>
-    <h2>Public lists</h2>
+    <div class="title-row">
+      <h2>Public lists</h2>
+      <button class="switch" role="switch" [attr.aria-checked]="active()" (click)="switchAll()" aria-label="Public lists"
+              [title]="active() ? 'Public lists are on: click to turn them all off' : 'Public lists are off: click to turn them on'"><i></i></button>
+      <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
+    </div>
     <p class="soft">{{ count() }} domains {{ q ? 'found' : 'imported' }}. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
   </div>
 </header>
@@ -10,7 +15,7 @@
 </form>
 <ul class="records">
   @for (n of names(); track n) {
-    <li><span class="rvalue">{{ n }}</span></li>
+    <li [class.off]="!active()"><span class="rvalue">{{ n }}</span></li>
   } @empty {
     <li class="empty">{{ q ? 'No results.' : 'No list imported. Run import_blocklist.' }}</li>
   }

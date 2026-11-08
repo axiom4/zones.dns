@@ -19,6 +19,14 @@ export type { BlockedPartialUpdate$Params as BlockedPartialUpdate$Params } from 
 export { blockedPartialUpdate as blockedPartialUpdate } from './fn/blocked/blocked-partial-update';
 export type { BlockedImportedRetrieve$Params as BlockedImportedRetrieve$Params } from './fn/blocked/blocked-imported-retrieve';
 export { blockedImportedRetrieve as blockedImportedRetrieve } from './fn/blocked/blocked-imported-retrieve';
+export type { BlockedPersonalRetrieve$Params as BlockedPersonalRetrieve$Params } from './fn/blocked/blocked-personal-retrieve';
+export { blockedPersonalRetrieve as blockedPersonalRetrieve } from './fn/blocked/blocked-personal-retrieve';
+export type { BlockedPersonalPartialUpdate$Params as BlockedPersonalPartialUpdate$Params } from './fn/blocked/blocked-personal-partial-update';
+export { blockedPersonalPartialUpdate as blockedPersonalPartialUpdate } from './fn/blocked/blocked-personal-partial-update';
+export type { BlockedPublicRetrieve$Params as BlockedPublicRetrieve$Params } from './fn/blocked/blocked-public-retrieve';
+export { blockedPublicRetrieve as blockedPublicRetrieve } from './fn/blocked/blocked-public-retrieve';
+export type { BlockedPublicPartialUpdate$Params as BlockedPublicPartialUpdate$Params } from './fn/blocked/blocked-public-partial-update';
+export { blockedPublicPartialUpdate as blockedPublicPartialUpdate } from './fn/blocked/blocked-public-partial-update';
 export type { GeoDestinationsRetrieve$Params as GeoDestinationsRetrieve$Params } from './fn/geo/geo-destinations-retrieve';
 export { geoDestinationsRetrieve as geoDestinationsRetrieve } from './fn/geo/geo-destinations-retrieve';
 export type { GeoIpsRetrieve$Params as GeoIpsRetrieve$Params } from './fn/geo/geo-ips-retrieve';
