@@ -5,7 +5,7 @@ from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from zones.audit import NAME_RE
-from zones.models import BlockedDomain
+from zones.models import BlockedDomain, DataVersion
 
 DEFAULT_URL = 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'  # ads + malware, hosts format
 LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
@@ -45,4 +45,5 @@ class Command(BaseCommand):
         with transaction.atomic():
             BlockedDomain.objects.filter(source='list').delete()
             BlockedDomain.objects.bulk_create([BlockedDomain(name=n, source='list') for n in names - manual], batch_size=2000)
+            transaction.on_commit(DataVersion.bump)  # after the commit, so the daemon never reloads half-way
         self.stdout.write(f'{len(names - manual)} domains imported')

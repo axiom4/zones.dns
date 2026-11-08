@@ -1,7 +1,7 @@
 # Zones.dns
 
 DNS daemon (Python/dnslib) + API (Django 6.1.3 / DRF 3.18.3) + GUI (Angular 22).
-Zones and records live in the database; the daemon reads them on every query, so changes made in the GUI take effect at once.
+Zones and records live in the database; the daemon keeps a copy in memory and reloads it when the data changes, so changes made in the GUI take effect at once (within a second without Redis).
 Names the internal zones cannot answer are forwarded to `UPSTREAM_DNS` (default 1.1.1.1; several resolvers, comma separated, are tried in order).
 
 ## Quick start (development)
@@ -140,6 +140,16 @@ DNS_CACHE=true                       # upstream answers cached for their TTL
 ```
 
 The DNS daemon remembers upstream answers (at most `DNS_CACHE_MAX_TTL`, 300 s; NXDOMAIN and empty answers `DNS_CACHE_NEG_TTL`, 60 s; errors never). The blacklist, suspicious-query checks and internal zones are applied **before** the cache. If Redis does not answer, the daemon asks the upstream directly.
+
+**Persistent connections.** Each process keeps one pool of Redis connections (`REDIS_POOL_SIZE`, 20) that every thread shares; connections stay open and are reused (TCP keep-alive, a ping before reuse after 30 s idle, automatic reconnect after a Redis restart). `rundns` opens a few at start. Calls time out after 1 s, so a stuck Redis cannot stall DNS answers.
+
+**Zones, records and blacklist in memory and Redis.** Zones, enabled records and blacklist answers are kept until the data changes, so most queries read no database at all (only the log write remains). Every change (GUI, admin, `import_blocklist`) raises a counter (`DataVersion`).
+- **With `REDIS_URL`:** the counter, the data and the blacklist answers are also stored in Redis (`data:<n>`, `bl:<n>:<name>`). The daemon checks the counter on every query, so a change shows **at once**, a restarted daemon starts warm without reading the database, and several daemons share one copy. If Redis is down the daemon falls back to the database.
+- **Without Redis:** the daemon keeps the copy in its own memory and looks at the counter in the database once per `DNS_DATA_CHECK` seconds (1).
+
+As a safety net a copy older than `DNS_DATA_TTL` seconds (300) is reloaded anyway, which covers changes made behind the app's back (raw SQL, a restored backup). Run `manage.py migrate` after updating: the counter is a new table.
+
+**Persistent database connections.** Connections to MySQL/MariaDB or PostgreSQL stay open and are reused (`DB_CONN_MAX_AGE`, 600 s, with a ping before reuse, so one the database dropped is replaced). The DNS daemon answers on a fixed set of worker threads (`DNS_WORKERS`, 16 per protocol) instead of a thread per query, and each worker keeps its connection: the workers are the pool, and `rundns` opens a few at start. The API does the same per gunicorn thread. Set the database's `max_connections` above `DNS_WORKERS * 2` plus the 8 gunicorn threads and a few for management commands. Queries beyond `DNS_WORKERS * 8` waiting are dropped (flood protection).
 
 **Upstream failover.** `UPSTREAM_DNS=192.168.1.254,1.1.1.1` tries the resolvers in order: after `DNS_UPSTREAM_TIMEOUT` seconds (2) without an answer, or a SERVFAIL, it asks the next. A resolver that did not answer at all is skipped for `DNS_UPSTREAM_DOWN` seconds (30), so a dead one does not slow every query. If **all** are down, an answer that expired up to `DNS_STALE_TTL` seconds ago (86400; 0 = never) is served from the cache with a TTL of at most 30 s; the Query log shows it as `stale cache (upstream down)`. A name never asked before gets SERVFAIL. With `REDIS_URL` set, the sign-in replay protection also uses Redis.
 

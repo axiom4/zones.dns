@@ -1,6 +1,8 @@
 from django.contrib import admin
 
-from ..models import Record
+from django.db import transaction
+
+from ..models import DataVersion, Record
 
 
 @admin.register(Record)
@@ -22,7 +24,9 @@ class RecordAdmin(admin.ModelAdmin):
     @admin.action(description='Enable the selected records')
     def enable(self, request, qs):
         self.message_user(request, f'{qs.update(enabled=True)} records enabled.')
+        transaction.on_commit(DataVersion.bump)
 
     @admin.action(description='Disable the selected records')
     def disable(self, request, qs):
         self.message_user(request, f'{qs.update(enabled=False)} records disabled.')
+        transaction.on_commit(DataVersion.bump)

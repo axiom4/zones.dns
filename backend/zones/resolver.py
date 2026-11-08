@@ -1,4 +1,6 @@
+import threading
 import time
+from collections import defaultdict
 
 from django.conf import settings
 from django.core.cache import cache
@@ -8,7 +10,75 @@ from dnslib.server import BaseResolver
 
 from .domains import main_domain
 from . import suspicious
-from .models import BlockedDomain, QueryLog, Record, Zone
+from .models import BlockedDomain, DataVersion, QueryLog, Record, Zone
+
+
+# The zones, their enabled records and the blacklist answers stay in memory until the data changes. The API runs in another process, so every
+# change raises DataVersion (zones/signals.py). With REDIS_URL the counter, the data and the blacklist answers are also kept in Redis, so the daemon
+# sees a change at once (it checks on every query), restarts warm, and several daemons share one copy. Without Redis the daemon looks at the
+# counter in the database at most once per DNS_DATA_CHECK seconds.
+# DNS_DATA_TTL is the upper bound for a copy, in case a change slipped through without raising the counter (raw SQL, a restored backup).
+_data_lock = threading.Lock()
+_data = None  # (zone names longest first, {(zone name, record name): [Record]})
+_data_at = 0.0  # when the copy was made
+_data_checked = 0.0  # when the counter was last read
+_data_version = None
+_blocked = {}  # name -> blacklist entry or None; emptied when the data changes
+_NONE = ''  # a name that is not blocked, as stored in Redis (a missing key means "not asked yet")
+
+
+def _shared():
+    return bool(settings.REDIS_URL)
+
+
+def _build():
+    """The data as plain values (these are what Redis stores): ([zone names], {(zone, name): [(type, value, ttl)]})."""
+    zones = [z.name for z in Zone.objects.all()]
+    recs = defaultdict(list)
+    for r in Record.objects.filter(enabled=True).select_related('zone'):
+        recs[(r.zone.name, r.name)].append((r.type, r.value, r.ttl))
+    return zones, dict(recs)
+
+
+def _load():
+    global _data, _data_at, _data_version
+    version = DataVersion.version()  # read before the data: a change during the load makes the next check reload again
+    plain = None
+    if _shared():
+        try:
+            plain = cache.get(f'data:{version}')
+        except Exception:
+            pass
+    if plain is None:
+        plain = _build()
+        if _shared():
+            try:
+                cache.set(f'data:{version}', plain, settings.DNS_DATA_TTL)
+            except Exception:
+                pass
+    names, plain_recs = plain
+    by_name = {key: [Record(name=key[1], type=t, value=v, ttl=ttl, zone=Zone(name=key[0])) for t, v, ttl in rows] for key, rows in plain_recs.items()}
+    _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name), time.monotonic(), version
+    _blocked.clear()
+
+
+def _snapshot():
+    global _data_checked
+    now = time.monotonic()
+    if _data is not None and now - _data_checked < (0 if _shared() else settings.DNS_DATA_CHECK):  # with Redis: look at every query
+        return _data
+    if _data_lock.acquire(blocking=_data is None):  # while one thread checks or reloads, the others keep using the current copy
+        try:
+            now = _data_checked = time.monotonic()
+            try:
+                if _data is None or now - _data_at > settings.DNS_DATA_TTL or DataVersion.version() != _data_version:
+                    _load()
+            except Exception:
+                if _data is None:
+                    raise  # nothing to fall back on; with a copy we keep serving it and look again at the next check
+        finally:
+            _data_lock.release()
+    return _data
 
 
 def lookup(qname, qtype):
@@ -17,16 +87,16 @@ def lookup(qname, qtype):
     Exact name wins; otherwise the closest wildcard (a.b.zone -> *.b.zone, then *.zone).
     """
     q = qname.rstrip('.').lower()
-    for z in sorted(Zone.objects.all(), key=lambda z: -len(z.name)):
-        if q == z.name or q.endswith('.' + z.name):
-            rel = '@' if q == z.name else q[: -len(z.name) - 1]
-            recs, wild = list(Record.objects.filter(zone=z, name=rel, enabled=True)), False
+    zones, by_name = _snapshot()
+    for zname in zones:
+        if q == zname or q.endswith('.' + zname):
+            rel = '@' if q == zname else q[: -len(zname) - 1]
+            recs, wild = by_name.get((zname, rel), []), False
             if not recs and rel != '@':
                 labels = rel.split('.')
                 cands = [f'*.{".".join(labels[i:])}' for i in range(1, len(labels))] + ['*']
-                found = list(Record.objects.filter(zone=z, name__in=cands, enabled=True))
                 for c in cands:  # most specific first
-                    recs = [r for r in found if r.name == c]
+                    recs = by_name.get((zname, c), [])
                     if recs:
                         wild = True
                         break
@@ -38,11 +108,30 @@ def lookup(qname, qtype):
 
 
 def blocked_match(qname):
-    """The blacklist entry that covers qname (itself or a parent), or None."""
+    """The blacklist entry that covers qname (itself or a parent), or None. Answers are remembered per name until the data changes."""
+    _snapshot()  # notices a change and empties _blocked
+    if qname in _blocked:
+        return _blocked[qname]
+    if _shared():
+        try:
+            stored = cache.get(f'bl:{_data_version}:{qname}')
+            if stored is not None:
+                _blocked[qname] = match = stored or None
+                return match
+        except Exception:
+            pass
     labels = qname.rstrip('.').lower().split('.')
     suffixes = ['.'.join(labels[i:]) for i in range(len(labels))]
     hit = BlockedDomain.objects.filter(name__in=suffixes).order_by('-name').first()
-    return hit.name if hit else None
+    if len(_blocked) > 20000:  # bounded: names that were asked once are the bulk
+        _blocked.clear()
+    _blocked[qname] = match = hit.name if hit else None
+    if _shared():
+        try:
+            cache.set(f'bl:{_data_version}:{qname}', match or _NONE, settings.DNS_DATA_TTL)
+        except Exception:
+            pass
+    return match
 
 
 def summarize(reply):
@@ -64,6 +153,7 @@ class Resolver(BaseResolver):
         self.down = {}  # upstream -> monotonic time until which it is skipped
 
     def resolve(self, request, handler):
+        connection.close_if_health_check_failed()  # a connection the database dropped while idle is replaced before use
         t0 = time.monotonic()
         qname, qtype = str(request.q.qname).rstrip('.').lower(), QTYPE[request.q.qtype]
         try:
@@ -92,7 +182,7 @@ class Resolver(BaseResolver):
                                     ms=int((time.monotonic() - t0) * 1000), rcode=rcode, via=via, answers=answers)
             return reply
         finally:
-            connection.close()  # one thread per request; don't leak DB connections
+            connection.close_if_unusable_or_obsolete()  # the worker thread keeps its connection for the next query, unless it broke or is older than CONN_MAX_AGE
 
     def forward(self, request):
         """(reply, via). Answers are cached for their TTL; a cache failure (Redis down) just means asking upstream.

@@ -90,8 +90,13 @@ WSGI_APPLICATION = 'dnsadmin.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+# Connections stay open between requests/queries and are reused: CONN_MAX_AGE seconds (0 = close after each, None = never), checked with a ping
+# before reuse. Each thread has its own: the API (gunicorn threads) and the DNS daemon (DNS_WORKERS threads) are the pool, so size
+# the database's max_connections for roughly DNS_WORKERS * 2 + gunicorn threads + a few for management commands.
+DB_CONN_MAX_AGE = int(os.environ.get('DB_CONN_MAX_AGE', '600'))
+DNS_WORKERS = int(os.environ.get('DNS_WORKERS', '16'))  # threads answering queries per protocol (UDP, TCP) = database connections kept open by the daemon
 DATABASES = {
-    'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=0),
+    'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=DB_CONN_MAX_AGE, conn_health_checks=True),
 }
 
 
@@ -196,11 +201,21 @@ GUI_URL = os.environ.get('GUI_URL', 'http://localhost:4200/')
 # Cache. REDIS_URL set = Redis (shared by processes, survives restarts); empty = in-process memory.
 # The DNS daemon keeps upstream answers in it for their TTL (capped), see DNS_CACHE*.
 REDIS_URL = os.environ.get('REDIS_URL', '')
-CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': REDIS_URL, 'KEY_PREFIX': 'dnsadmin'} if REDIS_URL
-          else {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+REDIS_POOL_SIZE = int(os.environ.get('REDIS_POOL_SIZE', '20'))  # connections kept open to Redis (shared by every thread of the process)
+CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': REDIS_URL, 'KEY_PREFIX': 'dnsadmin', 'OPTIONS': {
+    'pool_class': 'zones.redis_pool.SharedPool',  # one pool for all threads, see zones/redis_pool.py
+    'max_connections': REDIS_POOL_SIZE,
+    'timeout': 1,                # seconds to wait for a free connection when all are busy (then the cache counts as down)
+    'socket_timeout': 1,         # a stuck Redis must not stall DNS answers: after 1 s the call fails and the database / upstream is used
+    'socket_connect_timeout': 1,
+    'socket_keepalive': True,    # TCP keep-alive: idle connections are not dropped by firewalls
+    'health_check_interval': 30,  # an idle connection is pinged before reuse after 30 s, and replaced if it died
+}} if REDIS_URL else {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
 DNS_CACHE = os.environ.get('DNS_CACHE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_CACHE_MAX_TTL = int(os.environ.get('DNS_CACHE_MAX_TTL', '300'))  # seconds, upper bound for positive answers
 DNS_CACHE_NEG_TTL = int(os.environ.get('DNS_CACHE_NEG_TTL', '60'))  # NXDOMAIN / empty answers
+DNS_DATA_CHECK = float(os.environ.get('DNS_DATA_CHECK', '1'))  # seconds between looks at the change counter: a GUI change reaches the DNS daemon within this time
+DNS_DATA_TTL = float(os.environ.get('DNS_DATA_TTL', '300'))  # a copy of zones/records/blacklist older than this is reloaded even if no change was seen
 DNS_STALE_TTL = int(os.environ.get('DNS_STALE_TTL', '86400'))  # seconds an expired answer may still be served when every upstream is down; 0 = never
 
 # Suspicious queries (tunnelling, DGA, recon). off | log (only flag in the query log) | block (answer NXDOMAIN).

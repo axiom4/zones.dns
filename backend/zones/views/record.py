@@ -3,7 +3,9 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from ..models import Record
+from django.db import transaction
+
+from ..models import DataVersion, Record
 from ..serializers import BulkActionSerializer, BulkResultSerializer, RecordSerializer
 
 
@@ -28,4 +30,5 @@ class RecordViewSet(viewsets.ModelViewSet):
             qs.delete()
         else:
             count = qs.update(enabled=(act == 'enable'))
+            transaction.on_commit(DataVersion.bump)
         return Response({'count': count})

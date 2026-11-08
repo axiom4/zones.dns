@@ -3,11 +3,14 @@ from datetime import timedelta
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
+from django.db import close_old_connections
 from django.utils import timezone
 
 from zones.models import QueryLog
 from zones.resolver import Resolver
 from dnslib.server import DNSServer
+
+from zones.dnsserver import PooledTCPServer, PooledUDPServer
 
 
 class Command(BaseCommand):
@@ -19,13 +22,29 @@ class Command(BaseCommand):
         p.add_argument('--upstream', default=settings.UPSTREAM_DNS, help='one or more resolvers, comma separated, tried in order')
 
     def handle(self, *a, address, port, upstream, **o):
+        if settings.REDIS_URL:
+            from django.core.cache import cache
+            from zones import redis_pool
+            try:
+                cache.get('warmup')  # creates the pool
+                redis_pool.warm(min(settings.REDIS_POOL_SIZE, 4))  # a few connections ready from the first query
+            except Exception as e:
+                self.stderr.write(f'Redis is not reachable ({e}): continuing without it until it answers')
         r = Resolver(upstream)
-        servers = [DNSServer(r, port=port, address=address, tcp=t) for t in (False, True)]
+        for cls in (PooledUDPServer, PooledTCPServer):
+            cls.workers = settings.DNS_WORKERS
+        servers = [DNSServer(r, port=port, address=address, tcp=t, server=PooledTCPServer if t else PooledUDPServer) for t in (False, True)]
+        try:
+            for s in servers:
+                s.server.warm(min(settings.DNS_WORKERS, 4))  # a few database connections ready from the first query
+        except Exception as e:
+            self.stderr.write(f'Database is not reachable yet ({e}): connections are opened as queries arrive')
         for s in servers:
             s.start_thread()
         self.stdout.write(f'DNS on {address}:{port} (udp+tcp), upstream {upstream}')
         try:
             while True:
+                close_old_connections()  # this thread sleeps for an hour: do not reuse a connection the database has closed meanwhile
                 QueryLog.objects.filter(time__lt=timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)).delete()
                 time.sleep(3600)
         except KeyboardInterrupt:
