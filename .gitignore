@@ -1,5 +1,7 @@
 # Secrets and local data
 .env
+.env.*
+!.env.example
 *.env.local
 backend/db.sqlite3
 backend/geoip-data/
