@@ -220,6 +220,8 @@ DNS_CACHE_MAX_TTL = int(os.environ.get('DNS_CACHE_MAX_TTL', '300'))  # seconds, 
 DNS_CACHE_NEG_TTL = int(os.environ.get('DNS_CACHE_NEG_TTL', '60'))  # NXDOMAIN / empty answers
 # true: names under an internal zone that have no record get NXDOMAIN/NODATA (authoritative, RFC 2308); false: they are forwarded to the upstream
 DNS_AUTHORITATIVE = os.environ.get('DNS_AUTHORITATIVE', 'true').lower() in ('1', 'true', 'yes', 'on')
+# true: reverse lookups of private addresses (10/8, 172.16/12, 192.168/16, fc00::/7 ...) that no zone answers get NXDOMAIN here (RFC 6303) instead of going upstream
+DNS_LOCAL_REVERSE = os.environ.get('DNS_LOCAL_REVERSE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_PREFETCH = os.environ.get('DNS_PREFETCH', 'true').lower() in ('1', 'true', 'yes', 'on')  # renew cached answers that are about to expire while still asked for
 DNS_PREFETCH_AT = float(os.environ.get('DNS_PREFETCH_AT', '0.2'))  # ...when less than this fraction of their TTL is left
 DNS_PREFETCH_WORKERS = int(os.environ.get('DNS_PREFETCH_WORKERS', '4'))  # threads asking the upstream for renewals

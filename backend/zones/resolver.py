@@ -148,6 +148,20 @@ def authority(qname):
     return None
 
 
+# RFC 6303: reverse zones of addresses that mean nothing outside the local network. Nobody else can answer for them, so they are never sent upstream.
+_LOCAL_REVERSE = frozenset(
+    ['10.in-addr.arpa', '168.192.in-addr.arpa', '254.169.in-addr.arpa', '127.in-addr.arpa', '0.in-addr.arpa', '255.255.255.255.in-addr.arpa']
+    + [f'{n}.172.in-addr.arpa' for n in range(16, 32)]  # 172.16.0.0/12
+    + [f'{n}.100.in-addr.arpa' for n in range(64, 128)]  # 100.64.0.0/10 (RFC 6598)
+    + ['1.' + '0.' * 31 + 'ip6.arpa', '0.' * 32 + 'ip6.arpa', 'd.f.ip6.arpa', 'c.f.ip6.arpa', '8.e.f.ip6.arpa', '9.e.f.ip6.arpa', 'a.e.f.ip6.arpa', 'b.e.f.ip6.arpa'])  # ::1, ::, fc00::/7, fe80::/10
+
+
+def local_reverse(qname):
+    """The RFC 6303 zone qname is in (a private or special address), or None."""
+    labels = qname.rstrip('.').lower().split('.')
+    return next((z for z in ('.'.join(labels[i:]) for i in range(len(labels))) if z in _LOCAL_REVERSE), None)
+
+
 def soa(zone, ttl=300):
     """The zone has no stored SOA: build one. mname is the first apex NS (or ns.<zone>), the serial is the data version."""
     _, by_name, _ = _snapshot()
@@ -251,6 +265,9 @@ class Resolver(BaseResolver):
             elif settings.DNS_AUTHORITATIVE and (auth := authority(qname)):
                 outcome, via = 'local', f'zone {auth[0]} (no such {"record" if auth[1] else "name"})'
                 reply = negative(request, *auth)
+            elif settings.DNS_LOCAL_REVERSE and (zone := local_reverse(qname)):
+                outcome, via = 'local', f'private reverse zone {zone} (RFC 6303)'
+                reply = negative(request, zone, qname == zone)
             elif (match := blocked_match(qname)):
                 outcome, reply, via = 'blocked', request.reply(), f'blacklist {match}'
                 reply.header.rcode = RCODE.NXDOMAIN

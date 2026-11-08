@@ -151,3 +151,35 @@ class ZoneDeleteMfaTests(TestCase):
         with override_settings(LOGIN_ENCRYPTION='off'):
             r = self.api.post('/api/mfa/stepup/totp/', {'code': '000000', 'scope': f'zone-delete:{self.zone.pk}'}, format='json')
         self.assertEqual(r.status_code, 400)
+
+
+class LocalReverseTests(TestCase):
+    def ask(self, name, qtype='PTR'):
+        handler = SimpleNamespace(client_address=('127.0.0.1', 0))
+        return Resolver('127.0.0.1:9', log=None).resolve(DNSRecord.question(name, qtype), handler)
+
+    def setUp(self):
+        resolver._data = None
+
+    def test_private_ptr_without_zone_is_nxdomain_not_forwarded(self):
+        for name in ('229.1.168.192.in-addr.arpa', '5.0.0.10.in-addr.arpa', '9.20.16.172.in-addr.arpa', '1.' + '0.' * 31 + 'd.f.ip6.arpa'):
+            r = self.ask(name)
+            self.assertEqual((r.header.rcode, r.header.aa), (3, 1), name)
+            self.assertEqual([QTYPE[a.rtype] for a in r.auth], ['SOA'])
+
+    def test_public_ptr_is_still_forwarded(self):
+        self.assertEqual(self.ask('8.8.8.8.in-addr.arpa').header.rcode, 2)  # dead upstream: SERVFAIL
+
+    def test_172_outside_the_private_range_is_forwarded(self):
+        self.assertEqual(self.ask('9.20.15.172.in-addr.arpa').header.rcode, 2)  # 172.15.x is public
+
+    def test_a_local_reverse_zone_still_answers_first(self):
+        z = Zone.objects.create(name='1.168.192.in-addr.arpa')
+        Record.objects.create(zone=z, name='229', type='PTR', value='nas.lan.')
+        r = self.ask('229.1.168.192.in-addr.arpa')
+        self.assertEqual([str(a.rdata) for a in r.rr], ['nas.lan.'])
+
+    def test_switch_off_forwards(self):
+        from django.test import override_settings
+        with override_settings(DNS_LOCAL_REVERSE=False):
+            self.assertEqual(self.ask('229.1.168.192.in-addr.arpa').header.rcode, 2)
