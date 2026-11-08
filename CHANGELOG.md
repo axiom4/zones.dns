@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Zones can be switched off and on one by one (`enabled` flag; switch next to the zone name in the GUI, and in the Django admin): a disabled zone and its records are kept but not served, its names are answered as if the zone did not exist; the GUI shows its records as disabled and read-only. Needs `manage.py migrate` (0017).
 - Master switch for the Public lists too (`GET`/`PATCH /api/blocked/public/`): off = the imported domains are kept but ignored and shown as disabled; the Personal blocks keep working. At once, no new migration beyond 0016.
 - Master switch for the Personal blocks (GUI, top of the page; `GET`/`PATCH /api/blocked/personal/`): off = the blocks added by hand are kept but ignored, the imported public lists keep blocking. Takes effect at once. Needs `manage.py migrate` (0016).
 - Personal blocks can be switched off and on (`enabled` flag, GUI switch and Django admin): a disabled block is kept but does not block. Needs `manage.py migrate` (0015).

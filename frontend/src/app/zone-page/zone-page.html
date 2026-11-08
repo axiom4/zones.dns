@@ -1,8 +1,13 @@
 @if (zone(); as z) {
   <header>
     <div>
-      <h2>{{ z.name }}</h2>
-      <p class="soft">{{ records().length }} records</p>
+      <div class="title-row">
+        <h2>{{ z.name }}</h2>
+        <button class="switch" role="switch" [attr.aria-checked]="z.enabled !== false" (click)="toggleZone(z)" [attr.aria-label]="'Zone ' + z.name"
+                [title]="z.enabled === false ? 'Zone is off: click to serve it' : 'Zone is on: click to turn it off'"><i></i></button>
+        <span class="soft">{{ z.enabled === false ? 'Off: not served' : 'On' }}</span>
+      </div>
+      <p class="soft">{{ records().length }} records@if (z.enabled === false) { · its names are answered as if the zone did not exist (forwarded to the upstream)}</p>
     </div>
     <div class="actions">
       <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records">
@@ -14,8 +19,8 @@
         <option value="ttl">Sort: TTL</option>
       </select>
       <button class="ghost" (click)="desc.set(!desc())" [attr.aria-label]="desc() ? 'Descending' : 'Ascending'" [title]="desc() ? 'Descending' : 'Ascending'">{{ desc() ? '↓' : '↑' }}</button>
-      <button class="primary" (click)="form.open()">New record</button>
-      <button class="ghost" (click)="openImport()">Import</button>
+      <button class="primary" (click)="form.open()" [disabled]="off()">New record</button>
+      <button class="ghost" (click)="openImport()" [disabled]="off()">Import</button>
       <button class="ghost" (click)="exportZone()">Export</button>
     </div>
   </header>
@@ -24,7 +29,7 @@
     <div class="about rev">
       <p><b>Reverse zone</b> for the network <code>{{ z.cidr }}</code>. Here PTR records link an address to its name: the record name is the last part of the address (for <code>10.0.0.7</code> in a /24 it is <code>7</code>).</p>
       <div class="actions">
-        <button class="ghost" (click)="syncPtr()">Generate PTR from A/AAAA records</button>
+        <button class="ghost" (click)="syncPtr()" [disabled]="off()">Generate PTR from A/AAAA records</button>
         @if (syncMsg()) { <span class="soft">{{ syncMsg() }}</span> }
       </div>
     </div>
@@ -32,7 +37,7 @@
 
   <app-record-form #form [zoneId]="z.id" [zoneName]="z.name" [reverse]="z.reverse" [records]="records()" (saved)="onSaved($event)" />
 
-  @if (selected().size) {
+  @if (selected().size && !off()) {
     <div class="bulk" role="toolbar" aria-label="Actions on the selected records">
       <b>{{ selected().size }} selected</b>
       <button class="mini" (click)="bulk('enable')">Enable</button>
@@ -45,21 +50,21 @@
   <ul class="records">
     @if (shown().length) {
       <li class="head">
-        <input type="checkbox" [checked]="allSelected()" (change)="toggleAll()" aria-label="Select all">
+        <input type="checkbox" [checked]="allSelected()" [disabled]="off()" (change)="toggleAll()" aria-label="Select all">
         <span class="soft">Select all</span>
       </li>
     }
     @for (r of shown(); track r.id) {
-      <li [class.off]="r.enabled === false">
-        <input type="checkbox" [checked]="selected().has(r.id)" (change)="toggle(r.id)" [attr.aria-label]="'Select ' + r.name">
+      <li [class.off]="off() || r.enabled === false">
+        <input type="checkbox" [checked]="selected().has(r.id)" [disabled]="off()" (change)="toggle(r.id)" [attr.aria-label]="'Select ' + r.name">
         <span class="type" [attr.data-t]="r.type">{{ r.type }}</span>
         <span class="rname">{{ r.name }}@if (ipOf(r); as ip) {<small class="note-t">{{ ip }}</small>}</span>
         <span class="rvalue">{{ r.value }}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
         <span class="ttlv">{{ r.ttl }}s</span>
-        <button class="switch" role="switch" [attr.aria-checked]="r.enabled !== false" (click)="toggleOne(r)"
-                [title]="r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
-        <button class="icon edit" (click)="form.open(r)" [attr.aria-label]="'Edit ' + r.name">✎</button>
-        <button class="icon" (click)="del(r)" [attr.aria-label]="'Delete ' + r.name">✕</button>
+        <button class="switch" role="switch" [attr.aria-checked]="!off() && r.enabled !== false" (click)="toggleOne(r)" [disabled]="off()"
+                [title]="off() ? 'The zone is off' : r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
+        <button class="icon edit" (click)="form.open(r)" [disabled]="off()" [attr.aria-label]="'Edit ' + r.name">✎</button>
+        <button class="icon" (click)="del(r)" [disabled]="off()" [attr.aria-label]="'Delete ' + r.name">✕</button>
       </li>
     } @empty {
       <li class="empty">{{ records().length ? 'No results for your search.' : 'This zone is empty. Create the first record with “New record” or import a zone file.' }}</li>

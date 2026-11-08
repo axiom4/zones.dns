@@ -94,3 +94,16 @@ class BlocklistEnabledTests(TestCase):
         resolver._data = None
         self.assertIsNone(blocked_match('listed.example'))
         self.assertEqual(blocked_match('mine.example'), 'mine.example')
+
+
+class ZoneEnabledTests(TestCase):
+    def test_disabled_zone_is_not_served(self):
+        z = Zone.objects.create(name='off.lan')
+        Record.objects.create(zone=z, name='h', type='A', value='10.0.0.9')
+        resolver._data = None
+        self.assertIsNotNone(resolver.lookup('h.off.lan', 'A'))
+        z.enabled = False
+        z.save()
+        resolver._data = None
+        self.assertIsNone(resolver.lookup('h.off.lan', 'A'))
+        self.assertIsNone(resolver.authority('nope.off.lan'))  # no NXDOMAIN from a zone that is off: the name is forwarded

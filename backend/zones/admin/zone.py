@@ -7,7 +7,9 @@ from ..reverse import zone_to_cidr
 
 @admin.register(Zone)
 class ZoneAdmin(admin.ModelAdmin):
-    list_display = ['name', 'kind', 'record_count']
+    list_display = ['name', 'enabled', 'kind', 'record_count']
+    list_editable = ['enabled']
+    list_filter = ['enabled']
     search_fields = ['name']
     ordering = ['name']
 

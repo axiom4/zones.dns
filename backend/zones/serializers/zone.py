@@ -10,7 +10,7 @@ class ZoneSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Zone
-        fields = ['id', 'name', 'reverse', 'cidr']
+        fields = ['id', 'name', 'enabled', 'reverse', 'cidr']
 
     def get_reverse(self, z) -> bool:
         return zone_to_cidr(z.name) is not None

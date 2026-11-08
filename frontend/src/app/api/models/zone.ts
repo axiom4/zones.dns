@@ -7,6 +7,7 @@ export interface Zone {
    * Network covered by a reverse zone, e.g. 10.0.0.0/24
    */
   cidr: string | null;
+  enabled?: boolean;
   id: number;
   name: string;
 

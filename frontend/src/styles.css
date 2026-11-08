@@ -560,3 +560,4 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
 .title-row { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
 .title-row h2 { margin: 0; }
 .records button:disabled { opacity: .45; cursor: not-allowed; }
+.zone.off .zname { opacity: .45; text-decoration: line-through; }

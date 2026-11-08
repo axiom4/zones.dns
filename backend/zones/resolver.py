@@ -35,9 +35,9 @@ def _shared():
 
 def _build():
     """The data as plain values (these are what Redis stores): ([zone names], {(zone, name): [(type, value, ttl)]}, {host: [(address, ttl)]})."""
-    zones = [z.name for z in Zone.objects.all()]
+    zones = [z.name for z in Zone.objects.filter(enabled=True)]
     recs = defaultdict(list)
-    for r in Record.objects.filter(enabled=True).select_related('zone'):
+    for r in Record.objects.filter(enabled=True, zone__enabled=True).select_related('zone'):
         recs[(r.zone.name, r.name)].append((r.type, r.value, r.ttl))
     hosts = defaultdict(list)
     for h in StaticHost.objects.filter(enabled=True):

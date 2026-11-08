@@ -2392,6 +2392,8 @@ components:
           type: string
           minLength: 1
           maxLength: 253
+        enabled:
+          type: boolean
     PersonalSwitch:
       type: object
       properties:
@@ -3082,6 +3084,8 @@ components:
         name:
           type: string
           maxLength: 253
+        enabled:
+          type: boolean
         reverse:
           type: boolean
           readOnly: true
@@ -3134,6 +3138,8 @@ components:
           type: string
           minLength: 1
           maxLength: 253
+        enabled:
+          type: boolean
       required:
       - name
   securitySchemes:

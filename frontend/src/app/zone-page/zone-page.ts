@@ -1,8 +1,8 @@
 import { Component, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { recordsBulkCreate, recordsDestroy, recordsList, zonesExportRetrieve, zonesImportCreate, zonesSyncPtrCreate } from '../api/functions';
-import { ActionEnum, Record, ZoneImportResult } from '../api/models';
+import { recordsBulkCreate, recordsDestroy, recordsList, zonesExportRetrieve, zonesImportCreate, zonesPartialUpdate, zonesSyncPtrCreate } from '../api/functions';
+import { ActionEnum, Record, Zone, ZoneImportResult } from '../api/models';
 import { RecordForm } from '../record-form/record-form';
 import { ptrToIp } from '../lib/reverse';
 import { Ui } from '../services/ui';
@@ -22,6 +22,7 @@ export class ZonePage {
 
   empty = new Set<number>();
   zone = computed(() => this.store.zones().find(z => z.id === +this.id()));
+  off = computed(() => this.zone()?.enabled === false); // zone switched off: its records show as disabled and cannot be changed
   records = signal<Record[]>([]);
   filter = signal('');
   selected = signal(this.empty);
@@ -71,6 +72,11 @@ export class ZonePage {
     // drop selections of records that no longer exist
     const ids = new Set(this.records().map(r => r.id));
     this.selected.update(s => new Set([...s].filter(i => ids.has(i))));
+  }
+
+  toggleZone(z: Zone) {
+    this.selected.set(this.empty);
+    return this.ui.run(async () => { await this.api.invoke(zonesPartialUpdate, { id: z.id, body: { enabled: z.enabled === false } }); await this.store.load(); });
   }
 
   syncMsg = signal('');
