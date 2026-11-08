@@ -76,7 +76,7 @@ def clean_domain(raw):
 
 # ---------- DNS ----------
 def dns_query(name, qtype, server=None, tcp=False):
-    server = server or settings.UPSTREAM_DNS
+    server = server or settings.UPSTREAMS[0]
     try:
         reply = DNSRecord.parse(DNSRecord.question(name, qtype).send(server, 53, tcp=tcp, timeout=TIMEOUT, ipv6=':' in server))
         if reply.header.tc and not tcp:

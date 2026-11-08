@@ -2,7 +2,7 @@
 
 DNS daemon (Python/dnslib) + API (Django 6.1.3 / DRF 3.18.3) + GUI (Angular 22).
 Zones and records live in the database; the daemon reads them on every query, so changes made in the GUI take effect at once.
-Names the internal zones cannot answer are forwarded to `UPSTREAM_DNS` (default 1.1.1.1).
+Names the internal zones cannot answer are forwarded to `UPSTREAM_DNS` (default 1.1.1.1; several resolvers, comma separated, are tried in order).
 
 ## Quick start (development)
 
@@ -48,7 +48,7 @@ Every variable, with example values and comments, is in `backend/.env.example`. 
 | `SECRET_KEY` | Required and long (≥ 50 characters) with `DEBUG=false`: the server will not start with a weak key. Generate one: `python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"`. It signs sessions and sign-in tickets: if it is known, the admin can be forged. |
 | `DEBUG`, `ALLOWED_HOSTS` | `DEBUG=false` and explicit hosts in production. |
 | `DATABASE_URL` | Empty = SQLite; otherwise `postgres://…` or `mysql://…`. |
-| `UPSTREAM_DNS`, `QUERY_LOG_DAYS`, `DEFAULT_ZONE` | External resolver, days of log to keep, zone opened by default. |
+| `UPSTREAM_DNS`, `QUERY_LOG_DAYS`, `DEFAULT_ZONE` | External resolver(s), days of log to keep, zone opened by default. |
 | `LOGIN_ENCRYPTION` | `off` / `optional` / `required` (see "Encrypted sign-in"). |
 | `MFA_REQUIRED`, `MFA_ISSUER`, `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS` | Second factor and passkeys. |
 | `GUI_URL` | Where `/admin/login/` sends people (the GUI). |
@@ -139,7 +139,9 @@ REDIS_URL=redis://127.0.0.1:6379/0   # in backend/.env; empty = in-process memor
 DNS_CACHE=true                       # upstream answers cached for their TTL
 ```
 
-The DNS daemon remembers upstream answers (at most `DNS_CACHE_MAX_TTL`, 300 s; NXDOMAIN and empty answers `DNS_CACHE_NEG_TTL`, 60 s; errors never). The blacklist, suspicious-query checks and internal zones are applied **before** the cache. If Redis does not answer, the daemon asks the upstream directly. With `REDIS_URL` set, the sign-in replay protection also uses Redis.
+The DNS daemon remembers upstream answers (at most `DNS_CACHE_MAX_TTL`, 300 s; NXDOMAIN and empty answers `DNS_CACHE_NEG_TTL`, 60 s; errors never). The blacklist, suspicious-query checks and internal zones are applied **before** the cache. If Redis does not answer, the daemon asks the upstream directly.
+
+**Upstream failover.** `UPSTREAM_DNS=192.168.1.254,1.1.1.1` tries the resolvers in order: after `DNS_UPSTREAM_TIMEOUT` seconds (2) without an answer, or a SERVFAIL, it asks the next. A resolver that did not answer at all is skipped for `DNS_UPSTREAM_DOWN` seconds (30), so a dead one does not slow every query. If **all** are down, an answer that expired up to `DNS_STALE_TTL` seconds ago (86400; 0 = never) is served from the cache with a TTL of at most 30 s; the Query log shows it as `stale cache (upstream down)`. A name never asked before gets SERVFAIL. With `REDIS_URL` set, the sign-in replay protection also uses Redis.
 
 ## Production deployment
 

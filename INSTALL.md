@@ -19,7 +19,7 @@ Complete guide for a server install: PostgreSQL or MySQL/MariaDB, Redis, nginx, 
 
 - the **host name** of the GUI (for example `dns.example.com`): it goes in `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, `GUI_URL`, `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS`, the TLS certificate and the nginx `server_name`. Passkeys are bound to this name: changing it later invalidates them;
 - the **IP address** the DNS daemon will listen on, and which networks may query it;
-- the **upstream resolver** (`UPSTREAM_DNS`, default `1.1.1.1`).
+- the **upstream resolvers** (`UPSTREAM_DNS`, default `1.1.1.1`): list at least two, comma separated, so the network keeps resolving when one is down.
 
 Both gunicorn and `rundns` are single instances: the sign-in key lives in the memory of one process (see "Encrypted sign-in" in the README), and `rundns` also purges the old log once an hour.
 

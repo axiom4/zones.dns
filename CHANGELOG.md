@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- Several upstream resolvers with failover (`UPSTREAM_DNS=a,b`), and stale answers served from the cache when all are down (`DNS_STALE_TTL`).
+
 ## 1.0.0 — 2026-11-07
 
 First release of Zones.dns (backend and frontend share the version).

@@ -174,8 +174,11 @@ SPECTACULAR_SETTINGS = {
 # Zone the GUI opens by default (name, e.g. corp.lan). Empty or unknown = the user picks one.
 DEFAULT_ZONE = os.environ.get('DEFAULT_ZONE', '').strip().lower().rstrip('.')
 
-# Upstream resolver for names not served by internal zones.
+# Upstream resolvers for names not served by internal zones: one or more addresses, comma separated, tried in order.
 UPSTREAM_DNS = os.environ.get('UPSTREAM_DNS', '1.1.1.1')
+UPSTREAMS = [u.strip() for u in UPSTREAM_DNS.split(',') if u.strip()] or ['1.1.1.1']
+DNS_UPSTREAM_TIMEOUT = float(os.environ.get('DNS_UPSTREAM_TIMEOUT', '2'))  # seconds to wait for one upstream before trying the next
+DNS_UPSTREAM_DOWN = int(os.environ.get('DNS_UPSTREAM_DOWN', '30'))  # seconds an upstream that failed is skipped
 
 # Days of query history kept for statistics.
 QUERY_LOG_DAYS = int(os.environ.get('QUERY_LOG_DAYS', '7'))
@@ -198,6 +201,7 @@ CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 
 DNS_CACHE = os.environ.get('DNS_CACHE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_CACHE_MAX_TTL = int(os.environ.get('DNS_CACHE_MAX_TTL', '300'))  # seconds, upper bound for positive answers
 DNS_CACHE_NEG_TTL = int(os.environ.get('DNS_CACHE_NEG_TTL', '60'))  # NXDOMAIN / empty answers
+DNS_STALE_TTL = int(os.environ.get('DNS_STALE_TTL', '86400'))  # seconds an expired answer may still be served when every upstream is down; 0 = never
 
 # Suspicious queries (tunnelling, DGA, recon). off | log (only flag in the query log) | block (answer NXDOMAIN).
 SUSPICIOUS_MODE = os.environ.get('SUSPICIOUS_MODE', 'block')

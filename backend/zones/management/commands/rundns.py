@@ -16,7 +16,7 @@ class Command(BaseCommand):
     def add_arguments(self, p):
         p.add_argument('--address', default='127.0.0.1')
         p.add_argument('--port', type=int, default=5353)  # 53 needs root
-        p.add_argument('--upstream', default=settings.UPSTREAM_DNS)
+        p.add_argument('--upstream', default=settings.UPSTREAM_DNS, help='one or more resolvers, comma separated, tried in order')
 
     def handle(self, *a, address, port, upstream, **o):
         r = Resolver(upstream)
