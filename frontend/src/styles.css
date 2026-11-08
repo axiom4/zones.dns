@@ -161,7 +161,10 @@ button.ttlv.linkish { width: auto; text-align: right; font-size: 13px; color: va
 .more { text-align: center; padding: 1rem; }
 
 /* advanced records */
-.composer .note { width: 190px; }
+.composer .comment { flex: 1; min-width: 160px; }  /* not .note: that class is the small paragraph style */
+.composer .addr { width: 230px; }
+.composer .ttl { appearance: textfield; -moz-appearance: textfield; }
+.composer .ttl::-webkit-inner-spin-button, .composer .ttl::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .check { display: flex; align-items: center; gap: .35rem; color: var(--muted); font-weight: 600; white-space: nowrap; }
 .check input, .records input[type=checkbox] { width: auto; accent-color: var(--brand); }
 .bulk { display: flex; align-items: center; gap: .5rem; background: var(--brand-soft); border-radius: var(--radius); padding: .5rem .9rem; margin-bottom: .75rem; }
