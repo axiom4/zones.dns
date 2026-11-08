@@ -2,7 +2,7 @@
 
 DNS daemon (Python/dnslib) + API (Django 6.1.3 / DRF 3.18.3) + GUI (Angular 22).
 Zones and records live in the database; the daemon keeps a copy in memory and reloads it when the data changes, so changes made in the GUI take effect at once (within a second without Redis).
-Names the internal zones cannot answer are forwarded to `UPSTREAM_DNS` (default 1.1.1.1; several resolvers, comma separated, are tried in order).
+Internal zones are authoritative (RFC 1034/2308): inside a zone, a name that does not exist gets `NXDOMAIN` and a name without a record of the asked type gets an empty `NOERROR` answer, both with the `aa` flag and a generated SOA in the authority section; a CNAME to a name in another internal zone also returns that name's records. Only names **outside** every internal zone are forwarded to `UPSTREAM_DNS` (default 1.1.1.1; several resolvers, comma separated, are tried in order).
 
 ## Quick start (development)
 

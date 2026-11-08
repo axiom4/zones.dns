@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
-from dnslib import AAAA, QTYPE, RCODE, RR, A, DNSRecord
+from dnslib import AAAA, QTYPE, RCODE, RR, SOA, A, DNSRecord
 from dnslib.server import BaseResolver
 
 from .domains import main_domain
@@ -127,6 +127,46 @@ def lookup(qname, qtype):
     return None
 
 
+def authority(qname):
+    """(zone, exists) when qname is inside one of our zones, else None. Our zones are authoritative: a name or type they lack gets a
+    negative answer (RFC 2308), not an upstream lookup. exists is False only for a name with no records, no wildcard and nothing below it."""
+    q = qname.rstrip('.').lower()
+    zones, by_name, _ = _snapshot()
+    for zname in zones:
+        if q == zname or q.endswith('.' + zname):
+            rel = '@' if q == zname else q[: -len(zname) - 1]
+            if rel == '@' or (zname, rel) in by_name:
+                return zname, True
+            labels = rel.split('.')
+            wild = [f'*.{".".join(labels[i:])}' for i in range(1, len(labels))] + ['*']
+            if any((zname, c) in by_name for c in wild):
+                return zname, True
+            # empty non-terminal: a.b.zone exists, so b.zone exists (without data)
+            return zname, any(z == zname and n.endswith('.' + rel) for z, n in by_name)
+    return None
+
+
+def soa(zone, ttl=300):
+    """The zone has no stored SOA: build one. mname is the first apex NS (or ns.<zone>), the serial is the data version."""
+    _, by_name, _ = _snapshot()
+    ns = next((r for r in by_name.get((zone, '@'), []) if r.type == 'NS'), None)
+    mname = str(ns.to_rr()[0].rdata.label) if ns else f'ns.{zone}.'
+    times = (int(_data_version or 1) % 2**32, 3600, 600, 86400, ttl)
+    return RR(zone, QTYPE.SOA, rdata=SOA(mname, f'hostmaster.{zone}.', times), ttl=ttl)
+
+
+def negative(request, zone, exists):
+    """NODATA (name exists, no record of this type) or NXDOMAIN, authoritative, with the SOA in the authority section."""
+    reply = request.reply()
+    reply.header.aa = 1
+    if request.q.qtype == QTYPE.SOA and str(request.q.qname).rstrip('.').lower() == zone:
+        reply.add_answer(soa(zone))
+        return reply
+    reply.header.rcode = RCODE.NOERROR if exists else RCODE.NXDOMAIN
+    reply.add_auth(soa(zone))
+    return reply
+
+
 def blocked_match(qname):
     """The blacklist entry that covers qname (itself or a parent), or None. Answers are remembered per name until the data changes."""
     _snapshot()  # notices a change and empties _blocked
@@ -192,6 +232,20 @@ class Resolver(BaseResolver):
                 for r in recs:
                     for rr in r.to_rr(owner=qname if wild else None):
                         reply.add_answer(rr)
+                # A CNAME to a name in our own zones: add the target's records too, so the client gets an address
+                target, hops = recs, 0
+                while qtype != 'CNAME' and target[0].type == 'CNAME' and hops < 8:
+                    nxt = str(target[0].to_rr()[0].rdata.label).rstrip('.').lower()
+                    more = lookup(nxt, qtype)
+                    if not more:
+                        break
+                    target, hops = more[0], hops + 1
+                    for r in target:
+                        for rr in r.to_rr(owner=nxt if more[1] else None):
+                            reply.add_answer(rr)
+            elif (auth := authority(qname)):
+                outcome, via = 'local', f'zone {auth[0]} (no such {"record" if auth[1] else "name"})'
+                reply = negative(request, *auth)
             elif (match := blocked_match(qname)):
                 outcome, reply, via = 'blocked', request.reply(), f'blacklist {match}'
                 reply.header.rcode = RCODE.NXDOMAIN
