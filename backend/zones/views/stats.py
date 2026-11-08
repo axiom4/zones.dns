@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from django.db.models import Avg, Count
 from django.db.models.functions import TruncHour
@@ -27,7 +27,8 @@ class StatsView(APIView):
         except ValueError:
             hours = 24
         qs = QueryLog.objects.filter(time__gte=timezone.now() - timedelta(hours=hours))
-        per_hour = qs.annotate(hour=TruncHour('time')).values('hour').annotate(count=Count('id')).order_by('hour')
+        # UTC hours: whole-hour offsets keep the same buckets, and MySQL needs no time zone tables
+        per_hour = qs.annotate(hour=TruncHour('time', tzinfo=dt_timezone.utc)).values('hour').annotate(count=Count('id')).order_by('hour')
         return Response({
             'total': qs.count(),
             'avg_ms': qs.aggregate(a=Avg('ms'))['a'] or 0,

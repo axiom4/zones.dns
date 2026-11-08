@@ -126,7 +126,9 @@ AUTH_PASSWORD_VALIDATORS = [
 
 LANGUAGE_CODE = 'en-us'
 
-TIME_ZONE = 'UTC'
+# Times are stored in UTC and the GUI shows them in the browser's time zone. TIME_ZONE (e.g. Europe/Rome) is the zone the Django admin
+# shows them in. On MySQL/MariaDB the admin's date filter needs the time zone tables: mysql_tzinfo_to_sql /usr/share/zoneinfo | mysql -u root mysql
+TIME_ZONE = os.environ.get('TIME_ZONE', 'UTC')
 
 USE_I18N = True
 
