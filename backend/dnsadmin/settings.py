@@ -94,6 +94,8 @@ WSGI_APPLICATION = 'dnsadmin.wsgi.application'
 # before reuse. Each thread has its own: the API (gunicorn threads) and the DNS daemon (DNS_WORKERS threads) are the pool, so size
 # the database's max_connections for roughly DNS_WORKERS * 2 + gunicorn threads + a few for management commands.
 DB_CONN_MAX_AGE = int(os.environ.get('DB_CONN_MAX_AGE', '600'))
+DNS_LOG_FLUSH = float(os.environ.get('DNS_LOG_FLUSH', '1'))  # seconds between batch writes of the query log; 0 = write each row before answering
+DNS_LOG_QUEUE = int(os.environ.get('DNS_LOG_QUEUE', '50000'))  # log rows that may wait; when full, new ones are dropped
 DNS_WORKERS = int(os.environ.get('DNS_WORKERS', '16'))  # threads answering queries per protocol (UDP, TCP) = database connections kept open by the daemon
 DATABASES = {
     'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=DB_CONN_MAX_AGE, conn_health_checks=True),

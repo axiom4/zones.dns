@@ -147,7 +147,8 @@ def summarize(reply):
 
 
 class Resolver(BaseResolver):
-    def __init__(self, upstream):
+    def __init__(self, upstream, log=None):
+        self.log = log  # a LogWriter; None = write each log row at once
         self.upstream = upstream  # as given, for messages
         self.upstreams = [u.strip() for u in upstream.split(',') if u.strip()]
         self.down = {}  # upstream -> monotonic time until which it is skipped
@@ -178,8 +179,12 @@ class Resolver(BaseResolver):
                 if why:  # log-only mode
                     via += f' (suspicious: {why})'
             rcode, answers = summarize(reply)
-            QueryLog.objects.create(name=qname, domain=main_domain(qname), type=qtype, outcome=outcome, client=handler.client_address[0],
-                                    ms=int((time.monotonic() - t0) * 1000), rcode=rcode, via=via, answers=answers)
+            entry = QueryLog(name=qname, domain=main_domain(qname), type=qtype, outcome=outcome, client=handler.client_address[0],
+                             ms=int((time.monotonic() - t0) * 1000), rcode=rcode, via=via, answers=answers)
+            if self.log:
+                self.log.add(entry)  # saved in a batch a moment later
+            else:
+                entry.save()
             return reply
         finally:
             connection.close_if_unusable_or_obsolete()  # the worker thread keeps its connection for the next query, unless it broke or is older than CONN_MAX_AGE

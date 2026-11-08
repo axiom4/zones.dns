@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Query log written in batches by a background thread (`DNS_LOG_FLUSH`, `DNS_LOG_QUEUE`): answers no longer wait for the database write. Needs `manage.py migrate`.
 - Persistent database connections: the DNS daemon uses a fixed pool of worker threads (`DNS_WORKERS`) that keep their connection open, `DB_CONN_MAX_AGE` and connection health checks for the API.
 - One persistent, shared Redis connection pool per process (`REDIS_POOL_SIZE`): the daemon no longer opens a connection per query.
 - Zones, records and blacklist answers stay in the DNS daemon's memory until the data changes (change counter in the database and in Redis, `DNS_DATA_CHECK`, `DNS_DATA_TTL`; with Redis a change shows at once and a restart is warm): fewer database reads per query. Needs `manage.py migrate`.

@@ -10,6 +10,7 @@ from zones.models import QueryLog
 from zones.resolver import Resolver
 from dnslib.server import DNSServer
 
+from zones.logwriter import LogWriter
 from zones.dnsserver import PooledTCPServer, PooledUDPServer
 
 
@@ -30,7 +31,10 @@ class Command(BaseCommand):
                 redis_pool.warm(min(settings.REDIS_POOL_SIZE, 4))  # a few connections ready from the first query
             except Exception as e:
                 self.stderr.write(f'Redis is not reachable ({e}): continuing without it until it answers')
-        r = Resolver(upstream)
+        writer = LogWriter(settings.DNS_LOG_FLUSH, settings.DNS_LOG_QUEUE) if settings.DNS_LOG_FLUSH > 0 else None
+        if writer:
+            writer.start()
+        r = Resolver(upstream, log=writer)
         for cls in (PooledUDPServer, PooledTCPServer):
             cls.workers = settings.DNS_WORKERS
         servers = [DNSServer(r, port=port, address=address, tcp=t, server=PooledTCPServer if t else PooledUDPServer) for t in (False, True)]
@@ -50,3 +54,7 @@ class Command(BaseCommand):
         except KeyboardInterrupt:
             for s in servers:
                 s.stop()
+            if writer:
+                writer.stop()  # saves the rows still waiting
+                if writer.dropped:
+                    self.stderr.write(f'{writer.dropped} log rows were dropped (queue full)')
