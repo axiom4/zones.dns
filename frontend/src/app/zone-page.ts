@@ -20,6 +20,16 @@ import { ZonesStore } from './zones-store';
         </div>
         <div class="actions">
           <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records">
+          <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
+            <option value="">Sort: default</option>
+            <option value="type">Sort: type</option>
+            <option value="name">Sort: host</option>
+            <option value="value">Sort: IP / value</option>
+            <option value="ttl">Sort: TTL</option>
+          </select>
+          @if (sortBy()) {
+            <button class="ghost" (click)="desc.set(!desc())" [attr.aria-label]="desc() ? 'Descending' : 'Ascending'" [title]="desc() ? 'Descending' : 'Ascending'">{{ desc() ? '↓' : '↑' }}</button>
+          }
           <button class="primary" (click)="form.open()">New record</button>
           <button class="ghost" (click)="openImport()">Import</button>
           <button class="ghost" (click)="exportZone()">Export</button>
@@ -111,9 +121,29 @@ export class ZonePage {
   importReplace = false;
   importResult = signal<ZoneImportResult | null>(null);
 
+  sortBy = signal<'' | 'type' | 'name' | 'value' | 'ttl'>('');
+  desc = signal(false);
+
   shown = computed(() => {
     const f = this.filter().trim().toLowerCase();
-    return f ? this.records().filter(r => `${r.name} ${r.type} ${r.value} ${r.note}`.toLowerCase().includes(f)) : this.records();
+    const list = f ? this.records().filter(r => `${r.name} ${r.type} ${r.value} ${r.note}`.toLowerCase().includes(f)) : this.records();
+    const by = this.sortBy();
+    if (!by) return list;
+    const dir = this.desc() ? -1 : 1;
+    const text = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
+    const ip4 = (v: string) => /^\d+\.\d+\.\d+\.\d+$/.test(v) ? v.split('.').reduce((n, o) => n * 256 + +o, 0) : null;
+    const cmp = (a: Record, b: Record) => {
+      if (by === 'ttl') return (a.ttl ?? 0) - (b.ttl ?? 0);
+      if (by === 'value') {
+        const x = ip4(a.value), y = ip4(b.value);
+        if (x !== null && y !== null) return x - y; // IPv4 by number, so .9 comes before .10
+        if ((x === null) !== (y === null)) return x === null ? 1 : -1; // IPv4 first
+        return text(a.value, b.value);
+      }
+      return text(String(a[by] ?? ''), String(b[by] ?? ''));
+    };
+    // ties fall back to type then name so the order is stable
+    return [...list].sort((a, b) => dir * cmp(a, b) || text(a.type, b.type) || text(a.name ?? '', b.name ?? ''));
   });
   allSelected = computed(() => this.shown().length > 0 && this.shown().every(r => this.selected().has(r.id)));
 
