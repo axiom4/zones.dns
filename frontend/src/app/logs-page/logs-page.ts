@@ -38,14 +38,14 @@ export class LogsPage implements OnDestroy {
   domains = signal<{ [domain: string]: Open }>({});
   // expanded hosts: their individual log rows
   names = signal<{ [name: string]: Sub }>({});
-  q = ''; outcome = ''; type = ''; client = ''; rcode = ''; answer = ''; hours = 24; live = false;
-  grouped = true; ordering: 'last' | 'count' = 'last';
+  q = ''; outcome = ''; type = ''; client = ''; rcode = ''; answer = ''; hours = 24; live = true;
+  grouped = false; ordering: 'last' | 'count' = 'last';
   purgeHours = 168;
   purgeCount = signal<number | null>(null);
   private timer?: ReturnType<typeof setTimeout>;
   private poll?: ReturnType<typeof setInterval>;
 
-  constructor() { this.reset(); }
+  constructor() { this.reset(); this.toggleLive(); }
 
   // ---- popup with the details of a query / group, fetched only when it is opened ----
   detail = signal<Detail | null>(null);
