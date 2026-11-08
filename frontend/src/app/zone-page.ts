@@ -132,6 +132,11 @@ export class ZonePage {
     const dir = this.desc() ? -1 : 1;
     const text = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
     const ip4 = (v: string) => /^\d+\.\d+\.\d+\.\d+$/.test(v) ? v.split('.').reduce((n, o) => n * 256 + +o, 0) : null;
+    // reverse zone: the record name is only the tail of the address, so host sort uses the full IP
+    const addr = (an: string, ai: string | null, bn: string, bi: string | null) => {
+      const x = ai ? ip4(ai) : null, y = bi ? ip4(bi) : null;
+      return x !== null && y !== null ? x - y : text(ai ?? an, bi ?? bn);
+    };
     const cmp = (a: Record, b: Record) => {
       if (by === 'ttl') return (a.ttl ?? 0) - (b.ttl ?? 0);
       if (by === 'value') {
@@ -140,10 +145,11 @@ export class ZonePage {
         if ((x === null) !== (y === null)) return x === null ? 1 : -1; // IPv4 first
         return text(a.value, b.value);
       }
-      return text(String(a[by] ?? ''), String(b[by] ?? ''));
+      if (by === 'type') return text(a.type, b.type);
+      return addr(a.name ?? '', this.ipOf(a), b.name ?? '', this.ipOf(b));
     };
     // ties fall back to type then name so the order is stable
-    return [...list].sort((a, b) => dir * cmp(a, b) || text(a.type, b.type) || text(a.name ?? '', b.name ?? ''));
+    return [...list].sort((a, b) => dir * cmp(a, b) || text(a.type, b.type) || addr(a.name ?? '', this.ipOf(a), b.name ?? '', this.ipOf(b)));
   });
   allSelected = computed(() => this.shown().length > 0 && this.shown().every(r => this.selected().has(r.id)));
 
