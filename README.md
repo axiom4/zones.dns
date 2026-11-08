@@ -25,7 +25,7 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 
 | Section | What it does |
 |---|---|
-| **Zones** | Forward and reverse zones (from a CIDR), records with a guided form for 13 types (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, NAPTR, HTTPS, CAA, SSHFP, TLSA), wildcards, enable/disable, notes, bulk actions, zone file import/export, automatic PTR records. `DEFAULT_ZONE` picks the zone opened by default. |
+| **Zones** | Forward and reverse zones (from a CIDR), records with a guided form for 13 types (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, NAPTR, HTTPS, CAA, SSHFP, TLSA), wildcards, enable/disable, notes, bulk actions, zone file import/export, automatic PTR records. `DEFAULT_ZONE` picks the zone opened by default. Record list sortable by type, host, IP / value or TTL (default: by IP; in a reverse zone "IP" is the full address and "host" the PTR name). Names in a value (CNAME, MX, NS, SRV, PTR) outside the zone need the final dot: `axiom4.net.`, otherwise they are relative to the zone. |
 | **Hosts** | Static host names, like `/etc/hosts`: a name is answered with the IPv4/IPv6 address you set, whatever the real DNS says. Several addresses per name, TTL, note, enable/disable. |
 | **Blacklist** | *Personal blocks* (domains you block by hand, editable) and *Public lists* (imported, read-only, searchable). Blocked domains and their subdomains answer NXDOMAIN. |
 | **Query log** | Search and filters, grouping by domain (with subdomains), the full answer of every query, one-click blocking, a button to purge old entries. |
@@ -37,6 +37,7 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 The menu also has **Django admin ↗** (superusers only), which opens the admin: zones, records, blacklist (*Personal blocks* and *Public lists* sections), log, GeoIP cache and MFA factors.
 
 The interface adapts to phones (portrait and landscape) and tablets: below 1100 px the sidebar becomes a top bar.
+The Angular sources in `frontend/src/app/` have one folder per component (`zone-page/zone-page.ts` + `zone-page.html`), `services/` for injectable classes and `lib/` for plain helpers.
 The API is described in OpenAPI (`/api/schema/`, docs at `/api/docs/`) and the Angular client is generated from it: after any API change run `npm run api:gen` in `frontend/`.
 The interface language is English.
 
@@ -54,9 +55,13 @@ Every variable, with example values and comments, is in `backend/.env.example`. 
 | `MFA_REQUIRED`, `MFA_ISSUER`, `WEBAUTHN_RP_ID`, `WEBAUTHN_ORIGINS` | Second factor and passkeys. |
 | `GUI_URL` | Where `/admin/login/` sends people (the GUI). |
 | `SUSPICIOUS_MODE`, `SUSPICIOUS_ALLOW` (+ thresholds) | Suspicious queries. |
+| `DNS_AUTHORITATIVE` | `true` (default): a name or record type missing from an internal zone gets NXDOMAIN/NODATA. `false`: it is forwarded to the upstream (a zone that overrides only some names of a real domain). |
+| `TIME_ZONE` | Zone the Django admin shows times in (the GUI uses the browser's). MySQL/MariaDB then needs the time zone tables, see below. |
 | `REDIS_URL`, `DNS_CACHE` (+ TTLs) | Cache. |
 | `GEOIP_CITY_DB`, `GEOIP_ASN_DB`, `GEOIP_ONLINE_FALLBACK` | Geolocation. |
 | `BEHIND_PROXY`, `CSRF_TRUSTED_ORIGINS` | Behind nginx with https. |
+
+**MySQL/MariaDB and `TIME_ZONE`.** With a `TIME_ZONE` other than UTC the admin's date filters (e.g. GeoIP cache) fail with "Database returned an invalid datetime value" until the database has its time zone tables. Load them once: `mariadb-tzinfo-to-sql /usr/share/zoneinfo | sudo mariadb -u root mysql` (MySQL: `mysql_tzinfo_to_sql`). Check: `SELECT CONVERT_TZ('2026-11-08 12:00:00','UTC','Europe/Rome')` must not be `NULL`.
 
 `python manage.py check --deploy` with `BEHIND_PROXY=true` reports nothing except HSTS for subdomains and preloading (choices that are hard to undo, not enabled).
 
@@ -168,7 +173,7 @@ Summary: gunicorn (**one worker only**, the sign-in key lives in process memory)
 
 ## Tests
 
-The project has no automated tests. The features were tried by hand (Django test client, `curl`, headless Chrome, also with a virtual authenticator for passkeys and phone and tablet emulation).
+Run `python manage.py test zones` in `backend/` (resolver: CNAME chasing, NXDOMAIN/NODATA/SOA, `DNS_AUTHORITATIVE`). The rest was tried by hand (Django test client, `curl`, headless Chrome, also with a virtual authenticator for passkeys and phone and tablet emulation).
 
 ## Licence
 

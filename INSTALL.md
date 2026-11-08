@@ -143,6 +143,10 @@ sudo -u dns /opt/dns/.venv/bin/pip install mysqlclient
 ```
 DATABASE_URL=mysql://dns:change-me@127.0.0.1:3306/dns
 ```
+With a `TIME_ZONE` other than UTC, load the time zone tables once, or the admin's date filters fail ("Database returned an invalid datetime value"):
+```
+mariadb-tzinfo-to-sql /usr/share/zoneinfo | sudo mariadb -u root mysql     # MySQL: mysql_tzinfo_to_sql
+```
 
 Percent-encode special characters in the password inside the URL (`@` → `%40`, `/` → `%2F`, `:` → `%3A`). Keep the database on `127.0.0.1` or a private network; if it is on another host, use TLS and allow only the app server. Supported database versions are those of Django 6.1 ([docs](https://docs.djangoproject.com/en/6.1/ref/databases/)). Back it up (`pg_dump` / `mariadb-dump`): zones, records, users and second factors live only there.
 
@@ -335,6 +339,8 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 | The Django admin sends you back to the GUI | Expected: it opens only from **Django admin ↗** for superusers, and the GUI and `/admin` must share the same address. |
 | `OSError: Address already in use` on port 53 | Another resolver (often `systemd-resolved` on `127.0.0.53`): bind `--address` to the server IP or disable its stub listener. |
 | `PermissionError` on port 53 | `setcap cap_net_bind_service` missing, or lost after a Python upgrade (step 8). |
+| `Database returned an invalid datetime value` in the admin | The database lacks time zone tables: see step 4 (`mariadb-tzinfo-to-sql`), or set `TIME_ZONE=UTC`. |
+| A `.env` change has no effect | Restart **both** programs: `sudo supervisorctl restart dns:*` (`dns:dns-api` and `dns:dns-daemon`). Only `backend/.env` is read, not `.env.prod`. |
 | `mysqlclient` fails to build | Install `libmariadb-dev` (or `default-libmysqlclient-dev`), `pkg-config` and `build-essential`. |
 | `ModuleNotFoundError: psycopg` / `MySQLdb` | The driver of step 4 is not installed in `/opt/dns/.venv`. |
 | HTTP/3 does not work | UDP 443 is blocked, or nginx lacks `http_v3`; browsers fall back to HTTP/2 by themselves, so the site still works. |
