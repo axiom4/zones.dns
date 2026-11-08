@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Statistics: the chart follows the chosen period (per minute for the last hour, per hour for 24 h, per day for 7 and 30 days: 7 and 30 bars, today included, days in the browser's time zone), with empty buckets shown as zero. The stats API takes an optional `since`. API: `per_hour` replaced by `series` + `step`.
 - Static hosts (like `/etc/hosts`): exact names answered with fixed IPv4/IPv6 addresses before zones, blacklist and upstream; GUI page, API (`/api/hosts/`) and Django admin; loaded in the in-memory/Redis copy and refreshed on every change. Needs `manage.py migrate`.
 - Prefetch: cached answers that are about to expire and still asked for are renewed in the background (`DNS_PREFETCH*`); cached TTLs now count down.
 - Query log written in batches by a background thread (`DNS_LOG_FLUSH`, `DNS_LOG_QUEUE`): answers no longer wait for the database write. Needs `manage.py migrate`.

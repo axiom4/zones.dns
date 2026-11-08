@@ -1048,6 +1048,13 @@ paths:
         schema:
           type: integer
         description: Time window in hours (default 24, max 720)
+      - in: query
+        name: since
+        schema:
+          type: string
+          format: date-time
+        description: Start of the window (at most 720 hours back); replaces hours.
+          For windows that begin at a local midnight
       tags:
       - stats
       security:
@@ -1486,6 +1493,18 @@ components:
           maxLength: 253
       required:
       - name
+    Bucket:
+      type: object
+      properties:
+        t:
+          type: string
+          format: date-time
+          description: Start of the minute or hour (UTC)
+        count:
+          type: integer
+      required:
+      - count
+      - t
     BulkActionRequest:
       type: object
       properties:
@@ -1904,17 +1923,6 @@ components:
       - prefix
       - ptr
       - registry
-    Hour:
-      type: object
-      properties:
-        hour:
-          type: string
-          format: date-time
-        count:
-          type: integer
-      required:
-      - count
-      - hour
     Hsts:
       type: object
       properties:
@@ -2750,15 +2758,19 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Count'
-        per_hour:
+        step:
+          type: integer
+          description: 'Length of one series entry in seconds: 60 or 3600'
+        series:
           type: array
           items:
-            $ref: '#/components/schemas/Hour'
+            $ref: '#/components/schemas/Bucket'
       required:
       - avg_ms
       - by_outcome
       - by_type
-      - per_hour
+      - series
+      - step
       - top_blocked
       - top_clients
       - top_domains

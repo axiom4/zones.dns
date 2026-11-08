@@ -126,9 +126,9 @@ main header .actions { display: flex; gap: .5rem; }
 .col { position: relative; flex: 1; height: 100%; display: flex; align-items: end; min-width: 3px; }
 .col b { position: absolute; left: 50%; bottom: calc(var(--h, 0%) + 2px); transform: translateX(-50%); font-size: 11px; font-weight: 600; color: var(--muted, #667); white-space: nowrap; pointer-events: none; }
 .col span { position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); font-size: 10.5px; color: var(--muted, #667); white-space: nowrap; }
-.chart.dense .col b, .chart.dense .col span { display: none; }
-.chart.dense .col:hover b, .chart.dense .col:hover span { display: block; background: var(--surface); padding: 0 .25rem; border-radius: 4px; z-index: 2; }
-.col i { display: block; width: 100%; max-width: 72px; margin-inline: auto; min-height: 3px; background: var(--brand); border-radius: 4px 4px 0 0; }
+.chart.dense .col b, .col span.off { display: none; } /* many bars: no counts, and labels only on some of them (all show on hover) */
+.chart.dense .col:hover b, .col:hover span.off { display: block; background: var(--surface); padding: 0 .25rem; border-radius: 4px; z-index: 2; }
+.col i { display: block; width: 100%; min-height: 3px; background: var(--brand); border-radius: 4px 4px 0 0; }
 .col:hover i { filter: brightness(1.25); }
 
 .row { position: relative; display: flex; align-items: center; gap: .6rem; padding: .35rem .5rem; border-radius: 8px; overflow: hidden; }

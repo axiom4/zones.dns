@@ -31,7 +31,7 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 | **Query log** | Search and filters, grouping by domain (with subdomains), the full answer of every query, one-click blocking, a button to purge old entries. |
 | **Geolocation** | Where DNS answers point: countries, networks, cities and a map (see below). |
 | **Domain audit** | Public information about a domain: DNS, DNSSEC, mail (SPF/DMARC/DKIM/MTA-STS), RDAP, TLS, web headers, subdomains; every test has its own "Output". |
-| **Statistics** | Queries per hour, most requested domains and most active clients, query types, timings. |
+| **Statistics** | Queries over time (one bar per minute, hour or day, following the chosen period: 7 and 30 days are whole calendar days, today included), most requested domains and most active clients, query types, timings. |
 | **Security** | The user's second factors: authenticator app and passkeys. |
 
 The menu also has **Django admin ↗** (superusers only), which opens the admin: zones, records, blacklist (*Personal blocks* and *Public lists* sections), log, GeoIP cache and MFA factors.

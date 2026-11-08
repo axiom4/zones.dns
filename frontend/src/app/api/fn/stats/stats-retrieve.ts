@@ -15,12 +15,18 @@ export interface StatsRetrieve$Params {
  * Time window in hours (default 24, max 720)
  */
   hours?: number;
+
+/**
+ * Start of the window (at most 720 hours back); replaces hours. For windows that begin at a local midnight
+ */
+  since?: string;
 }
 
 export function statsRetrieve(http: HttpClient, rootUrl: string, params?: StatsRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<Stats>> {
   const rb = new RequestBuilder(rootUrl, statsRetrieve.PATH, 'get');
   if (params) {
     rb.query('hours', params.hours, {});
+    rb.query('since', params.since, {});
   }
 
   return http.request(

@@ -6,8 +6,8 @@ class CountSerializer(serializers.Serializer):
     count = serializers.IntegerField()
 
 
-class HourSerializer(serializers.Serializer):
-    hour = serializers.DateTimeField()
+class BucketSerializer(serializers.Serializer):
+    t = serializers.DateTimeField(help_text='Start of the minute or hour (UTC)')
     count = serializers.IntegerField()
 
 
@@ -19,4 +19,5 @@ class StatsSerializer(serializers.Serializer):
     top_domains = CountSerializer(many=True)
     top_blocked = CountSerializer(many=True)
     top_clients = CountSerializer(many=True)
-    per_hour = HourSerializer(many=True)
+    step = serializers.IntegerField(help_text='Length of one series entry in seconds: 60 or 3600')
+    series = BucketSerializer(many=True)
