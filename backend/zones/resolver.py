@@ -1,6 +1,7 @@
 import threading
 import time
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from django.core.cache import cache
@@ -152,6 +153,8 @@ class Resolver(BaseResolver):
         self.upstream = upstream  # as given, for messages
         self.upstreams = [u.strip() for u in upstream.split(',') if u.strip()]
         self.down = {}  # upstream -> monotonic time until which it is skipped
+        self._prefetch_pool = ThreadPoolExecutor(max_workers=settings.DNS_PREFETCH_WORKERS, thread_name_prefix='dns-prefetch')
+        self._prefetch_room = threading.BoundedSemaphore(settings.DNS_PREFETCH_WORKERS * 8)
 
     def resolve(self, request, handler):
         connection.close_if_health_check_failed()  # a connection the database dropped while idle is replaced before use
@@ -191,12 +194,22 @@ class Resolver(BaseResolver):
 
     def forward(self, request):
         """(reply, via). Answers are cached for their TTL; a cache failure (Redis down) just means asking upstream.
+        A cached answer that is about to expire and is still being asked for is renewed in the background (DNS_PREFETCH).
         When every upstream is down an expired answer is served instead, if we still have one (DNS_STALE_TTL)."""
         key = f'dns:{QTYPE[request.q.qtype]}:{str(request.q.qname).lower()}'
         if settings.DNS_CACHE:
-            raw = self._cache_get(key)
-            if raw:
-                return self._parse(raw, request), 'cache'
+            entry = self._cache_get(key)
+            if entry:
+                if isinstance(entry, (bytes, bytearray)):  # written by an older version: no expiry time stored
+                    return self._parse(entry, request), 'cache'
+                raw, expires, ttl = entry
+                remaining = expires - time.time()
+                reply = self._parse(raw, request)
+                for rr in reply.rr:
+                    rr.ttl = max(1, min(rr.ttl, int(remaining)))  # count the TTL down, so clients never keep it longer than the origin allowed
+                if settings.DNS_PREFETCH and ttl >= 10 and remaining < ttl * settings.DNS_PREFETCH_AT:
+                    self._prefetch(key, request)
+                return reply, 'cache'
         reply, used = self.ask_upstream(request)
         if used is None:  # nobody answered
             raw = settings.DNS_CACHE and settings.DNS_STALE_TTL and self._cache_get('stale:' + key)
@@ -206,19 +219,43 @@ class Resolver(BaseResolver):
                     rr.ttl = min(rr.ttl, 30)  # clients must ask again soon
                 return reply, 'stale cache (upstream down)'
             return reply, f'upstream {self.upstream} (no answer)'
-        if settings.DNS_CACHE and reply.header.rcode in (RCODE.NOERROR, RCODE.NXDOMAIN) and not reply.header.tc:
-            # shortcut: cached TTLs are not counted down, so a client may see a record live up to 2x its TTL (capped by DNS_CACHE_MAX_TTL)
+        if settings.DNS_CACHE:
+            self._store(key, reply)
+        return reply, f'upstream {used}'
+
+    @staticmethod
+    def _store(key, reply):
+        if reply.header.rcode in (RCODE.NOERROR, RCODE.NXDOMAIN) and not reply.header.tc:
             ttl = min([rr.ttl for rr in reply.rr] or [settings.DNS_CACHE_NEG_TTL])
             ttl = min(ttl, settings.DNS_CACHE_MAX_TTL) if reply.rr else min(ttl, settings.DNS_CACHE_NEG_TTL)
             if ttl > 0:
                 try:
                     raw = reply.pack()
-                    cache.set(key, raw, ttl)
+                    cache.set(key, (raw, time.time() + ttl, ttl), ttl)
                     if settings.DNS_STALE_TTL:
                         cache.set('stale:' + key, raw, settings.DNS_STALE_TTL)
                 except Exception:
                     pass  # cache down: the answer was still delivered, just not stored
-        return reply, f'upstream {used}'
+
+    def _prefetch(self, key, request):
+        """Ask the upstream again for a name that is still wanted, so the next query finds a fresh answer. Once per name at a time."""
+        try:
+            if not cache.add('pf:' + key, 1, 10):  # another thread (or daemon) is already on it; also retries a failed one after 10 s
+                return
+        except Exception:
+            return
+        if not self._prefetch_room.acquire(blocking=False):
+            return  # too many renewals under way
+        q = DNSRecord.question(str(request.q.qname), QTYPE[request.q.qtype])
+        self._prefetch_pool.submit(self._renew, key, q)
+
+    def _renew(self, key, question):
+        try:
+            reply, used = self.ask_upstream(question)
+            if used is not None:  # if every upstream is down, the old entry simply expires (and the stale copy stays)
+                self._store(key, reply)
+        finally:
+            self._prefetch_room.release()
 
     @staticmethod
     def _cache_get(key):

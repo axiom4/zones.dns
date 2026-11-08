@@ -216,6 +216,9 @@ CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 
 DNS_CACHE = os.environ.get('DNS_CACHE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_CACHE_MAX_TTL = int(os.environ.get('DNS_CACHE_MAX_TTL', '300'))  # seconds, upper bound for positive answers
 DNS_CACHE_NEG_TTL = int(os.environ.get('DNS_CACHE_NEG_TTL', '60'))  # NXDOMAIN / empty answers
+DNS_PREFETCH = os.environ.get('DNS_PREFETCH', 'true').lower() in ('1', 'true', 'yes', 'on')  # renew cached answers that are about to expire while still asked for
+DNS_PREFETCH_AT = float(os.environ.get('DNS_PREFETCH_AT', '0.2'))  # ...when less than this fraction of their TTL is left
+DNS_PREFETCH_WORKERS = int(os.environ.get('DNS_PREFETCH_WORKERS', '4'))  # threads asking the upstream for renewals
 DNS_DATA_CHECK = float(os.environ.get('DNS_DATA_CHECK', '1'))  # seconds between looks at the change counter: a GUI change reaches the DNS daemon within this time
 DNS_DATA_TTL = float(os.environ.get('DNS_DATA_TTL', '300'))  # a copy of zones/records/blacklist older than this is reloaded even if no change was seen
 DNS_STALE_TTL = int(os.environ.get('DNS_STALE_TTL', '86400'))  # seconds an expired answer may still be served when every upstream is down; 0 = never

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Prefetch: cached answers that are about to expire and still asked for are renewed in the background (`DNS_PREFETCH*`); cached TTLs now count down.
 - Query log written in batches by a background thread (`DNS_LOG_FLUSH`, `DNS_LOG_QUEUE`): answers no longer wait for the database write. Needs `manage.py migrate`.
 - Persistent database connections: the DNS daemon uses a fixed pool of worker threads (`DNS_WORKERS`) that keep their connection open, `DB_CONN_MAX_AGE` and connection health checks for the API.
 - One persistent, shared Redis connection pool per process (`REDIS_POOL_SIZE`): the daemon no longer opens a connection per query.
