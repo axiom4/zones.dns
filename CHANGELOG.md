@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.1 — 2026-11-08
 - RFC 6303: reverse lookups (PTR) of private and special addresses (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 127/8, `fc00::/7`, `fe80::/10`, `::1`) that no zone answers get NXDOMAIN from the daemon, with the `aa` flag and an SOA, and never go to the upstream (routers often answer SERVFAIL). `DNS_LOCAL_REVERSE=false` turns it off. A local reverse zone still answers first.
 - Deleting a zone needs a second factor (authenticator code or passkey) from the already signed-in user, no password: step-up endpoints `/api/mfa/stepup/…` give a one-use grant (2 minutes, one zone) that `DELETE /api/zones/<id>/` requires in `X-MFA-Grant`. Users with no second factor are not asked.
 - Zones can be switched off and on one by one (`enabled` flag; switch next to the zone name in the GUI, and in the Django admin): a disabled zone and its records are kept but not served, its names are answered as if the zone did not exist; the GUI shows its records as disabled and read-only. Needs `manage.py migrate` (0017).
