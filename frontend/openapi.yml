@@ -1476,6 +1476,8 @@ components:
         name:
           type: string
           maxLength: 253
+        enabled:
+          type: boolean
         created:
           type: string
           format: date-time
@@ -1491,6 +1493,8 @@ components:
           type: string
           minLength: 1
           maxLength: 253
+        enabled:
+          type: boolean
       required:
       - name
     Bucket:
@@ -2252,6 +2256,8 @@ components:
           type: string
           minLength: 1
           maxLength: 253
+        enabled:
+          type: boolean
     PatchedRecordRequest:
       type: object
       properties:

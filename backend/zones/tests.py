@@ -58,3 +58,16 @@ class AuthoritativeTests(TestCase):
         with override_settings(DNS_AUTHORITATIVE=False):
             r = self.ask('nope.lan')  # upstream 127.0.0.1:9 is dead, so a forwarded query ends in SERVFAIL, not our NXDOMAIN
         self.assertEqual(r.header.rcode, 2)
+
+
+class BlocklistEnabledTests(TestCase):
+    def test_disabled_block_does_not_block(self):
+        from .models import BlockedDomain
+        from .resolver import blocked_match
+        b = BlockedDomain.objects.create(name='ads.example.com')
+        resolver._data = None
+        self.assertEqual(blocked_match('x.ads.example.com'), 'ads.example.com')
+        b.enabled = False
+        b.save()  # signals bump the data version, which empties the memory copy
+        resolver._blocked.clear()
+        self.assertIsNone(blocked_match('x.ads.example.com'))

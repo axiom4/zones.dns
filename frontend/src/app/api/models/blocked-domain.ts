@@ -3,6 +3,7 @@
 
 export interface BlockedDomain {
   created: string;
+  enabled?: boolean;
   id: number;
   name: string;
 }

@@ -182,7 +182,7 @@ def blocked_match(qname):
             pass
     labels = qname.rstrip('.').lower().split('.')
     suffixes = ['.'.join(labels[i:]) for i in range(len(labels))]
-    hit = BlockedDomain.objects.filter(name__in=suffixes).order_by('-name').first()
+    hit = BlockedDomain.objects.filter(enabled=True, name__in=suffixes).order_by('-name').first()
     if len(_blocked) > 20000:  # bounded: names that were asked once are the bulk
         _blocked.clear()
     _blocked[qname] = match = hit.name if hit else None

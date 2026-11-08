@@ -4,6 +4,7 @@ from django.db import models
 class BlockedDomain(models.Model):
     name = models.CharField(max_length=253, unique=True)  # blocks the name and all its subdomains
     created = models.DateTimeField(auto_now_add=True)
+    enabled = models.BooleanField(default=True)  # disabled entries are kept but do not block
     source = models.CharField(max_length=10, default='manual', db_index=True)  # manual = added by hand; list = imported by import_blocklist
 
 

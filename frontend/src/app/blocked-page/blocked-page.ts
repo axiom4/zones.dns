@@ -30,6 +30,9 @@ export class BlockedPage {
   add() {
     return this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name: this.name } }); this.name = ''; await this.load(); });
   }
+  toggle(b: BlockedDomain) {
+    return this.ui.run(async () => { await this.api.invoke(blockedPartialUpdate, { id: b.id, body: { enabled: b.enabled === false } }); await this.load(); });
+  }
   del(b: BlockedDomain) {
     this.ui.ask(`Unblock ${b.name}?`, 'The domain and its subdomains will resolve again.', () =>
       this.ui.run(async () => { await this.api.invoke(blockedDestroy, { id: b.id }); await this.load(); }));

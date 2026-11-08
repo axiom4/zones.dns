@@ -6,7 +6,7 @@ from ..models import BlockedDomain
 class BlockedDomainSerializer(serializers.ModelSerializer):
     class Meta:
         model = BlockedDomain
-        fields = ['id', 'name', 'created']
+        fields = ['id', 'name', 'enabled', 'created']
 
     def validate_name(self, v):
         v = v.strip().strip('.').lower()

@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Personal blocks can be switched off and on (`enabled` flag, GUI switch and Django admin): a disabled block is kept but does not block. Needs `manage.py migrate` (0015).
 - Internal zones are authoritative: a name missing from a zone gets NXDOMAIN, a name without that record type gets NODATA (empty NOERROR), both with `aa` and a generated SOA (RFC 2308) instead of going to the upstream; `SOA` queries at the zone apex are answered. **Behaviour change:** names under an internal zone that have no record are no longer forwarded; `DNS_AUTHORITATIVE=false` brings the forwarding back.
 - A CNAME that points to a name in our own zones now also returns the target's records (e.g. `www CNAME @` answers with the apex A record).
 - Zone records can be sorted by type, host, IP / value (IPv4 numerically, then IPv6 and names) or TTL, ascending or descending.

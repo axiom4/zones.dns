@@ -27,7 +27,7 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 |---|---|
 | **Zones** | Forward and reverse zones (from a CIDR), records with a guided form for 13 types (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, NAPTR, HTTPS, CAA, SSHFP, TLSA), wildcards, enable/disable, notes, bulk actions, zone file import/export, automatic PTR records. `DEFAULT_ZONE` picks the zone opened by default. Record list sortable by type, host, IP / value or TTL (default: by IP; in a reverse zone "IP" is the full address and "host" the PTR name). Names in a value (CNAME, MX, NS, SRV, PTR) outside the zone need the final dot: `axiom4.net.`, otherwise they are relative to the zone. |
 | **Hosts** | Static host names, like `/etc/hosts`: a name is answered with the IPv4/IPv6 address you set, whatever the real DNS says. Several addresses per name, TTL, note, enable/disable. |
-| **Blacklist** | *Personal blocks* (domains you block by hand, editable) and *Public lists* (imported, read-only, searchable). Blocked domains and their subdomains answer NXDOMAIN. |
+| **Blacklist** | *Personal blocks* (domains you block by hand, editable, with an on/off switch each) and *Public lists* (imported, read-only, searchable). Blocked domains and their subdomains answer NXDOMAIN. |
 | **Query log** | Search and filters, grouping by domain (with subdomains), the full answer of every query, one-click blocking, a button to purge old entries. |
 | **Geolocation** | Where DNS answers point: countries, networks, cities and a map (see below). |
 | **Domain audit** | Public information about a domain: DNS, DNSSEC, mail (SPF/DMARC/DKIM/MTA-STS), RDAP, TLS, web headers, subdomains; every test has its own "Output". |

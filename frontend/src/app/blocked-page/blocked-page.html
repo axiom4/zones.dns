@@ -1,7 +1,7 @@
 <header>
   <div>
     <h2>Personal blocks</h2>
-    <p class="soft">{{ blocked().length }} {{ blocked().length === 1 ? 'blocked domain' : 'blocked domains' }}. The domain and its subdomains answer NXDOMAIN; internal zones are never blocked.</p>
+    <p class="soft">{{ blocked().length }} {{ blocked().length === 1 ? 'blocked domain' : 'blocked domains' }}. The domain and its subdomains answer NXDOMAIN (switch a block off to keep it without blocking); internal zones are never blocked.</p>
   </div>
   @if (blocked().length > 5) {
     <div class="actions"><input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search blocks" aria-label="Search blocks" autocomplete="off"></div>
@@ -13,7 +13,7 @@
 </form>
 <ul class="records blocked">
   @for (b of shown(); track b.id) {
-    <li>
+    <li [class.off]="b.enabled === false">
       @if (editing() === b.id) {
         <form class="grow inline" (ngSubmit)="save(b)">
           <input class="grow" name="e" [(ngModel)]="draft" autocomplete="off" aria-label="New name" required autofocus>
@@ -23,6 +23,8 @@
       } @else {
         <span class="rvalue">{{ b.name }}</span>
         <span class="ttlv wide">{{ b.created.slice(0, 10) }}</span>
+        <button class="switch" role="switch" [attr.aria-checked]="b.enabled !== false" (click)="toggle(b)"
+                [title]="b.enabled === false ? 'Disabled: click to block again' : 'Enabled: click to stop blocking'"><i></i></button>
         <button class="mini" (click)="edit(b)" [attr.aria-label]="'Edit ' + b.name">Edit</button>
         <button class="icon" (click)="del(b)" [attr.aria-label]="'Unblock ' + b.name">✕</button>
       }
