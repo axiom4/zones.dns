@@ -7,6 +7,7 @@ import { Api } from '../api/api';
 import { adminTicketCreate, meRetrieve } from '../api/functions';
 import { Auth } from '../services/auth';
 import { cidrToZone } from '../lib/reverse';
+import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 import { ZonesStore } from '../services/zones-store';
 
@@ -17,11 +18,14 @@ import { ZonesStore } from '../services/zones-store';
 })
 export class Shell implements AfterViewInit {
   ui = inject(Ui);
+  stepUp = inject(StepUp);
+  code = '';
   store = inject(ZonesStore);
   private auth = inject(Auth);
   private api = inject(Api);
   private router = inject(Router);
   private dlg = viewChild.required<ElementRef<HTMLDialogElement>>('dlg');
+  private stepDlg = viewChild.required<ElementRef<HTMLDialogElement>>('step');
   private revDlg = viewChild.required<ElementRef<HTMLDialogElement>>('rev');
   superuser = signal(false); // the Django admin link is for superusers
   newZone = '';
@@ -41,7 +45,8 @@ export class Shell implements AfterViewInit {
     this.router.events.pipe(filter(e => e instanceof NavigationEnd)).subscribe(() => this.ui.error.set(''));
   }
 
-  ngAfterViewInit() { this.ui.dlg = this.dlg().nativeElement; }
+  ngAfterViewInit() { this.ui.dlg = this.dlg().nativeElement; this.stepUp.dlg = this.stepDlg().nativeElement; }
+  async confirmCode() { await this.stepUp.code(this.code); this.code = ''; }
 
   async addZone() { if (await this.store.add(this.newZone)) this.newZone = ''; }
   zonePreview = () => cidrToZone(this.cidr);

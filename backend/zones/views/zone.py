@@ -1,11 +1,11 @@
 from django.http import HttpResponse
 from drf_spectacular.types import OpenApiTypes
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .. import reverse, zonefile
+from .. import mfa, reverse, zonefile
 from ..models import Zone
 from ..serializers import (ReverseZoneRequestSerializer, SyncPtrResultSerializer, ZoneImportResultSerializer,
                            ZoneImportSerializer, ZoneSerializer)
@@ -14,6 +14,17 @@ from ..serializers import (ReverseZoneRequestSerializer, SyncPtrResultSerializer
 class ZoneViewSet(viewsets.ModelViewSet):
     queryset = Zone.objects.order_by('name')
     serializer_class = ZoneSerializer
+
+    @extend_schema(parameters=[OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
+                                                description='Proof of a second factor for this deletion (POST /api/mfa/stepup/...). Required when the user has a second factor.')])
+    def destroy(self, request, *args, **kwargs):
+        zone = self.get_object()
+        if mfa.methods(request.user):  # someone who has no second factor cannot be asked for one
+            try:
+                mfa.use_grant(request.user, f'zone-delete:{zone.pk}', request.headers.get('X-MFA-Grant'))
+            except mfa.MfaError as e:
+                return Response({'detail': e.text, 'mfa_required': True}, status=status.HTTP_403_FORBIDDEN)
+        return super().destroy(request, *args, **kwargs)
 
     @extend_schema(responses={(200, 'text/plain'): OpenApiTypes.STR})
     @action(detail=True, methods=['get'])

@@ -84,6 +84,8 @@ The key is downloaded from an unauthenticated endpoint: it protects against pass
 
 After the password a second factor is required: a code from an authenticator app (TOTP) or a **passkey**. With `MFA_REQUIRED=true` whoever has none sets one up at the first sign-in; afterwards they manage them in the **Security** page (the last factor cannot be removed while MFA is mandatory). Five wrong codes lock attempts for five minutes; a code that was already used does not work twice.
 
+**Deleting a zone** asks for the second factor again: after the usual confirmation a window asks for a fresh authenticator code or a passkey, with no user name or password (the user is already signed in). The server accepts the deletion only with a one-use proof (valid 2 minutes, for that zone only) that the factor was just checked (`X-MFA-Grant` header; the steps are `/api/mfa/stepup/…`, inside the encrypted channel when `LOGIN_ENCRYPTION` is on). A user with no second factor set up (possible only with `MFA_REQUIRED=false`) deletes with the normal confirmation. A code already used to sign in is refused: wait for the next one.
+
 ```sh
 python manage.py mfa_reset <user>   # lost phone or key: the user starts the setup again
 ```

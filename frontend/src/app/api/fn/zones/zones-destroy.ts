@@ -11,6 +11,11 @@ import { RequestBuilder } from '../../request-builder';
 export interface ZonesDestroy$Params {
 
 /**
+ * Proof of a second factor for this deletion (POST /api/mfa/stepup/...). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
+
+/**
  * A unique integer value identifying this zone.
  */
   id: number;
@@ -19,6 +24,7 @@ export interface ZonesDestroy$Params {
 export function zonesDestroy(http: HttpClient, rootUrl: string, params: ZonesDestroy$Params, context?: HttpContext): Observable<StrictHttpResponse<void>> {
   const rb = new RequestBuilder(rootUrl, zonesDestroy.PATH, 'delete');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.path('id', params.id, {});
   }
 

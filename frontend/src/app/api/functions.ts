@@ -73,6 +73,12 @@ export type { MfaPasskeyRegisterOptionsCreate$Params as MfaPasskeyRegisterOption
 export { mfaPasskeyRegisterOptionsCreate as mfaPasskeyRegisterOptionsCreate } from './fn/mfa/mfa-passkey-register-options-create';
 export type { MfaPasskeyVerifyCreate$Params as MfaPasskeyVerifyCreate$Params } from './fn/mfa/mfa-passkey-verify-create';
 export { mfaPasskeyVerifyCreate as mfaPasskeyVerifyCreate } from './fn/mfa/mfa-passkey-verify-create';
+export type { MfaStepupPasskeyOptionsCreate$Params as MfaStepupPasskeyOptionsCreate$Params } from './fn/mfa/mfa-stepup-passkey-options-create';
+export { mfaStepupPasskeyOptionsCreate as mfaStepupPasskeyOptionsCreate } from './fn/mfa/mfa-stepup-passkey-options-create';
+export type { MfaStepupPasskeyVerifyCreate$Params as MfaStepupPasskeyVerifyCreate$Params } from './fn/mfa/mfa-stepup-passkey-verify-create';
+export { mfaStepupPasskeyVerifyCreate as mfaStepupPasskeyVerifyCreate } from './fn/mfa/mfa-stepup-passkey-verify-create';
+export type { MfaStepupTotpCreate$Params as MfaStepupTotpCreate$Params } from './fn/mfa/mfa-stepup-totp-create';
+export { mfaStepupTotpCreate as mfaStepupTotpCreate } from './fn/mfa/mfa-stepup-totp-create';
 export type { MfaTotpCreate$Params as MfaTotpCreate$Params } from './fn/mfa/mfa-totp-create';
 export { mfaTotpCreate as mfaTotpCreate } from './fn/mfa/mfa-totp-create';
 export type { MfaTotpConfirmCreate$Params as MfaTotpConfirmCreate$Params } from './fn/mfa/mfa-totp-confirm-create';

@@ -26,6 +26,22 @@ class MfaCredentialSerializer(MfaTicketSerializer):
     name = serializers.CharField(required=False, allow_blank=True, max_length=80)
 
 
+class StepUpScopeSerializer(MfaTicketSerializer):
+    scope = serializers.CharField(help_text='The action to confirm, e.g. zone-delete:7')
+
+
+class StepUpCodeSerializer(StepUpScopeSerializer):
+    code = serializers.CharField(max_length=10)
+
+
+class StepUpCredentialSerializer(StepUpScopeSerializer):
+    credential = serializers.JSONField(help_text='PublicKeyCredential.toJSON() from the browser')
+
+
+class StepUpGrantSerializer(serializers.Serializer):
+    grant = serializers.CharField(help_text='One-use proof (2 minutes) sent in the X-MFA-Grant header of the confirmed request')
+
+
 class MfaOptionsSerializer(serializers.Serializer):
     options = serializers.JSONField(help_text='WebAuthn options for PublicKeyCredential.parse*OptionsFromJSON()')
 

@@ -107,3 +107,47 @@ class ZoneEnabledTests(TestCase):
         resolver._data = None
         self.assertIsNone(resolver.lookup('h.off.lan', 'A'))
         self.assertIsNone(resolver.authority('nope.off.lan'))  # no NXDOMAIN from a zone that is off: the name is forwarded
+
+
+class ZoneDeleteMfaTests(TestCase):
+    def setUp(self):
+        import time
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        from . import mfa
+        from .models import TotpDevice
+        self.mfa, self.time = mfa, time
+        self.user = get_user_model().objects.create_user('u', password='x', is_staff=True)
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+        self.zone = Zone.objects.create(name='del.lan')
+        resolver._data = None
+        self.TotpDevice = TotpDevice
+
+    def totp(self):
+        dev = self.TotpDevice.objects.create(user=self.user, secret=self.mfa.new_secret(), confirmed=True)
+        return lambda: self.mfa.totp_code(dev.secret, int(self.time.time() // 30))
+
+    def test_no_factor_set_up_deletes_without_grant(self):
+        self.assertEqual(self.api.delete(f'/api/zones/{self.zone.pk}/').status_code, 204)
+
+    def test_with_a_factor_a_grant_is_needed_and_works_once(self):
+        from django.test import override_settings
+        code = self.totp()
+        self.assertEqual(self.api.delete(f'/api/zones/{self.zone.pk}/').status_code, 403)
+        with override_settings(LOGIN_ENCRYPTION='off'):
+            r = self.api.post('/api/mfa/stepup/totp/', {'code': code(), 'scope': f'zone-delete:{self.zone.pk}'}, format='json')
+        self.assertEqual(r.status_code, 200)
+        grant = r.json()['grant']
+        other = Zone.objects.create(name='other.lan')
+        self.assertEqual(self.api.delete(f'/api/zones/{other.pk}/', HTTP_X_MFA_GRANT=grant).status_code, 403)  # grant is for another zone
+        self.assertEqual(self.api.delete(f'/api/zones/{self.zone.pk}/', HTTP_X_MFA_GRANT=grant).status_code, 204)
+        again = Zone.objects.create(name='del.lan')
+        self.assertEqual(self.api.delete(f'/api/zones/{again.pk}/', HTTP_X_MFA_GRANT=grant).status_code, 403)  # used once
+
+    def test_wrong_code_gives_no_grant(self):
+        from django.test import override_settings
+        self.totp()
+        with override_settings(LOGIN_ENCRYPTION='off'):
+            r = self.api.post('/api/mfa/stepup/totp/', {'code': '000000', 'scope': f'zone-delete:{self.zone.pk}'}, format='json')
+        self.assertEqual(r.status_code, 400)

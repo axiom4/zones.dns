@@ -1,3 +1,5 @@
+import re
+
 from django.conf import settings
 from django.core.cache import cache
 from drf_spectacular.utils import extend_schema
@@ -10,7 +12,7 @@ from rest_framework.views import APIView
 from .. import mfa
 from ..models import Passkey, TotpDevice
 from ..serializers import (AdminTicketSerializer, MeSerializer, MfaCodeSerializer, MfaCredentialSerializer, MfaOptionsSerializer, MfaStatusSerializer, MfaTicketSerializer,
-                           TokenResultSerializer, TotpSetupSerializer)
+                           StepUpCodeSerializer, StepUpCredentialSerializer, StepUpGrantSerializer, StepUpScopeSerializer, TokenResultSerializer, TotpSetupSerializer)
 from .token import EncryptedView
 
 
@@ -52,6 +54,40 @@ def passkey_verify(d, auth):
     return {'token': mfa.token_for(user)}
 
 
+def _stepup(d, auth):
+    """The logged-in user and the action to confirm (only known actions can be confirmed)."""
+    if not (auth and auth.is_authenticated and auth.is_staff):
+        raise mfa.MfaError('forbidden')
+    scope = str(d.get('scope', ''))
+    if not re.fullmatch(r'zone-delete:\d+', scope):
+        raise mfa.MfaError('forbidden')
+    return auth, scope
+
+
+def stepup_totp(d, auth):
+    user, scope = _stepup(d, auth)
+    mfa.guard(user)
+    dev = TotpDevice.objects.filter(user=user, confirmed=True).first()
+    if not dev or not mfa.check_totp(dev, str(d.get('code', ''))):
+        mfa.fail(user)
+    return {'grant': mfa.make_grant(user, scope)}
+
+
+def stepup_passkey_options(d, auth):
+    user, _ = _stepup(d, auth)
+    if not user.passkeys.exists():
+        raise mfa.MfaError('no_passkey')
+    return {'options': mfa.authentication_options(user)}
+
+
+def stepup_passkey_verify(d, auth):
+    user, scope = _stepup(d, auth)
+    mfa.guard(user)
+    if not mfa.check_passkey(user, d.get('credential')):
+        mfa.fail(user)
+    return {'grant': mfa.make_grant(user, scope)}
+
+
 def totp_setup(d, auth):
     user = _enrol_user(d, auth)
     secret = mfa.new_secret()
@@ -85,7 +121,8 @@ def passkey_register(d, auth):
 
 
 ACTIONS = {'totp': totp_verify, 'passkey-options': passkey_options, 'passkey-verify': passkey_verify, 'totp-setup': totp_setup,
-           'totp-confirm': totp_confirm, 'passkey-register-options': passkey_register_options, 'passkey-register': passkey_register}
+           'totp-confirm': totp_confirm, 'passkey-register-options': passkey_register_options, 'passkey-register': passkey_register,
+           'stepup-totp': stepup_totp, 'stepup-passkey-options': stepup_passkey_options, 'stepup-passkey-verify': stepup_passkey_verify}
 
 
 class _Plain(APIView):
@@ -119,6 +156,9 @@ TotpSetupView = _plain('totp-setup', MfaTicketSerializer, TotpSetupSerializer, '
 TotpConfirmView = _plain('totp-confirm', MfaCodeSerializer, TokenResultSerializer, 'Activate the authenticator app with the first code it shows.')
 PasskeyRegisterOptionsView = _plain('passkey-register-options', MfaTicketSerializer, MfaOptionsSerializer, 'Challenge to register a new passkey.')
 PasskeyRegisterView = _plain('passkey-register', MfaCredentialSerializer, TokenResultSerializer, 'Store the passkey the browser created.')
+TotpStepUpView = _plain('stepup-totp', StepUpCodeSerializer, StepUpGrantSerializer, 'Confirm one action (e.g. deleting a zone) with an authenticator-app code: returns a one-use grant.')
+PasskeyStepUpOptionsView = _plain('stepup-passkey-options', StepUpScopeSerializer, MfaOptionsSerializer, 'Challenge to confirm one action with a passkey.')
+PasskeyStepUpVerifyView = _plain('stepup-passkey-verify', StepUpCredentialSerializer, StepUpGrantSerializer, 'Confirm one action with the browser\'s answer to the challenge: returns a one-use grant.')
 
 
 class MfaEncryptedView(EncryptedView):

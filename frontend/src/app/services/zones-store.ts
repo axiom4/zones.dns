@@ -3,6 +3,7 @@ import { Router } from '@angular/router';
 import { Api } from '../api/api';
 import { zonesCreate, zonesDestroy, zonesList, zonesReverseCreate } from '../api/functions';
 import { Zone } from '../api/models';
+import { StepUp } from './step-up';
 import { Ui } from './ui';
 
 @Injectable({ providedIn: 'root' })
@@ -10,6 +11,7 @@ export class ZonesStore {
   private api = inject(Api);
   private ui = inject(Ui);
   private router = inject(Router);
+  private stepUp = inject(StepUp);
 
   zones = signal<Zone[]>([]);
   loaded = signal(false);
@@ -44,9 +46,11 @@ export class ZonesStore {
   }
 
   del(z: Zone) {
-    this.ui.ask(`Delete ${z.name}?`, 'All its records will be deleted too. This cannot be undone.', () =>
+    this.ui.ask(`Delete ${z.name}?`, 'All its records will be deleted too. This cannot be undone. You will be asked for your second factor.', () =>
       this.ui.run(async () => {
-        await this.api.invoke(zonesDestroy, { id: z.id });
+        const grant = await this.stepUp.request(`zone-delete:${z.id}`); // '' = no second factor set up, null = cancelled
+        if (grant === null) return;
+        await this.api.invoke(zonesDestroy, { id: z.id, 'X-MFA-Grant': grant || undefined });
         if (this.router.url === `/zones/${z.id}`) this.router.navigate(['/zones']);
         await this.load();
       }));

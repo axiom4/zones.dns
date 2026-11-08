@@ -882,6 +882,75 @@ paths:
               schema:
                 $ref: '#/components/schemas/TokenResult'
           description: ''
+  /api/mfa/stepup/passkey/options/:
+    post:
+      operationId: mfa_stepup_passkey_options_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepUpScopeRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MfaOptions'
+          description: ''
+  /api/mfa/stepup/passkey/verify/:
+    post:
+      operationId: mfa_stepup_passkey_verify_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepUpCredentialRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StepUpGrant'
+          description: ''
+  /api/mfa/stepup/totp/:
+    post:
+      operationId: mfa_stepup_totp_create
+      description: 'One step over a plain request. Refused when LOGIN_ENCRYPTION=required:
+        use the encrypted endpoint.'
+      tags:
+      - mfa
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StepUpCodeRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - {}
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/StepUpGrant'
+          description: ''
   /api/mfa/totp/:
     post:
       operationId: mfa_totp_create
@@ -1291,6 +1360,12 @@ paths:
     delete:
       operationId: zones_destroy
       parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor for this deletion (POST /api/mfa/stepup/...).
+          Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -2867,6 +2942,59 @@ components:
       - top_clients
       - top_domains
       - total
+    StepUpCodeRequest:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Login ticket; not needed when already logged in
+        scope:
+          type: string
+          minLength: 1
+          description: The action to confirm, e.g. zone-delete:7
+        code:
+          type: string
+          minLength: 1
+          maxLength: 10
+      required:
+      - code
+      - scope
+    StepUpCredentialRequest:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Login ticket; not needed when already logged in
+        scope:
+          type: string
+          minLength: 1
+          description: The action to confirm, e.g. zone-delete:7
+        credential:
+          description: PublicKeyCredential.toJSON() from the browser
+      required:
+      - credential
+      - scope
+    StepUpGrant:
+      type: object
+      properties:
+        grant:
+          type: string
+          description: One-use proof (2 minutes) sent in the X-MFA-Grant header of
+            the confirmed request
+      required:
+      - grant
+    StepUpScopeRequest:
+      type: object
+      properties:
+        ticket:
+          type: string
+          description: Login ticket; not needed when already logged in
+        scope:
+          type: string
+          minLength: 1
+          description: The action to confirm, e.g. zone-delete:7
+      required:
+      - scope
     Subdomains:
       type: object
       properties:

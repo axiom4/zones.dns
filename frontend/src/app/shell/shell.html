@@ -72,6 +72,25 @@
   </form>
 </dialog>
 
+<dialog #step class="confirm" (close)="stepUp.closed()" (click)="$event.target === step ? step.close() : null">
+  <form (ngSubmit)="confirmCode()">
+    <h3>Confirm with your second factor</h3>
+    <p class="soft pl">You are already signed in, so no user name or password is needed. Use a fresh code (not the one you signed in with) or a passkey.</p>
+    @if (stepUp.pending()?.totp) {
+      <label class="field">
+        <span class="lbl">Authenticator app code</span>
+        <input name="sc" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" aria-label="Authenticator app code">
+      </label>
+    }
+    @if (stepUp.error()) { <p class="error" role="alert">{{ stepUp.error() }}</p> }
+    <div class="actions">
+      <button type="button" class="ghost" (click)="step.close()">Cancel</button>
+      @if (stepUp.pending()?.passkey) { <button type="button" class="ghost" [disabled]="stepUp.busy()" (click)="stepUp.passkey()">Use a passkey</button> }
+      @if (stepUp.pending()?.totp) { <button class="danger" [disabled]="stepUp.busy() || !code.trim()">Confirm and delete</button> }
+    </div>
+  </form>
+</dialog>
+
 <dialog #dlg class="confirm" (click)="$event.target === dlg ? dlg.close() : null">
   <h3>{{ ui.box()?.title }}</h3>
   <p class="soft">{{ ui.box()?.text }}</p>

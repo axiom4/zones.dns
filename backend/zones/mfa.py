@@ -32,6 +32,7 @@ MESSAGES = {
     'bad_passkey': 'Invalid passkey or domain not allowed (check WEBAUTHN_RP_ID and WEBAUTHN_ORIGINS).',
     'no_passkey': 'No passkey registered.',
     'forbidden': 'Not authorised.',
+    'grant': 'Confirmation missing or expired: confirm with your second factor again.',
 }
 
 
@@ -73,6 +74,25 @@ def fail(user):
     except ValueError:
         pass  # the counter expired between add() and incr(): the attempt just is not counted
     raise MfaError('wrong_code')
+
+
+# ---- step-up: a logged-in user proves a factor again for one dangerous action (e.g. deleting a zone)
+GRANT_AGE = 120  # seconds
+
+
+def make_grant(user, scope):
+    """Signed proof that this user has just passed a second factor for this one action (scope, e.g. "zone-delete:7")."""
+    return signing.dumps({'u': user.pk, 's': scope}, salt='mfa-grant')
+
+
+def use_grant(user, scope, grant):
+    """Accepts a grant once: for this user and this scope, young enough, never used before."""
+    try:
+        d = signing.loads(grant or '', salt='mfa-grant', max_age=GRANT_AGE)
+    except signing.BadSignature:
+        raise MfaError('grant')
+    if d.get('u') != user.pk or d.get('s') != scope or not cache.add('mfa-grant-used:' + hashlib.sha256(grant.encode()).hexdigest(), 1, GRANT_AGE + 60):
+        raise MfaError('grant')
 
 
 # ---- TOTP

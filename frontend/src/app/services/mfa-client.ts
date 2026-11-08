@@ -1,11 +1,12 @@
 import { Injectable, inject } from '@angular/core';
 import { Api } from '../api/api';
-import { mfaEncryptedCreate, mfaPasskeyOptionsCreate, mfaPasskeyRegisterCreate, mfaPasskeyRegisterOptionsCreate, mfaPasskeyVerifyCreate, mfaTotpConfirmCreate, mfaTotpCreate, mfaTotpSetupCreate } from '../api/functions';
+import { mfaEncryptedCreate, mfaPasskeyOptionsCreate, mfaPasskeyRegisterCreate, mfaPasskeyRegisterOptionsCreate, mfaPasskeyVerifyCreate, mfaStepupPasskeyOptionsCreate, mfaStepupPasskeyVerifyCreate, mfaStepupTotpCreate, mfaTotpConfirmCreate, mfaTotpCreate, mfaTotpSetupCreate } from '../api/functions';
 import { Secure } from './secure';
 
 const PLAIN = {
   'totp': mfaTotpCreate, 'passkey-options': mfaPasskeyOptionsCreate, 'passkey-verify': mfaPasskeyVerifyCreate, 'totp-setup': mfaTotpSetupCreate,
   'totp-confirm': mfaTotpConfirmCreate, 'passkey-register-options': mfaPasskeyRegisterOptionsCreate, 'passkey-register': mfaPasskeyRegisterCreate,
+  'stepup-totp': mfaStepupTotpCreate, 'stepup-passkey-options': mfaStepupPasskeyOptionsCreate, 'stepup-passkey-verify': mfaStepupPasskeyVerifyCreate,
 } as const;
 export type MfaAction = keyof typeof PLAIN;
 
