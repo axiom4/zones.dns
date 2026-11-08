@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-- Internal zones are authoritative: a name missing from a zone gets NXDOMAIN, a name without that record type gets NODATA (empty NOERROR), both with `aa` and a generated SOA (RFC 2308) instead of going to the upstream; `SOA` queries at the zone apex are answered. **Behaviour change:** names under an internal zone that have no record are no longer forwarded.
+- Internal zones are authoritative: a name missing from a zone gets NXDOMAIN, a name without that record type gets NODATA (empty NOERROR), both with `aa` and a generated SOA (RFC 2308) instead of going to the upstream; `SOA` queries at the zone apex are answered. **Behaviour change:** names under an internal zone that have no record are no longer forwarded; `DNS_AUTHORITATIVE=false` brings the forwarding back.
 - A CNAME that points to a name in our own zones now also returns the target's records (e.g. `www CNAME @` answers with the apex A record).
 - Zone records can be sorted by type, host, IP / value (IPv4 numerically, then IPv6 and names) or TTL, ascending or descending.
 - Statistics: the chart follows the chosen period (per minute for the last hour, per hour for 24 h, per day for 7 and 30 days: 7 and 30 bars, today included, days in the browser's time zone), with empty buckets shown as zero. The stats API takes an optional `since`. API: `per_hour` replaced by `series` + `step`.

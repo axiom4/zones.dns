@@ -52,3 +52,9 @@ class AuthoritativeTests(TestCase):
     def test_soa_query_at_apex(self):
         r = self.ask('lan', 'SOA')
         self.assertEqual([QTYPE[a.rtype] for a in r.rr], ['SOA'])
+
+    def test_not_authoritative_forwards_missing_names(self):
+        from django.test import override_settings
+        with override_settings(DNS_AUTHORITATIVE=False):
+            r = self.ask('nope.lan')  # upstream 127.0.0.1:9 is dead, so a forwarded query ends in SERVFAIL, not our NXDOMAIN
+        self.assertEqual(r.header.rcode, 2)

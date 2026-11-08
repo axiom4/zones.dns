@@ -243,7 +243,7 @@ class Resolver(BaseResolver):
                     for r in target:
                         for rr in r.to_rr(owner=nxt if more[1] else None):
                             reply.add_answer(rr)
-            elif (auth := authority(qname)):
+            elif settings.DNS_AUTHORITATIVE and (auth := authority(qname)):
                 outcome, via = 'local', f'zone {auth[0]} (no such {"record" if auth[1] else "name"})'
                 reply = negative(request, *auth)
             elif (match := blocked_match(qname)):
