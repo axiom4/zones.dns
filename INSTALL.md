@@ -25,12 +25,82 @@ Both gunicorn and `rundns` are single instances: the sign-in key lives in the me
 
 Paths below: code in `/opt/dns/app`, virtualenv `/opt/dns/.venv`, user `dns`, host `dns.example.com`, server IP `192.0.2.10`.
 
-## 2. TLS certificate
+## 2. TLS certificate and key
 
-https is required (passkeys and secure cookies do not work over plain http). Put the files where the virtual host expects them (`ssl_certificate`, `ssl_certificate_key`).
+https is required (passkeys and secure cookies do not work over plain http). nginx needs two files, named in the virtual host (`deploy/nginx/dns.example.lan`, lines `ssl_certificate` and `ssl_certificate_key`):
 
-- **Public name:** Let's Encrypt. `sudo apt install certbot`, then `sudo certbot certonly --webroot -w /var/www/html -d dns.example.com` (or `--standalone` before nginx serves the site). Point `ssl_certificate` at `/etc/letsencrypt/live/dns.example.com/fullchain.pem` and `ssl_certificate_key` at `privkey.pem`. Certbot renews by timer; add a deploy hook: `--deploy-hook "systemctl reload nginx"`.
-- **Internal name** (`.lan`, `.home.arpa`, private zones): a public CA cannot issue it. Use your own CA ([step-ca](https://smallstep.com/docs/step-ca/), [mkcert](https://github.com/FiloSottile/mkcert) for small setups) and install its root certificate on the clients, otherwise browsers refuse the site and passkeys do not work.
+| File | Content | Permissions |
+|---|---|---|
+| `/etc/ssl/certs/dns.example.com.pem` | certificate (with the intermediate certificates, if any) | `644`, root |
+| `/etc/ssl/private/dns.example.com.key` | **private key**: never copy it elsewhere, never commit it | `600`, root |
+
+Edit both paths in the virtual host if you keep the files somewhere else. nginx reads them as root at start, so the `dns` user does not need access. Pick **A** or **B**.
+
+### A. Public name: Let's Encrypt
+
+```sh
+sudo apt install certbot
+sudo mkdir -p /var/www/html
+sudo certbot certonly --webroot -w /var/www/html -d dns.example.com --deploy-hook "systemctl reload nginx"
+```
+
+The name must resolve to this server and port 80 must be reachable from the internet (use `--standalone` instead of `--webroot` if nginx is not serving the site yet, with port 80 free). Certbot writes the files to `/etc/letsencrypt/live/dns.example.com/`: set in the virtual host
+
+```
+ssl_certificate     /etc/letsencrypt/live/dns.example.com/fullchain.pem;
+ssl_certificate_key /etc/letsencrypt/live/dns.example.com/privkey.pem;
+```
+
+Certbot renews by itself (systemd timer); check with `sudo certbot renew --dry-run`.
+
+### B. Internal name (`.lan`, `.home.arpa`, private IPs): your own CA
+
+A public CA cannot issue certificates for these names. Create a small CA once, then a server certificate signed by it (run on a safe machine; the server only receives the certificate and its key):
+
+```sh
+mkdir tls && cd tls
+# 1. the CA (10 years). ca.key is the most sensitive file: keep it offline, not on the server.
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 3650 \
+  -keyout ca.key -out ca.pem -subj "/CN=Zones.dns internal CA" \
+  -addext "basicConstraints=critical,CA:TRUE" -addext "keyUsage=critical,keyCertSign,cRLSign"
+
+# 2. the server key and request: use the exact host name people type in the browser
+openssl req -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
+  -keyout server.key -out server.csr -subj "/CN=dns.example.com"
+
+# 3. sign it. subjectAltName is mandatory: browsers ignore the CN. Add every name/IP you use.
+printf "subjectAltName=DNS:dns.example.com,IP:192.0.2.10\nbasicConstraints=CA:FALSE\nkeyUsage=digitalSignature\nextendedKeyUsage=serverAuth\n" > san.ext
+openssl x509 -req -in server.csr -CA ca.pem -CAkey ca.key -CAcreateserial -days 397 -extfile san.ext -out server.pem
+
+openssl verify -CAfile ca.pem server.pem        # server.pem: OK
+```
+
+Install on the server:
+
+```sh
+sudo install -m 644 -o root server.pem /etc/ssl/certs/dns.example.com.pem
+sudo install -m 600 -o root server.key /etc/ssl/private/dns.example.com.key
+shred -u server.key server.csr                   # remove the copies you do not need
+```
+
+Renew before it expires (397 days is the longest browsers accept): repeat steps 2–3 and the install commands, then `sudo systemctl reload nginx`. Check the expiry: `openssl x509 -in /etc/ssl/certs/dns.example.com.pem -noout -enddate`.
+
+**Trust the CA on every client** (`ca.pem` only, never `ca.key`), otherwise browsers refuse the site and passkeys do not work:
+
+- Debian/Ubuntu: `sudo cp ca.pem /usr/local/share/ca-certificates/zones-ca.crt && sudo update-ca-certificates`
+- macOS: `sudo security add-trusted-cert -d -r trustRoot -k /Library/Keychains/System.keychain ca.pem`
+- Windows (administrator): `certutil -addstore -f Root ca.pem`
+- Firefox has its own store (Settings → Certificates → Authorities → Import); iOS and Android: install the file as a profile/certificate and enable full trust.
+
+### Check the result
+
+```sh
+sudo openssl x509 -in /etc/ssl/certs/dns.example.com.pem -noout -subject -enddate -ext subjectAltName
+sudo nginx -t && sudo systemctl reload nginx
+openssl s_client -connect dns.example.com:443 -servername dns.example.com </dev/null 2>/dev/null | grep "Verify return"
+```
+
+The last line must say `Verify return code: 0 (ok)` (add `-CAfile ca.pem` when using your own CA).
 
 ## 3. System user and code
 
@@ -257,6 +327,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 | Symptom | Cause and fix |
 |---|---|
 | The API will not start: weak `SECRET_KEY` | With `DEBUG=false` the key must have at least 50 characters. Generate a new one (README, "Configuration"). |
+| `DisallowedHost: Invalid HTTP_HOST header: '192.168.1.23'` | The browser used an address that is not in `ALLOWED_HOSTS`. Use the configured host name, or add the address: `ALLOWED_HOSTS=dns.example.com,192.168.1.23` (and `CSRF_TRUSTED_ORIGINS=https://dns.example.com,https://192.168.1.23`, and the IP in the certificate SAN). Passkeys never work on an IP address: sign in through the host name. |
 | `502 Bad Gateway` from nginx | gunicorn is down or not on `127.0.0.1:8000`: `supervisorctl status`, `tail /var/log/supervisor/dns-api.err.log`. |
 | `403` "CSRF verification failed" | `CSRF_TRUSTED_ORIGINS` is missing the exact `https://host` used in the browser, or `BEHIND_PROXY` is not `true`. |
 | Sign-in answers `403` | `LOGIN_ENCRYPTION=required` refuses plain requests: use the GUI (it encrypts), not `curl` on `/api/token/`. |
