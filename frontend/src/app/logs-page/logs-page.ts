@@ -61,7 +61,7 @@ export class LogsPage implements OnDestroy {
   async loadClients() {
     try {
       const r = await this.api.invoke(logsClientsList, { hours: this.hours || undefined });
-      this.clients.set(r); this.clientNames.set(Object.fromEntries(r.filter(c => c.name).map(c => [c.ip, c.name])));
+      this.clients.set(r); this.clientNames.set(Object.fromEntries(r.filter(c => c.host).map(c => [c.ip, c.host])));
     } catch { /* the filter still works with the IP typed before: never an error */ }
   }
 
