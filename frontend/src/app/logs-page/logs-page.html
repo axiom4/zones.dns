@@ -215,12 +215,14 @@
     @else { <span class="rvalue"></span> }
     <button class="ttlv linkish" (click)="client = l.client; reset()" [title]="'Filter by this client' + (who(l.client) !== l.client ? ' (' + l.client + ')' : '')">{{ who(l.client) }}</button>
     <span class="ttlv">{{ l.ms }} ms</span>
-    @if (l.rcode) {
-      <button class="mini" (click)="openQuery(l)" [attr.aria-label]="'Show the answer of ' + l.name">Answer</button>
-    }
-    @if (!sub && l.outcome === 'forwarded') {
-      @if (blockedNow().has(l.name)) { <span class="out sm" data-o="blocked">Blocked</span> }
-      @else { <button class="mini" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
-    }
+    <span class="acts">
+      @if (l.rcode) {
+        <button class="mini" (click)="openQuery(l)" [attr.aria-label]="'Show the answer of ' + l.name">Answer</button>
+      }
+      @if (!sub && l.outcome === 'forwarded') {
+        @if (blockedNow().has(l.name)) { <span class="out sm" data-o="blocked">Blocked</span> }
+        @else { <button class="mini" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
+      }
+    </span>
   </li>
 </ng-template>
