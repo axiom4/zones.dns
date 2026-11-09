@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from dnslib import DNSRecord, QTYPE
+from dnslib import DNSQuestion, DNSRecord, QTYPE
 from django.test import TestCase
 
 from . import resolver
@@ -238,3 +238,58 @@ class AsnIndexTests(TestCase):
             self.assertEqual(asnindex.lookup('2001:db8::1'), (3, 'Three Net'))
             self.assertIsNone(asnindex.lookup('11.0.0.1'))
             self.assertIsNone(asnindex.lookup('2001:db9::1'))
+
+
+class RfcConformanceTests(TestCase):
+    def setUp(self):
+        resolver._data = None
+        z = Zone.objects.create(name='lan')
+        Record.objects.create(zone=z, name='a.b', type='A', value='10.0.0.2')
+        Record.objects.create(zone=z, name='*', type='A', value='10.0.0.9')
+        Record.objects.create(zone=z, name='big', type='TXT', value='x' * 250)
+        Record.objects.create(zone=z, name='big', type='TXT', value='y' * 250)
+        Record.objects.create(zone=z, name='big', type='TXT', value='z' * 250)
+
+    def ask(self, q, proto='tcp'):
+        handler = SimpleNamespace(client_address=('127.0.0.1', 0), protocol=proto)
+        return Resolver('127.0.0.1:9', log=None).resolve(q, handler)
+
+    def test_wildcard_does_not_cover_empty_non_terminal(self):
+        self.assertEqual(len(self.ask(DNSRecord.question('b.lan', 'A')).rr), 0)  # b.lan exists (a.b.lan below it)
+        self.assertEqual(len(self.ask(DNSRecord.question('other.lan', 'A')).rr), 1)
+
+    def test_blocked_name_is_not_authoritative_and_has_soa(self):
+        from .models import BlockedDomain
+        BlockedDomain.objects.create(name='ads.example')
+        resolver._data = None
+        r = self.ask(DNSRecord.question('x.ads.example', 'A'))
+        self.assertEqual((r.header.rcode, r.header.aa, [QTYPE[a.rtype] for a in r.auth]), (3, 0, ['SOA']))
+
+    def test_static_host_nodata_has_soa(self):
+        from .models import StaticHost
+        StaticHost.objects.create(name='printer.lan', address='10.0.0.5')
+        resolver._data = None
+        r = self.ask(DNSRecord.question('printer.lan', 'AAAA'))
+        self.assertEqual((len(r.rr), [QTYPE[a.rtype] for a in r.auth]), (0, ['SOA']))
+
+    def test_edns_gets_an_opt_back(self):
+        from dnslib import EDNS0
+        q = DNSRecord.question('a.b.lan', 'A')
+        q.add_ar(EDNS0(udp_len=4096))
+        self.assertEqual([QTYPE[a.rtype] for a in self.ask(q).ar], ['OPT'])
+        self.assertEqual(self.ask(DNSRecord.question('a.b.lan', 'A')).ar, [])
+
+    def test_big_udp_answer_is_truncated_tcp_is_not(self):
+        q = DNSRecord.question('big.lan', 'TXT')
+        r = self.ask(q, 'udp')
+        self.assertEqual((r.header.tc, len(r.rr)), (1, 0))
+        self.assertEqual((self.ask(q, 'tcp').header.tc, len(self.ask(q, 'tcp').rr)), (0, 3))
+
+    def test_notimp_and_refused_and_formerr(self):
+        q = DNSRecord.question('a.b.lan', 'A')
+        q.header.opcode = 4  # NOTIFY
+        self.assertEqual(self.ask(q).header.rcode, 4)
+        self.assertEqual(self.ask(DNSRecord(q=DNSQuestion('a.b.lan', 1, 3))).header.rcode, 5)  # class CH
+        two = DNSRecord.question('a.lan')
+        two.add_question(*DNSRecord.question('b.lan').questions)
+        self.assertEqual(self.ask(two).header.rcode, 1)

@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
-from dnslib import AAAA, QTYPE, RCODE, RR, SOA, A, DNSRecord
+from dnslib import AAAA, EDNS0, OPCODE, QTYPE, RCODE, RR, SOA, A, DNSHeader, DNSRecord
 from dnslib.server import BaseResolver
 
 from .domains import main_domain
@@ -101,6 +101,9 @@ def static_reply(request, qtype, hosts):
     for address, ttl in hosts:
         if want and (':' in address) == (want == 6):
             reply.add_answer(RR(request.q.qname, request.q.qtype, rdata=rdata(address), ttl=ttl))
+    if not reply.rr:  # NODATA: the SOA lets clients cache it (RFC 2308)
+        name = str(request.q.qname).rstrip('.').lower()
+        reply.add_auth(soa((authority(name) or (name,))[0]))
     return reply
 
 
@@ -123,6 +126,8 @@ def lookup(qname, qtype):
                     if recs:
                         wild = True
                         break
+                if recs and any(z == zname and n.endswith('.' + rel) for z, n in by_name):
+                    recs = []  # rel has names below it, so it exists: the wildcard does not apply
             if not recs:
                 return None  # zone is ours but name unknown: ask upstream
             hit = [r for r in recs if r.type == qtype] or [r for r in recs if r.type == 'CNAME']
@@ -214,6 +219,40 @@ def blocked_match(qname):
     return match
 
 
+def blocked_reply(request, zone):
+    """NXDOMAIN for a blocked name: not authoritative, with an SOA so clients can cache it (RFC 2308)."""
+    reply = request.reply(aa=0)
+    reply.header.rcode = RCODE.NXDOMAIN
+    reply.add_auth(soa(zone, ttl=settings.DNS_CACHE_NEG_TTL))
+    return reply
+
+
+def early_error(request):
+    """FORMERR / NOTIMP / REFUSED for what is not one ordinary IN query (RFC 1035 §4.1.1), else None."""
+    if len(request.questions) != 1:
+        return DNSRecord(DNSHeader(id=request.header.id, qr=1, opcode=request.header.opcode, rcode=RCODE.FORMERR))
+    rcode = RCODE.NOTIMP if request.header.opcode != OPCODE.QUERY else RCODE.REFUSED if request.q.qclass != 1 else None
+    if rcode is None:
+        return None
+    reply = request.reply(aa=0)
+    reply.header.rcode = rcode
+    return reply
+
+
+def edns_option(request):
+    return next((rr for rr in request.ar if rr.rtype == QTYPE.OPT), None)
+
+
+def finish(request, reply, handler):
+    """Answer EDNS with an OPT (RFC 6891) and cut a UDP answer that does not fit: TC=1 makes the client retry over TCP (RFC 1035 §4.2.1)."""
+    opt = edns_option(request)
+    if opt and not any(rr.rtype == QTYPE.OPT for rr in reply.ar):
+        reply.add_ar(EDNS0(udp_len=1232))
+    if getattr(handler, 'protocol', 'tcp') == 'udp' and len(reply.pack()) > (max(512, min(opt.rclass, 1232)) if opt else 512):
+        return reply.truncate()
+    return reply
+
+
 def summarize(reply):
     """What the client was told: response code and the answer records (capped)."""
     answers = []
@@ -236,6 +275,8 @@ class Resolver(BaseResolver):
         self._prefetch_room = threading.BoundedSemaphore(settings.DNS_PREFETCH_WORKERS * 8)
 
     def resolve(self, request, handler):
+        if (bad := early_error(request)) is not None:
+            return bad
         connection.close_if_health_check_failed()  # a connection the database dropped while idle is replaced before use
         t0 = time.monotonic()
         qname, qtype = str(request.q.qname).rstrip('.').lower(), QTYPE[request.q.qtype]
@@ -270,11 +311,9 @@ class Resolver(BaseResolver):
                 outcome, via = 'local', f'private reverse zone {zone} (RFC 6303)'
                 reply = negative(request, zone, qname == zone)
             elif (match := blocked_match(qname)):
-                outcome, reply, via = 'blocked', request.reply(), f'blacklist {match}'
-                reply.header.rcode = RCODE.NXDOMAIN
+                outcome, reply, via = 'blocked', blocked_reply(request, match), f'blacklist {match}'
             elif (why := suspicious.check(qname, qtype, handler.client_address[0])) and settings.SUSPICIOUS_MODE == 'block':
-                outcome, reply, via = 'blocked', request.reply(), f'suspicious: {why}'
-                reply.header.rcode = RCODE.NXDOMAIN
+                outcome, reply, via = 'blocked', blocked_reply(request, qname), f'suspicious: {why}'
             else:
                 reply, via = self.forward(request)
                 outcome = 'error' if reply.header.rcode == RCODE.SERVFAIL else 'forwarded'
@@ -288,7 +327,7 @@ class Resolver(BaseResolver):
             else:
                 entry.save()
                 rollup.add([entry])
-            return reply
+            return finish(request, reply, handler)
         finally:
             connection.close_if_unusable_or_obsolete()  # the worker thread keeps its connection for the next query, unless it broke or is older than CONN_MAX_AGE
 
@@ -296,7 +335,8 @@ class Resolver(BaseResolver):
         """(reply, via). Answers are cached for their TTL; a cache failure (Redis down) just means asking upstream.
         A cached answer that is about to expire and is still being asked for is renewed in the background (DNS_PREFETCH).
         When every upstream is down an expired answer is served instead, if we still have one (DNS_STALE_TTL)."""
-        key = f'dns:{QTYPE[request.q.qtype]}:{str(request.q.qname).lower()}'
+        opt = edns_option(request)  # EDNS, DO and CD change the answer, so they are part of the key
+        key = f'dns:{QTYPE[request.q.qtype]}:{str(request.q.qname).lower()}:{int(bool(opt))}{(opt.ttl >> 15) & 1 if opt else 0}{request.header.cd}'
         if settings.DNS_CACHE:
             entry = self._cache_get(key)
             if entry:
@@ -346,12 +386,11 @@ class Resolver(BaseResolver):
             return
         if not self._prefetch_room.acquire(blocking=False):
             return  # too many renewals under way
-        q = DNSRecord.question(str(request.q.qname), QTYPE[request.q.qtype])
-        self._prefetch_pool.submit(self._renew, key, q)
+        self._prefetch_pool.submit(self._renew, key, request)
 
-    def _renew(self, key, question):
+    def _renew(self, key, request):
         try:
-            reply, used = self.ask_upstream(question)
+            reply, used = self.ask_upstream(request)
             if used is not None:  # if every upstream is down, the old entry simply expires (and the stale copy stays)
                 self._store(key, reply)
         finally:
