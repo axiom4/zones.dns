@@ -90,7 +90,7 @@ export class LogsPage implements OnDestroy {
       const r = await this.api.invoke(geoWhoisRetrieve, { ip });
       this.whois.set({ ip, server: r.server, text: r.text });
     } catch (e: any) {
-      this.whois.set({ ip, error: e?.error?.ip?.[0] ?? e?.error?.detail ?? 'The WHOIS lookup failed.' });
+      this.whois.set({ ip, error: e?.error?.ip?.[0] ?? e?.error?.detail ?? `The WHOIS lookup failed (HTTP ${e?.status ?? 'no answer'}).` });
     }
   }
 
