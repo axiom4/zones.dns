@@ -51,6 +51,8 @@ export type { LogsRetrieve$Params as LogsRetrieve$Params } from './fn/logs/logs-
 export { logsRetrieve as logsRetrieve } from './fn/logs/logs-retrieve';
 export type { LogsAnswersList$Params as LogsAnswersList$Params } from './fn/logs/logs-answers-list';
 export { logsAnswersList as logsAnswersList } from './fn/logs/logs-answers-list';
+export type { LogsClientsList$Params as LogsClientsList$Params } from './fn/logs/logs-clients-list';
+export { logsClientsList as logsClientsList } from './fn/logs/logs-clients-list';
 export type { LogsGroupedList$Params as LogsGroupedList$Params } from './fn/logs/logs-grouped-list';
 export { logsGroupedList as logsGroupedList } from './fn/logs/logs-grouped-list';
 export type { LogsPurgeCreate$Params as LogsPurgeCreate$Params } from './fn/logs/logs-purge-create';

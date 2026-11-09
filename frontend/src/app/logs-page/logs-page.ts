@@ -3,8 +3,8 @@ import { Component, ElementRef, OnDestroy, inject, signal, viewChild } from '@an
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
-import { blockedCreate, logsAnswersList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve } from '../api/functions';
-import { Answer, GeoIp, QueryLog, QueryLogGroup, Resolved } from '../api/models';
+import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve } from '../api/functions';
+import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
 import { countryName, flag } from '../lib/geo-util';
 import { Ui } from '../services/ui';
 
@@ -45,7 +45,18 @@ export class LogsPage implements OnDestroy {
   private timer?: ReturnType<typeof setTimeout>;
   private poll?: ReturnType<typeof setInterval>;
 
-  constructor() { this.reset(); this.toggleLive(); }
+  // distinct client IPs (with their name in the default zone) for the filter; refreshed when the list is opened and when the period changes
+  clients = signal<QueryLogClient[]>([]);
+  clientNames = signal<{ [ip: string]: string }>({});
+  who(ip: string) { return this.clientNames()[ip] || ip; }
+  async loadClients() {
+    try {
+      const r = await this.api.invoke(logsClientsList, { hours: this.hours || undefined });
+      this.clients.set(r); this.clientNames.set(Object.fromEntries(r.filter(c => c.name).map(c => [c.ip, c.name])));
+    } catch { /* the filter still works with the IP typed before: never an error */ }
+  }
+
+  constructor() { this.reset(); this.loadClients(); this.toggleLive(); }
 
   // ---- popup with the details of a query / group, fetched only when it is opened ----
   detail = signal<Detail | null>(null);

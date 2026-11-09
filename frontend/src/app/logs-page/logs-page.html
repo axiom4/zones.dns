@@ -32,8 +32,12 @@
     <option value="REFUSED">REFUSED</option>
   </select>
   <input class="ip" name="ans" [(ngModel)]="answer" (ngModelChange)="search()" placeholder="Search the answer (e.g. IP)" aria-label="Search the answer">
-  <input class="ip" name="c" [(ngModel)]="client" (ngModelChange)="search()" placeholder="IP client" aria-label="IP client">
-  <select name="h" [(ngModel)]="hours" (ngModelChange)="reset()" aria-label="Period">
+  <select name="c" [(ngModel)]="client" (ngModelChange)="reset()" (focus)="loadClients()" aria-label="Client">
+    <option value="">All clients</option>
+    @if (client && !clientNames()[client]) { <option [value]="client">{{ client }}</option> }
+    @for (c of clients(); track c.ip) { <option [value]="c.ip">{{ c.name ? c.name + ' (' + c.ip + ')' : c.ip }}</option> }
+  </select>
+  <select name="h" [(ngModel)]="hours" (ngModelChange)="reset(); loadClients()" aria-label="Period">
     <option [ngValue]="1">Last hour</option>
     <option [ngValue]="24">Last 24 hours</option>
     <option [ngValue]="168">Last 7 days</option>
@@ -101,7 +105,7 @@
       <h3><span class="type" [attr.data-t]="d.row.type">{{ d.row.type }}</span> {{ d.row.name }}</h3>
       <dl>
         <dt>Time</dt><dd>{{ time(d.row.time) }}</dd>
-        <dt>Client</dt><dd class="mono">{{ d.row.client }}</dd>
+        <dt>Client</dt><dd class="mono">{{ d.row.client }}@if (who(d.row.client) !== d.row.client) { · {{ who(d.row.client) }} }</dd>
         <dt>Outcome</dt><dd><span class="out" [attr.data-o]="d.row.outcome">{{ labels[d.row.outcome] }}</span></dd>
         <dt>Response code</dt><dd><span class="rc" [attr.data-rc]="d.row.rcode">{{ d.row.rcode }}</span></dd>
         <dt>Resolved by</dt><dd>{{ d.row.via || '—' }}</dd>
@@ -210,7 +214,7 @@
     <span class="type" [attr.data-t]="l.type">{{ l.type }}</span>
     @if (!sub) { <button class="rvalue linkish" (click)="q = l.name; reset()" title="Filter by this name">{{ l.name }}</button> }
     @else { <span class="rvalue"></span> }
-    <button class="ttlv linkish" (click)="client = l.client; reset()" title="Filter by this client">{{ l.client }}</button>
+    <button class="ttlv linkish" (click)="client = l.client; reset()" [title]="'Filter by this client' + (who(l.client) !== l.client ? ' (' + l.client + ')' : '')">{{ who(l.client) }}</button>
     <span class="ttlv">{{ l.ms }} ms</span>
     @if (l.rcode) {
       <button class="mini" (click)="openQuery(l)" [attr.aria-label]="'Show the answer of ' + l.name">Answer</button>

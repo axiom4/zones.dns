@@ -293,3 +293,24 @@ class RfcConformanceTests(TestCase):
         two = DNSRecord.question('a.lan')
         two.add_question(*DNSRecord.question('b.lan').questions)
         self.assertEqual(self.ask(two).header.rcode, 1)
+
+
+class QueryLogClientsTests(TestCase):
+    def test_distinct_clients_with_default_zone_names(self):
+        from django.contrib.auth import get_user_model
+        from django.test import override_settings
+        from rest_framework.test import APIClient
+        from datetime import datetime, timezone as tz
+        from .models import StatCount
+        z = Zone.objects.create(name='axiom4.net')
+        Record.objects.create(zone=z, name='pc', type='A', value='192.168.1.10')
+        Record.objects.create(zone=z, name='*', type='A', value='192.168.1.11')
+        h = datetime(2026, 1, 1, tzinfo=tz.utc)
+        for hour, key, n in [(h, '192.168.1.10', 5), (h.replace(hour=1), '192.168.1.10', 2), (h, '192.168.1.11', 9)]:
+            StatCount.objects.create(dim='client', hour=hour, key=key, n=n)
+        StatCount.objects.create(dim='type', hour=h, key='A', n=99)
+        c = APIClient()
+        c.force_authenticate(get_user_model().objects.create_user('u', password='x', is_staff=True))
+        with override_settings(DEFAULT_ZONE='axiom4.net'):
+            r = c.get('/api/logs/clients/')
+        self.assertEqual(r.json(), [{'ip': '192.168.1.11', 'name': '', 'count': 9}, {'ip': '192.168.1.10', 'name': 'pc.axiom4.net', 'count': 7}])

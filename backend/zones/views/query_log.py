@@ -1,6 +1,7 @@
 from datetime import timedelta
 
-from django.db.models import Avg, Count, Max, Q, TextField
+from django.conf import settings
+from django.db.models import Avg, Count, Max, Q, Sum, TextField
 from django.db.models.functions import Cast
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
@@ -9,8 +10,9 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from .. import rollup
-from ..models import QueryLog
-from ..serializers import GroupResolvedSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
+from ..models import QueryLog, Record, StatCount
+from ..rollup import floor_hour
+from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
 from rest_framework.pagination import LimitOffsetPagination
 
 
@@ -70,6 +72,24 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         for r in page:
             r['name'] = r[key]
         return self.get_paginated_response(QueryLogGroupSerializer(page, many=True).data)
+
+    @extend_schema(parameters=[OpenApiParameter('hours', int, description='Only the last N hours (whole hours); 0 or missing = all')], responses=QueryLogClientSerializer(many=True))
+    @action(detail=False, methods=['get'], pagination_class=None)
+    def clients(self, request):
+        """Distinct client IPs, most active first (at most 500), with the FQDN of the default zone that points to each.
+        Read from the hourly counters (a few rows), not by scanning the log."""
+        rows = StatCount.objects.filter(dim='client')
+        hours = request.query_params.get('hours', '')
+        if hours.isdigit() and int(hours):
+            rows = rows.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(hours))))
+        found = list(rows.values('key').annotate(count=Sum('n')).order_by('-count', 'key')[:500])
+        zone, names = settings.DEFAULT_ZONE, {}
+        if zone:
+            recs = Record.objects.filter(zone__name=zone, zone__enabled=True, enabled=True, type__in=('A', 'AAAA'), value__in=[r['key'] for r in found]).values_list('value', 'name')
+            # shortcut: IPv6 compared as text (no normalisation); several names for one IP: the shortest wins. Wildcards are not names of a host
+            for ip, n in sorted((r for r in recs if '*' not in r[1]), key=lambda r: (-len(r[1]), r[1])):
+                names[ip] = zone if n == '@' else f'{n}.{zone}'
+        return Response(QueryLogClientSerializer([{'ip': r['key'], 'name': names.get(r['key'], ''), 'count': r['count']} for r in found], many=True).data)
 
     @extend_schema(request=PurgeRequestSerializer, responses=PurgeResultSerializer)
     @action(detail=False, methods=['post'])

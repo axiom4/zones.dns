@@ -46,6 +46,12 @@ class QueryLogGroupSerializer(serializers.Serializer):
     error = serializers.IntegerField()
 
 
+class QueryLogClientSerializer(serializers.Serializer):
+    ip = serializers.CharField()
+    name = serializers.CharField(allow_blank=True, help_text='FQDN in DEFAULT_ZONE whose A/AAAA record is this IP; empty if none')
+    count = serializers.IntegerField(help_text='Queries from this client')
+
+
 class PurgeRequestSerializer(serializers.Serializer):
     older_than_hours = serializers.IntegerField(min_value=0, help_text='Delete queries older than this many hours; 0 = everything')
     dry_run = serializers.BooleanField(default=False, help_text='Only count what would be deleted')

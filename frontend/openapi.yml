@@ -573,6 +573,31 @@ paths:
                 items:
                   $ref: '#/components/schemas/QueryLogAnswers'
           description: ''
+  /api/logs/clients/:
+    get:
+      operationId: logs_clients_list
+      description: |-
+        Distinct client IPs, most active first (at most 500), with the FQDN of the default zone that points to each.
+        Read from the hourly counters (a few rows), not by scanning the log.
+      parameters:
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours (whole hours); 0 or missing = all
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueryLogClient'
+          description: ''
   /api/logs/grouped/:
     get:
       operationId: logs_grouped_list
@@ -2557,6 +2582,22 @@ components:
       required:
       - answers
       - id
+    QueryLogClient:
+      type: object
+      properties:
+        ip:
+          type: string
+        name:
+          type: string
+          description: FQDN in DEFAULT_ZONE whose A/AAAA record is this IP; empty
+            if none
+        count:
+          type: integer
+          description: Queries from this client
+      required:
+      - count
+      - ip
+      - name
     QueryLogGroup:
       type: object
       properties:
