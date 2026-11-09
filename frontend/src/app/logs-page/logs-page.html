@@ -219,9 +219,9 @@
       @if (l.rcode) {
         <button class="mini" (click)="openQuery(l)" [attr.aria-label]="'Show the answer of ' + l.name">Answer</button>
       }
-      @if (!sub && l.outcome === 'forwarded') {
+      @if (!sub) {
         @if (blockedNow().has(l.name)) { <span class="out sm" data-o="blocked">Blocked</span> }
-        @else { <button class="mini" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
+        @else { <button class="mini" [disabled]="l.outcome !== 'forwarded'" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
       }
     </span>
   </li>
