@@ -1,6 +1,7 @@
 from datetime import timedelta, timezone as dt_timezone
 
-from django.db.models import Avg, Count
+from django.core.cache import cache
+from django.db.models import Count, Sum
 from django.db.models.functions import TruncHour, TruncMinute
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -29,6 +30,9 @@ class StatsView(APIView):
             hours = min(max(int(request.query_params.get('hours', 24)), 1), 720)
         except ValueError:
             hours = 24
+        key = f"stats:{hours}:{request.query_params.get('since', '')}"
+        if (hit := cache.get(key)) is not None:
+            return Response(hit)
         now = timezone.now()
         start = now - timedelta(hours=hours)
         since = parse_datetime(request.query_params.get('since', ''))
@@ -40,14 +44,19 @@ class StatsView(APIView):
         step = 60 if (now - start) <= timedelta(hours=2) else 3600
         trunc = TruncMinute if step == 60 else TruncHour
         series = qs.annotate(t=trunc('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id')).order_by('t')
-        return Response({
-            'total': qs.count(),
-            'avg_ms': qs.aggregate(a=Avg('ms'))['a'] or 0,
-            'by_outcome': _counts(qs, 'outcome'),
+        # one scan gives outcome counts, total and average
+        outcomes = list(qs.values('outcome').annotate(count=Count('id'), ms=Sum('ms')).order_by('-count'))
+        total = sum(r['count'] for r in outcomes)
+        data = {
+            'total': total,
+            'avg_ms': (sum(r['ms'] or 0 for r in outcomes) / total) if total else 0,
+            'by_outcome': [{'name': r['outcome'], 'count': r['count']} for r in outcomes],
             'by_type': _counts(qs, 'type'),
             'top_domains': _counts(qs, 'name', 10),
             'top_blocked': _counts(qs.filter(outcome='blocked'), 'name', 10),
             'top_clients': _counts(qs, 'client', 10),
             'step': step,
             'series': list(series),
-        })
+        }
+        cache.set(key, data, 30)  # shortcut: numbers up to 30 s old, to spare the repeated full scans of the log; lower it if that matters
+        return Response(data)
