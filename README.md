@@ -49,6 +49,7 @@ Every variable, with example values and comments, is in `backend/.env.example`. 
 |---|---|
 | `SECRET_KEY` | Required and long (≥ 50 characters) with `DEBUG=false`: the server will not start with a weak key. Generate one: `python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"`. It signs sessions and sign-in tickets: if it is known, the admin can be forged. |
 | `DEBUG`, `ALLOWED_HOSTS` | `DEBUG=false` and explicit hosts in production. |
+| `SESSION_MAX_AGE` | Seconds a sign-in lasts at most (API token and Django admin session), 7200 = 2 hours, absolute. A new sign-in ends the user's older sessions. |
 | `DATABASE_URL` | Empty = SQLite; otherwise `postgres://…` or `mysql://…`. |
 | `UPSTREAM_DNS`, `QUERY_LOG_DAYS`, `DEFAULT_ZONE` | External resolver(s), days of log to keep, zone opened by default. |
 | `LOGIN_ENCRYPTION` | `off` / `optional` / `required` (see "Encrypted sign-in"). |

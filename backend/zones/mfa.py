@@ -136,7 +136,8 @@ def methods(user):
 
 
 def token_for(user):
-    return Token.objects.get_or_create(user=user)[0].key
+    Token.objects.filter(user=user).delete()  # every sign-in starts a new session of SESSION_MAX_AGE; older ones of this user end
+    return Token.objects.create(user=user).key
 
 
 def login_result(user):

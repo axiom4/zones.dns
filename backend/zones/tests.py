@@ -195,3 +195,19 @@ class PartitionPlanTests(TestCase):
         self.assertEqual(drop, ['pold'])
         self.assertEqual([n for n, _ in add], ['p20261110', 'p20261111'])
         self.assertEqual(add[0][1], date(2026, 11, 11))
+
+
+class SessionExpiryTests(TestCase):
+    def test_token_expires(self):
+        from datetime import timedelta
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+        from rest_framework.authtoken.models import Token
+        from rest_framework.test import APIClient
+        u = get_user_model().objects.create_user('s', password='x', is_staff=True)
+        t = Token.objects.create(user=u)
+        c = APIClient()
+        c.credentials(HTTP_AUTHORIZATION=f'Token {t.key}')
+        self.assertEqual(c.get('/api/zones/').status_code, 200)
+        Token.objects.filter(pk=t.pk).update(created=timezone.now() - timedelta(hours=3))
+        self.assertEqual(c.get('/api/zones/').status_code, 401)

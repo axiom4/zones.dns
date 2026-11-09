@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Sign-in sessions last at most 2 hours (`SESSION_MAX_AGE`, 7200 s; absolute, not idle): the API token expires that long after the sign-in that issued it (the GUI returns to the sign-in page on the 401), and so does the Django admin session. Every sign-in issues a new token, so signing in on another device ends the user's older sessions.
 - Query log partitioned by day on MySQL/MariaDB and PostgreSQL (`manage.py partition_querylog`, once; rebuilds the table, so run it at a quiet time and back up first): old days are dropped with `DROP PARTITION` / `DROP TABLE` instead of a huge `DELETE`, and `rundns` creates the next days' partitions every hour. The primary key becomes `(id, time)`. On PostgreSQL the table is replaced by a partitioned one (no default partition: the next 7 days must exist). SQLite is unchanged. The PostgreSQL path was written without a PostgreSQL server at hand: try it on a copy first.
 - Statistics and geolocation read hourly counters (`StatCount`, `GeoStat`) kept up to date with every batch of log rows, instead of grouping the whole log: much faster on an external database. Windows over 2 hours start at the hour in which they begin; the per-minute view (up to 2 hours) still reads the log. Needs `manage.py migrate` (0019), then `manage.py rebuild_stats` once to count the existing log. Purging the log also purges the counters.
 - Statistics: one scan instead of three for total, average and outcomes; the response is cached for 30 seconds.

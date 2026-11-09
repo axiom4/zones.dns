@@ -166,7 +166,7 @@ MAILERS = {
 }
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ['rest_framework.authentication.TokenAuthentication'],
+    'DEFAULT_AUTHENTICATION_CLASSES': ['zones.authentication.ExpiringTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAdminUser'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -190,6 +190,9 @@ DNS_UPSTREAM_TIMEOUT = float(os.environ.get('DNS_UPSTREAM_TIMEOUT', '2'))  # sec
 DNS_UPSTREAM_DOWN = int(os.environ.get('DNS_UPSTREAM_DOWN', '30'))  # seconds an upstream that failed is skipped
 
 # Days of query history kept for statistics.
+# Seconds a sign-in lasts at most (API token and Django admin session): after that the user signs in again. Absolute, not idle.
+SESSION_MAX_AGE = int(os.environ.get('SESSION_MAX_AGE', '7200'))
+SESSION_COOKIE_AGE = SESSION_MAX_AGE
 QUERY_LOG_DAYS = int(os.environ.get('QUERY_LOG_DAYS', '7'))
 
 # Second factor for the GUI login (authenticator-app code or passkey). With MFA_REQUIRED a user without any factor must enrol one at the next login.
