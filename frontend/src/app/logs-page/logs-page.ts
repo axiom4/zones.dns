@@ -48,6 +48,8 @@ export class LogsPage implements OnDestroy {
   // distinct client IPs (with their name in the default zone) for the filter; refreshed when the list is opened and when the period changes
   clients = signal<QueryLogClient[]>([]);
   clientNames = signal<{ [ip: string]: string }>({});
+  /** What was typed or picked, as an IP: a name of the default zone is looked up in the list. */
+  private clientIp() { const c = this.client.trim().toLowerCase(); return this.clients().find(x => x.name === c)?.ip ?? this.client.trim(); }
   who(ip: string) { return this.clientNames()[ip] || ip; }
   async loadClients() {
     try {
@@ -110,7 +112,7 @@ export class LogsPage implements OnDestroy {
   search() { clearTimeout(this.timer); this.timer = setTimeout(() => this.reset(), 250); }
 
   private filters() {
-    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.client || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined };
+    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined };
   }
 
   /** Reload from the start. While live, keep as many rows as were already loaded so the list doesn't jump. */

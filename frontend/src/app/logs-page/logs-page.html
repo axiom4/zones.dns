@@ -32,11 +32,10 @@
     <option value="REFUSED">REFUSED</option>
   </select>
   <input class="ip" name="ans" [(ngModel)]="answer" (ngModelChange)="search()" placeholder="Search the answer (e.g. IP)" aria-label="Search the answer">
-  <select name="c" [(ngModel)]="client" (ngModelChange)="reset()" (focus)="loadClients()" aria-label="Client">
-    <option value="">All clients</option>
-    @if (client && !clientNames()[client]) { <option [value]="client">{{ client }}</option> }
-    @for (c of clients(); track c.ip) { <option [value]="c.ip">{{ c.name ? c.name + ' (' + c.ip + ')' : c.ip }}</option> }
-  </select>
+  <input class="ip" name="c" list="client-list" [(ngModel)]="client" (ngModelChange)="search()" (focus)="loadClients()" placeholder="Client (IP or name)" aria-label="Client" autocomplete="off">
+  <datalist id="client-list">
+    @for (c of clients(); track c.ip) { <option [value]="c.ip">{{ c.name }}</option> }
+  </datalist>
   <select name="h" [(ngModel)]="hours" (ngModelChange)="reset(); loadClients()" aria-label="Period">
     <option [ngValue]="1">Last hour</option>
     <option [ngValue]="24">Last 24 hours</option>
