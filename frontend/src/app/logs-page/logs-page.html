@@ -186,7 +186,7 @@
     <button class="chev" (click)="level === 0 ? toggleDomain(g) : toggleName(g)" [attr.aria-expanded]="isOpen(g.name, level)"
             [attr.aria-label]="(isOpen(g.name, level) ? 'Hide' : 'Show') + (level === 0 && g.names > 1 ? ' the subdomains of ' : ' the queries of ') + g.name">▸</button>
     <button class="rvalue linkish" (click)="level === 0 ? toggleDomain(g) : toggleName(g)">{{ g.name }}</button>
-    @if (level === 0 && g.names > 1) { <span class="hosts" title="Distinct hosts queried">{{ g.names }} host</span> }
+    @if (level === 0) { <span class="hosts" [class.none]="g.names < 2" title="Distinct hosts queried">{{ g.names }} host</span> }
     <span class="mix">
       @if (g.local) { <span class="out sm" data-o="local" title="Internal zones">{{ g.local }}</span> }
       @if (g.forwarded) { <span class="out sm" data-o="forwarded" title="Forwarded">{{ g.forwarded }}</span> }
@@ -196,14 +196,13 @@
     <span class="ttlv wide"><b>{{ g.count }}</b> queries</span>
     <span class="ttlv wide">{{ g.clients }} client</span>
     <span class="when">{{ time(g.last) }}</span>
-    @if (g.blocked < g.count) {
-      <button class="mini" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name">Answer</button>
-    }
+    <button class="mini" [disabled]="g.blocked >= g.count" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name">Answer</button>
     @if (g.name !== '.') { <a class="mini" routerLink="/audit" [queryParams]="{ domain: g.name }" [attr.aria-label]="'Analyse ' + g.name">Audit</a> }
+    @else { <button class="mini" disabled>Audit</button> }
     @if (blockedNow().has(g.name)) {
-      <span class="out sm" data-o="blocked">Blocked</span>
-    } @else if (g.forwarded && g.name !== '.') {
-      <button class="mini" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
+      <button class="mini" disabled>Blocked</button>
+    } @else {
+      <button class="mini" [disabled]="!g.forwarded || g.name === '.'" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
               [title]="level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
     }
   </li>
