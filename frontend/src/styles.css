@@ -296,7 +296,8 @@ li.subrow .ans { padding-left: 9.25rem; }
 .anstable th { text-align: left; color: var(--muted); font-weight: 600; padding: .35rem .5rem; border-bottom: 1px solid var(--line); }
 .anstable td { padding: .4rem .5rem; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; vertical-align: top; }
 .anstable tr:last-child td { border-bottom: 0; }
-.anstable .type { width: auto; min-width: 3.6rem; }
+.anstable .type { width: auto; min-width: 3.6rem; white-space: nowrap; }
+.anstable .mini { white-space: nowrap; }
 .secure { margin: -.5rem 0 0; color: #059669; font-weight: 600; font-size: 13px; }
 
 /* richer audit */
@@ -570,7 +571,7 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
 .zone.off .zname { opacity: .45; text-decoration: line-through; }
 
 .composer.filters app-autocomplete input { flex: none; width: 100%; }  /* the box inside the autocomplete fills its host on every screen */
-pre.whois { max-height: 18rem; overflow: auto; margin: 0; padding: .7rem .9rem; background: var(--bg); border-radius: 12px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
+pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radius: 12px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }
 
 /* Wide screens: every column of a group row has a fixed slot, so rows line up whatever they contain (no host badge, one outcome, no Block...) */
 @media (min-width: 1101px) {
@@ -594,3 +595,4 @@ pre.whois { max-height: 18rem; overflow: auto; margin: 0; padding: .7rem .9rem; 
   .records.logs li.grp > .ttlv.wide { width: 6.2rem; }
   .records.logs li.grp > :is(button.mini, a.mini) { min-width: 4rem; padding-inline: .5rem; }
 }
+.confirm.detail .actions { position: sticky; bottom: -1.75rem; margin: 0 -1.75rem -1.75rem; padding: .75rem 1.75rem 1.75rem; background: var(--surface); }  /* Close stays in view under a long WHOIS record */
