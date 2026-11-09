@@ -30,6 +30,10 @@ let next = 0;
     li { display: flex; justify-content: space-between; gap: 1rem; padding: .4rem .6rem; border-radius: 8px; cursor: pointer; font-size: 13px; }
     li.on { background: var(--brand-soft); }
     .v { font-family: var(--mono); }
+    @media (max-width: 1100px) {
+      .ac { width: 100%; max-width: none; }  /* as wide as the box: a list that starts in the right half would run off the screen */
+      li { flex-wrap: wrap; gap: .1rem .6rem; padding-block: .6rem; }
+    }
     .l { color: var(--muted); }`,
 })
 export class Autocomplete {

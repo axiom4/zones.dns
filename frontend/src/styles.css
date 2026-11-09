@@ -266,6 +266,7 @@ a.mini:hover { border-color: var(--brand); color: var(--brand); }
 @media (max-width: 1100px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) { dl { grid-template-columns: 1fr; } }
 
 /* main domain / sub-host levels */
+.hosts.none { display: none; }  /* wide screens keep its place instead (see the end of the file) */
 .hosts { flex: none; font-size: 12px; font-weight: 700; color: var(--brand); background: var(--brand-soft); border-radius: 999px; padding: .1rem .55rem; }
 .records li.sub2 { background: color-mix(in srgb, var(--brand-soft) 55%, white); padding-left: 2rem; border-radius: var(--radius); margin: 2px 0 4px; }
 .records li.grp.l1 { box-shadow: none; background: var(--surface); }
@@ -413,6 +414,10 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
   .records.logs li > .chev { order: -2; width: 36px; height: 36px; }
   .records.logs li > .rvalue { order: -1; flex: 1 1 calc(100% - 3.5rem); min-width: 0; text-align: left; overflow-wrap: anywhere; font-size: 14px; }
   .logs .when, .logs .acts { width: auto; }
+  .composer.filters app-autocomplete { flex: 1 1 calc(50% - .5rem); width: auto; min-width: 0; }
+  /* the actions of a log row: one line of equal buttons under the details (they used to be direct children of the row) */
+  .records.logs li:has(> .out:not(.sm)) > .acts { order: 7; flex: 1 1 100%; }
+  .records.logs li .acts > .mini { flex: 1 1 0; min-width: 5rem; }
   .records li.sub { padding: 0 0 .5rem .6rem; border-left: 3px solid var(--brand); border-radius: 0 0 var(--radius) 0; }
   .records li.sub2 { padding-left: .6rem; }
   .records li.subrow { padding: .5rem .5rem; }
@@ -570,7 +575,7 @@ pre.whois { max-height: 18rem; overflow: auto; margin: 0; padding: .7rem .9rem; 
 /* Wide screens: every column of a group row has a fixed slot, so rows line up whatever they contain (no host badge, one outcome, no Block...) */
 @media (min-width: 1101px) {
   .records.logs li.grp > .hosts { width: 4.9rem; text-align: center; }
-  .records.logs li.grp > .hosts.none { visibility: hidden; }
+  .records.logs li.grp > .hosts.none { display: inline-block; visibility: hidden; }
   .records.logs li.grp > .mix { width: 9rem; flex: none; display: flex; justify-content: flex-end; gap: .3rem; }
   .records.logs li.grp > .ttlv.wide { width: 6.5rem; text-align: right; }
   .records.logs li.grp > :is(button.mini, a.mini) { min-width: 4.6rem; text-align: center; }
