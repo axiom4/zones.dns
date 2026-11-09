@@ -1,7 +1,7 @@
 # Changelog
 
 ## Unreleased
-- Query log partitioned by day on MySQL/MariaDB (`manage.py partition_querylog`, once; rebuilds the table, so run it at a quiet time and back up first): old days are dropped with `DROP PARTITION` instead of a huge `DELETE`, and `rundns` creates the next days' partitions every hour. The primary key becomes `(id, time)`. Other databases are unchanged.
+- Query log partitioned by day on MySQL/MariaDB and PostgreSQL (`manage.py partition_querylog`, once; rebuilds the table, so run it at a quiet time and back up first): old days are dropped with `DROP PARTITION` / `DROP TABLE` instead of a huge `DELETE`, and `rundns` creates the next days' partitions every hour. The primary key becomes `(id, time)`. On PostgreSQL the table is replaced by a partitioned one (no default partition: the next 7 days must exist). SQLite is unchanged. The PostgreSQL path was written without a PostgreSQL server at hand: try it on a copy first.
 - Statistics and geolocation read hourly counters (`StatCount`, `GeoStat`) kept up to date with every batch of log rows, instead of grouping the whole log: much faster on an external database. Windows over 2 hours start at the hour in which they begin; the per-minute view (up to 2 hours) still reads the log. Needs `manage.py migrate` (0019), then `manage.py rebuild_stats` once to count the existing log. Purging the log also purges the counters.
 - Statistics: one scan instead of three for total, average and outcomes; the response is cached for 30 seconds.
 - Fewer database round trips: geolocation cache saved with one `bulk_create` upsert instead of two queries per address; the daemon's reload reads both master switches in one query and records and hosts as plain values.

@@ -6,11 +6,11 @@ from ...models import QueryLog
 
 
 class Command(BaseCommand):
-    help = 'MySQL/MariaDB only: split the query log into daily partitions (old days are then dropped instantly). Safe to run again; rundns keeps them up to date.'
+    help = 'MySQL/MariaDB and PostgreSQL: split the query log into daily partitions (old days are then dropped instantly). Safe to run again; rundns keeps them up to date.'
 
     def handle(self, *a, **o):
-        if connection.vendor != 'mysql':
-            raise CommandError('partitioning is for MySQL/MariaDB only')
+        if not partitions.supported():
+            raise CommandError('partitioning is for MySQL/MariaDB and PostgreSQL only')
         if partitions._partitions(QueryLog._meta.db_table):
             self.stdout.write('already partitioned; maintenance done' if partitions.maintain() else 'nothing to do')
             return
