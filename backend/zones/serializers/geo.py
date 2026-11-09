@@ -15,6 +15,12 @@ class GeoIpSerializer(serializers.Serializer):
     source = serializers.ChoiceField(['local', 'cymru', 'none', 'private'], help_text='Where the location came from')
 
 
+class WhoisSerializer(serializers.Serializer):
+    ip = serializers.CharField()
+    server = serializers.CharField(help_text='The WHOIS server that answered')
+    text = serializers.CharField(help_text='Its answer, as text')
+
+
 class GeoIpsResultSerializer(serializers.Serializer):
     results = GeoIpSerializer(many=True)
     pending = serializers.IntegerField(help_text='Addresses not located yet (ask again)')

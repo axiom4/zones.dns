@@ -565,3 +565,4 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
 .zone.off .zname { opacity: .45; text-decoration: line-through; }
 
 .composer.filters app-autocomplete input { flex: none; width: 100%; }  /* the box inside the autocomplete fills its host on every screen */
+pre.whois { max-height: 18rem; overflow: auto; margin: 0; padding: .7rem .9rem; background: var(--bg); border-radius: 12px; font-family: var(--mono); font-size: 12px; white-space: pre-wrap; overflow-wrap: anywhere; }

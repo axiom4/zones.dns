@@ -1,4 +1,4 @@
-from .geo import GeoDestinationsView, GeoIpsView
+from .geo import GeoDestinationsView, GeoIpsView, WhoisView
 from .audit import AuditView
 from .blocked_domain import BlockedDomainViewSet
 from .mfa import (AdminTicketView, MeView, MfaEncryptedView, MfaStatusView, PasskeyOptionsView, PasskeyRegisterOptionsView, PasskeyRegisterView, PasskeyRemoveView, PasskeyVerifyView,

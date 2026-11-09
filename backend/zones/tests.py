@@ -314,3 +314,34 @@ class QueryLogClientsTests(TestCase):
         with override_settings(DEFAULT_ZONE='axiom4.net'):
             r = c.get('/api/logs/clients/')
         self.assertEqual(r.json(), [{'ip': '192.168.1.11', 'name': '', 'host': '', 'count': 9}, {'ip': '192.168.1.10', 'name': 'pc.axiom4.net', 'host': 'pc', 'count': 7}])
+
+
+class WhoisTests(TestCase):
+    def setUp(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        self.c = APIClient()
+        self.c.force_authenticate(get_user_model().objects.create_user('w', password='x', is_staff=True))
+
+    def test_private_and_bad_addresses_are_refused_without_a_lookup(self):
+        from unittest import mock
+        with mock.patch('zones.whois._ask') as ask:
+            self.assertEqual(self.c.get('/api/geo/whois/?ip=192.168.1.1').status_code, 400)
+            self.assertEqual(self.c.get('/api/geo/whois/?ip=nope').status_code, 400)
+            ask.assert_not_called()
+
+    def test_follows_only_a_known_registry(self):
+        from unittest import mock
+        from . import whois
+        from django.core.cache import cache
+        cache.clear()
+        with mock.patch('zones.whois._ask', side_effect=['refer: whois.arin.net\n', 'NetName: GOOGLE\n']) as ask:
+            self.assertEqual(whois.lookup('8.8.8.8'), ('whois.arin.net', 'NetName: GOOGLE\n'))
+        cache.clear()
+        with mock.patch('zones.whois._ask', return_value='refer: evil.example\n') as ask:
+            self.assertEqual(whois.lookup('8.8.4.4')[0], 'whois.iana.org')
+            self.assertEqual(ask.call_count, 1)
+        cache.clear()
+        with mock.patch('zones.whois._ask', side_effect=['refer: whois.ripe.net\n', 'inetnum: x\n']):
+            r = self.c.get('/api/geo/whois/?ip=8.8.8.8')
+        self.assertEqual((r.status_code, r.json()['server']), (200, 'whois.ripe.net'))

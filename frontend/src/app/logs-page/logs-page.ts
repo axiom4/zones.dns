@@ -3,7 +3,7 @@ import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild }
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
-import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve } from '../api/functions';
+import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve, geoWhoisRetrieve } from '../api/functions';
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
 import { countryName, flag } from '../lib/geo-util';
@@ -15,6 +15,7 @@ const ipKey = (ip: string) => /^\d+(\.\d+){3}$/.test(ip) ? '0' + ip.split('.').m
 const PAGE = 50;
 const SUB = 20; // individual queries loaded per expansion step
 
+interface Whois { ip: string; loading?: boolean; server?: string; text?: string; error?: string }
 interface Sub { rows: QueryLog[]; count: number }
 type Detail =
   | { kind: 'q'; row: QueryLog; answers: Answer[] | null }
@@ -81,6 +82,18 @@ export class LogsPage implements OnDestroy {
     } catch { /* the position is a nicety: never an error */ }
   }
 
+  whois = signal<Whois | null>(null);
+  canWhois(type: string, ip: string) { return (type === 'A' || type === 'AAAA') && !this.geo()[ip]?.private; }
+  async lookupWhois(ip: string) {
+    this.whois.set({ ip, loading: true });
+    try {
+      const r = await this.api.invoke(geoWhoisRetrieve, { ip });
+      this.whois.set({ ip, server: r.server, text: r.text });
+    } catch (e: any) {
+      this.whois.set({ ip, error: e?.error?.ip?.[0] ?? e?.error?.detail ?? 'The WHOIS lookup failed.' });
+    }
+  }
+
   place(type: string, ip: string) {
     if (type !== 'A' && type !== 'AAAA') return '';
     const g = this.geo()[ip];
@@ -90,6 +103,7 @@ export class LogsPage implements OnDestroy {
   }
 
   openQuery(row: QueryLog) {
+    this.whois.set(null);
     this.detail.set({ kind: 'q', row, answers: null });
     this.det().nativeElement.showModal();
     return this.ui.run(async () => {
@@ -100,6 +114,7 @@ export class LogsPage implements OnDestroy {
   }
 
   openGroup(g: QueryLogGroup, level: number) {
+    this.whois.set(null);
     this.detail.set({ kind: 'g', g, level, resolved: null });
     this.det().nativeElement.showModal();
     return this.ui.run(async () => {

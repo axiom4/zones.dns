@@ -7,10 +7,12 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .. import geo
+from rest_framework.exceptions import APIException, ValidationError
+
+from .. import geo, whois
 from ..models import GeoStat
 from ..rollup import floor_hour
-from ..serializers import DestinationsSerializer, GeoIpsResultSerializer
+from ..serializers import DestinationsSerializer, GeoIpsResultSerializer, WhoisSerializer
 
 
 class GeoIpsView(APIView):
@@ -25,6 +27,23 @@ class GeoIpsView(APIView):
                 pass  # not an address: ignored
         found, pending = geo.locate(ips)
         return Response({'results': [found[i] for i in ips if i in found], 'pending': pending})
+
+
+class WhoisView(APIView):
+    @extend_schema(parameters=[OpenApiParameter('ip', str, description='A public IP address')], responses=WhoisSerializer)
+    def get(self, request):
+        """Who owns an address: the WHOIS record from its regional registry (cached for a day)."""
+        try:
+            ip = ipaddress.ip_address(request.query_params.get('ip', '').strip())
+        except ValueError:
+            raise ValidationError({'ip': 'Not an IP address.'})
+        if not ip.is_global:
+            raise ValidationError({'ip': 'Only public addresses have a WHOIS record.'})  # also keeps this from reaching internal hosts
+        try:
+            server, text = whois.lookup(str(ip))
+        except OSError:
+            raise APIException('The WHOIS server did not answer.')
+        return Response({'ip': str(ip), 'server': server, 'text': text})
 
 
 class GeoDestinationsView(APIView):

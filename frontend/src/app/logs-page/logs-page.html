@@ -112,10 +112,10 @@
       @if (d.answers; as list) {
         @if (list.length) {
           <table class="anstable">
-            <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Location</th></tr></thead>
+            <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Location</th><th></th></tr></thead>
             <tbody>
               @for (a of list; track $index) {
-                <tr><td class="mono">{{ a.name }}</td><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ a.ttl }} s</td><td>{{ place(a.type, a.value) }}</td></tr>
+                <tr><td class="mono">{{ a.name }}</td><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ a.ttl }} s</td><td>{{ place(a.type, a.value) }}</td><td>@if (canWhois(a.type, a.value)) { <button class="mini" (click)="lookupWhois(a.value)" [attr.aria-label]="'WHOIS of ' + a.value">Whois</button> }</td></tr>
               }
             </tbody>
           </table>
@@ -143,12 +143,18 @@
       @if (d.resolved; as list) {
         @if (list.length) {
           <table class="anstable">
-            <thead><tr><th>Type</th><th>Value</th><th>Location</th></tr></thead>
-            <tbody>@for (a of list; track $index) { <tr><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ place(a.type, a.value) }}</td></tr> }</tbody>
+            <thead><tr><th>Type</th><th>Value</th><th>Location</th><th></th></tr></thead>
+            <tbody>@for (a of list; track $index) { <tr><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ place(a.type, a.value) }}</td><td>@if (canWhois(a.type, a.value)) { <button class="mini" (click)="lookupWhois(a.value)" [attr.aria-label]="'WHOIS of ' + a.value">Whois</button> }</td></tr> }</tbody>
           </table>
         } @else { <p class="soft">No address recorded for this group.</p> }
       } @else { <p class="soft">Loading addresses…</p> }
     }
+  }
+  @if (whois(); as w) {
+    <h4>WHOIS {{ w.ip }}@if (w.server) { <span class="soft"> · {{ w.server }}</span> }</h4>
+    @if (w.loading) { <p class="soft">Asking the registry…</p> }
+    @else if (w.error) { <p class="soft">{{ w.error }}</p> }
+    @else { <pre class="whois">{{ w.text }}</pre> }
   }
   <div class="actions"><button class="ghost" (click)="det.close()">Close</button></div>
 </dialog>

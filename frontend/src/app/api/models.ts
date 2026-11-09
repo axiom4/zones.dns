@@ -89,6 +89,7 @@ export type { TokenResult } from './models/token-result';
 export type { TotpSetup } from './models/totp-setup';
 export type { TypeEnum } from './models/type-enum';
 export type { Web } from './models/web';
+export type { Whois } from './models/whois';
 export type { Zone } from './models/zone';
 export type { ZoneImportRequest } from './models/zone-import-request';
 export type { ZoneImportResult } from './models/zone-import-result';

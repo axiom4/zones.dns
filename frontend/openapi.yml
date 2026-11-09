@@ -308,6 +308,28 @@ paths:
               schema:
                 $ref: '#/components/schemas/GeoIpsResult'
           description: ''
+  /api/geo/whois/:
+    get:
+      operationId: geo_whois_retrieve
+      description: 'Who owns an address: the WHOIS record from its regional registry
+        (cached for a day).'
+      parameters:
+      - in: query
+        name: ip
+        schema:
+          type: string
+        description: A public IP address
+      tags:
+      - geo
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Whois'
+          description: ''
   /api/hosts/:
     get:
       operationId: hosts_list
@@ -3249,6 +3271,21 @@ components:
       - redirects
       - robots_txt
       - security_txt
+    Whois:
+      type: object
+      properties:
+        ip:
+          type: string
+        server:
+          type: string
+          description: The WHOIS server that answered
+        text:
+          type: string
+          description: Its answer, as text
+      required:
+      - ip
+      - server
+      - text
     Zone:
       type: object
       properties:

@@ -31,6 +31,8 @@ export type { GeoDestinationsRetrieve$Params as GeoDestinationsRetrieve$Params }
 export { geoDestinationsRetrieve as geoDestinationsRetrieve } from './fn/geo/geo-destinations-retrieve';
 export type { GeoIpsRetrieve$Params as GeoIpsRetrieve$Params } from './fn/geo/geo-ips-retrieve';
 export { geoIpsRetrieve as geoIpsRetrieve } from './fn/geo/geo-ips-retrieve';
+export type { GeoWhoisRetrieve$Params as GeoWhoisRetrieve$Params } from './fn/geo/geo-whois-retrieve';
+export { geoWhoisRetrieve as geoWhoisRetrieve } from './fn/geo/geo-whois-retrieve';
 export type { HostsList$Params as HostsList$Params } from './fn/hosts/hosts-list';
 export { hostsList as hostsList } from './fn/hosts/hosts-list';
 export type { HostsCreate$Params as HostsCreate$Params } from './fn/hosts/hosts-create';
