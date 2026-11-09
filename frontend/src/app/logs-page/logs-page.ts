@@ -9,6 +9,9 @@ import { Autocomplete } from '../lib/autocomplete';
 import { countryName, flag } from '../lib/geo-util';
 import { Ui } from '../services/ui';
 
+/** Sort key of an address: IPv4 as 4 zero-padded numbers, ahead of everything else. */
+const ipKey = (ip: string) => /^\d+(\.\d+){3}$/.test(ip) ? '0' + ip.split('.').map(n => n.padStart(3, '0')).join('.') : '1' + ip;
+
 const PAGE = 50;
 const SUB = 20; // individual queries loaded per expansion step
 
@@ -48,7 +51,8 @@ export class LogsPage implements OnDestroy {
 
   // distinct client IPs (with their name in the default zone) for the filter; refreshed when the list is opened and when the period changes
   clients = signal<QueryLogClient[]>([]);
-  clientOptions = computed(() => this.clients().map(c => ({ value: c.ip, label: c.host })));
+  // sorted by address: IPv4 numerically, then IPv6 and anything else as text
+  clientOptions = computed(() => this.clients().map(c => ({ value: c.ip, label: c.host })).sort((a, b) => ipKey(a.value).localeCompare(ipKey(b.value))));
   clientNames = signal<{ [ip: string]: string }>({});
   /** What was typed or picked, as an IP: a name of the default zone is looked up in the list. */
   private clientIp() { const c = this.client.trim().toLowerCase(); return this.clients().find(x => x.host === c || x.name === c)?.ip ?? this.client.trim(); }
