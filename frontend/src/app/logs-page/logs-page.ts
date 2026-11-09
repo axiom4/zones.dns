@@ -1,10 +1,11 @@
 import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
-import { Component, ElementRef, OnDestroy, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve } from '../api/functions';
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
+import { Autocomplete } from '../lib/autocomplete';
 import { countryName, flag } from '../lib/geo-util';
 import { Ui } from '../services/ui';
 
@@ -19,7 +20,7 @@ interface Open { subs: QueryLogGroup[] | null; total: number; rows: QueryLog[]; 
 
 @Component({
   selector: 'app-logs-page',
-  imports: [FormsModule, NgTemplateOutlet, RouterLink, DecimalPipe],
+  imports: [FormsModule, NgTemplateOutlet, RouterLink, DecimalPipe, Autocomplete],
   templateUrl: './logs-page.html',
 })
 export class LogsPage implements OnDestroy {
@@ -47,6 +48,7 @@ export class LogsPage implements OnDestroy {
 
   // distinct client IPs (with their name in the default zone) for the filter; refreshed when the list is opened and when the period changes
   clients = signal<QueryLogClient[]>([]);
+  clientOptions = computed(() => this.clients().map(c => ({ value: c.ip, label: c.name })));
   clientNames = signal<{ [ip: string]: string }>({});
   /** What was typed or picked, as an IP: a name of the default zone is looked up in the list. */
   private clientIp() { const c = this.client.trim().toLowerCase(); return this.clients().find(x => x.name === c)?.ip ?? this.client.trim(); }

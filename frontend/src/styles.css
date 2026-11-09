@@ -563,3 +563,5 @@ app-geo-map svg { width: 100%; height: auto; display: block; }
 .title-row h2 { margin: 0; }
 .records button:disabled { opacity: .45; cursor: not-allowed; }
 .zone.off .zname { opacity: .45; text-decoration: line-through; }
+
+.composer.filters app-autocomplete input { flex: none; width: 100%; }  /* the box inside the autocomplete fills its host on every screen */
