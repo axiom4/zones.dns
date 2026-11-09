@@ -37,11 +37,11 @@ def _build():
     """The data as plain values (these are what Redis stores): ([zone names], {(zone, name): [(type, value, ttl)]}, {host: [(address, ttl)]})."""
     zones = [z.name for z in Zone.objects.filter(enabled=True)]
     recs = defaultdict(list)
-    for r in Record.objects.filter(enabled=True, zone__enabled=True).select_related('zone'):
-        recs[(r.zone.name, r.name)].append((r.type, r.value, r.ttl))
+    for zone, name, rtype, value, ttl in Record.objects.filter(enabled=True, zone__enabled=True).values_list('zone__name', 'name', 'type', 'value', 'ttl'):
+        recs[(zone, name)].append((rtype, value, ttl))
     hosts = defaultdict(list)
-    for h in StaticHost.objects.filter(enabled=True):
-        hosts[h.name].append((h.address, h.ttl))
+    for name, address, ttl in StaticHost.objects.filter(enabled=True).values_list('name', 'address', 'ttl'):
+        hosts[name].append((address, ttl))
     return zones, dict(recs), dict(hosts)
 
 
@@ -64,7 +64,8 @@ def _load():
     names, plain_recs, hosts = plain
     by_name = {key: [Record(name=key[1], type=t, value=v, ttl=ttl, zone=Zone(name=key[0])) for t, v, ttl in rows] for key, rows in plain_recs.items()}
     _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name, hosts), time.monotonic(), version
-    _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if not Setting.flag(key))
+    off = set(Setting.objects.filter(key__in=[PERSONAL_BLOCKS, PUBLIC_LISTS], value='false').values_list('key', flat=True))  # one query for both switches
+    _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if key in off)
     _blocked.clear()
 
 

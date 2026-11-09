@@ -40,10 +40,12 @@ def locate(ips, budget=150):
     if batch:
         with ThreadPoolExecutor(12) as ex:  # network only; the database is written from this thread
             infos = list(ex.map(asn_info, batch))
+        rows = []
         for ip, info in zip(batch, infos):
             info = info or {}
-            cached[ip], _ = IpGeo.objects.update_or_create(ip=ip, defaults={
-                'country': (info.get('country') or '')[:2].upper(), 'asn': info.get('asn') or '', 'as_name': (info.get('as_name') or '')[:200], 'prefix': info.get('prefix') or ''})
+            rows.append(IpGeo(ip=ip, country=(info.get('country') or '')[:2].upper(), asn=info.get('asn') or '', as_name=(info.get('as_name') or '')[:200], prefix=info.get('prefix') or ''))
+        IpGeo.objects.bulk_create(rows, update_conflicts=True, unique_fields=['ip'], update_fields=['country', 'asn', 'as_name', 'prefix', 'updated'])  # one round trip, not two per address
+        cached.update({g.ip: g for g in rows})
     for ip in public:
         loc, g = local[ip], cached.get(ip)
         country = loc.get('country') or (g.country if g else '')
