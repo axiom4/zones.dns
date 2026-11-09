@@ -46,7 +46,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.filter(name__icontains=p['q'].strip())
         for f in ('name', 'domain', 'type', 'outcome', 'client', 'rcode'):
             if p.get(f):
-                qs = qs.filter(**{f: p[f]})
+                qs = qs.filter(**{f: '' if p[f] == '.' and f in ('name', 'domain') else p[f]})  # '.' is how the root (an empty name) is shown
         if p.get('answer'):
             qs = qs.annotate(answers_text=Cast('answers', TextField())).filter(answers_text__icontains=p['answer'].strip())
         if p.get('hours', '').isdigit():
@@ -70,7 +70,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         qs = qs.order_by('-count' if request.query_params.get('ordering') == 'count' else '-last', key)
         page = self.paginate_queryset(qs)
         for r in page:
-            r['name'] = r[key]
+            r['name'] = r[key] or '.'  # the root name is empty in the log: an empty group name could not be asked for again
         return self.get_paginated_response(QueryLogGroupSerializer(page, many=True).data)
 
     @extend_schema(parameters=[OpenApiParameter('hours', int, description='Only the last N hours (whole hours); 0 or missing = all')], responses=QueryLogClientSerializer(many=True))
@@ -127,7 +127,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
     def resolved(self, request):
         """Recent distinct answers (A/AAAA/CNAME, at most 4) for some groups, loaded on demand."""
         key = 'name' if request.query_params.get('by') == 'name' else 'domain'
-        names = [n.strip().lower() for n in request.query_params.get('names', '').split(',') if n.strip()][:50]
+        names = ['' if n == '.' else n for n in (n.strip().lower() for n in request.query_params.get('names', '').split(',')) if n][:50]
         out = {n: [] for n in names}
         # shortcut: scans the latest 500 answered queries of these groups
         recent = QueryLog.objects.filter(**{f'{key}__in': names}).exclude(answers=[]).order_by('-time').values(key, 'answers')[:500]
@@ -137,4 +137,4 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
                 item = {'type': a['type'], 'value': a['value']}
                 if a['type'] in ('A', 'AAAA', 'CNAME') and item not in res and len(res) < 4:
                     res.append(item)
-        return Response(GroupResolvedSerializer([{'name': n, 'resolved': v} for n, v in out.items()], many=True).data)
+        return Response(GroupResolvedSerializer([{'name': n or '.', 'resolved': v} for n, v in out.items()], many=True).data)

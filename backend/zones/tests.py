@@ -345,3 +345,17 @@ class WhoisTests(TestCase):
         with mock.patch('zones.whois._ask', side_effect=['refer: whois.ripe.net\n', 'inetnum: x\n']):
             r = self.c.get('/api/geo/whois/?ip=8.8.8.8')
         self.assertEqual((r.status_code, r.json()['server']), (200, 'whois.ripe.net'))
+
+
+class RootGroupTests(TestCase):
+    def test_root_name_is_a_group_called_dot_and_can_be_asked_for(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        QueryLog.objects.create(name='', domain='', type='NS', outcome='forwarded', client='1.1.1.1', ms=1)
+        QueryLog.objects.create(name='a.example.com', domain='example.com', type='A', outcome='forwarded', client='1.1.1.1', ms=1)
+        c = APIClient()
+        c.force_authenticate(get_user_model().objects.create_user('r', password='x', is_staff=True))
+        names = [g['name'] for g in c.get('/api/logs/grouped/').json()['results']]
+        self.assertIn('.', names)
+        self.assertEqual(c.get('/api/logs/?domain=.').json()['count'], 1)  # not every query: '.' selects the root only

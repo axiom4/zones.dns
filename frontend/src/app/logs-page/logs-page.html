@@ -199,10 +199,10 @@
     @if (g.blocked < g.count) {
       <button class="mini" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name">Answer</button>
     }
-    <a class="mini" routerLink="/audit" [queryParams]="{ domain: g.name }" [attr.aria-label]="'Analyse ' + g.name">Audit</a>
+    @if (g.name !== '.') { <a class="mini" routerLink="/audit" [queryParams]="{ domain: g.name }" [attr.aria-label]="'Analyse ' + g.name">Audit</a> }
     @if (blockedNow().has(g.name)) {
       <span class="out sm" data-o="blocked">Blocked</span>
-    } @else if (g.forwarded) {
+    } @else if (g.forwarded && g.name !== '.') {
       <button class="mini" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
               [title]="level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
     }
