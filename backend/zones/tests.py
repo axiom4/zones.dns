@@ -211,3 +211,30 @@ class SessionExpiryTests(TestCase):
         self.assertEqual(c.get('/api/zones/').status_code, 200)
         Token.objects.filter(pk=t.pk).update(created=timezone.now() - timedelta(hours=3))
         self.assertEqual(c.get('/api/zones/').status_code, 401)
+
+
+class AsnIndexTests(TestCase):
+    def test_flatten_and_lookup(self):
+        import io, os, tarfile, tempfile
+        from django.test import override_settings
+        from . import asnindex
+        # 10.0.0.0/8 is AS1, the 10.1.0.0/16 inside it is AS2
+        self.assertEqual(asnindex.flatten([(10 << 24, (11 << 24) - 1, 1), (10 << 24 | 1 << 16, 10 << 24 | (2 << 16) - 1, 2)]),
+                         [(10 << 24, (10 << 24 | 1 << 16) - 1, 1), (10 << 24 | 1 << 16, 10 << 24 | (2 << 16) - 1, 2), (10 << 24 | 2 << 16, (11 << 24) - 1, 1)])
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode='w:gz') as t:
+            for name, text in [('as/1/ipv4-aggregated.txt', '# AS1 (ONE)\n# One Net\n10.0.0.0/8\n'), ('as/2/ipv4-aggregated.txt', '# AS2 (TWO)\n# Two Net\n10.1.0.0/16\n'),
+                               ('as/3/ipv6-aggregated.txt', '# AS3 (THREE)\n# Three Net\n2001:db8::/32\n')]:
+                data = text.encode()
+                info = tarfile.TarInfo(name)
+                info.size = len(data)
+                t.addfile(info, io.BytesIO(data))
+        buf.seek(0)
+        v4, v6, names = asnindex.read_archive(buf)
+        with tempfile.TemporaryDirectory() as d, override_settings(ASN_INDEX=os.path.join(d, 'i.bin')):
+            asnindex.write(os.path.join(d, 'i.bin'), v4, v6, names)
+            self.assertEqual(asnindex.lookup('10.1.2.3'), (2, 'Two Net'))
+            self.assertEqual(asnindex.lookup('10.9.9.9'), (1, 'One Net'))
+            self.assertEqual(asnindex.lookup('2001:db8::1'), (3, 'Three Net'))
+            self.assertIsNone(asnindex.lookup('11.0.0.1'))
+            self.assertIsNone(asnindex.lookup('2001:db9::1'))

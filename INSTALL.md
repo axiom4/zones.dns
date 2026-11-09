@@ -316,6 +316,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 - **Backup:** the database is the only data to protect, plus `.env`. PostgreSQL: `pg_dump -U dns dns | gzip > dns-$(date +%F).sql.gz`. MariaDB: `mariadb-dump --single-transaction dns | gzip > ...`. Run it from cron, copy it off the server, and test a restore (`psql dns < dump.sql` / `mariadb dns < dump.sql`) on a spare machine. Keep `.env` copies in a secret store: without `SECRET_KEY` nobody can use tickets signed before, but data is intact.
 - **Partitioned log (MySQL/MariaDB or PostgreSQL, optional):** `manage.py partition_querylog` once splits the query log into daily partitions; `rundns` then drops old days instantly instead of running a huge `DELETE`. It rebuilds the table and writes wait meanwhile: back up first, run it when the traffic is low (see "Partitioned log" in the README).
 - **Statistics counters:** the Statistics and Geolocation pages read hourly counters, not the log. `manage.py rebuild_stats` recomputes them from the log if they ever look wrong.
+- **ASN index:** cron as user `dns`, nightly: `30 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_asn` (about 10 s; the old index is kept if the download fails). Run it once by hand after installing.
 - **Blocklists:** cron as user `dns`, for example weekly: `0 4 * * 0  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist`.
 - **Lost second factor:** `manage.py mfa_reset <user>`.
 

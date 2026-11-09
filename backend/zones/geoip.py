@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 import maxminddb
 from django.conf import settings
 
+from . import asnindex
+
 
 class _Db:
     """One or more database files (comma separated in the setting: some publishers ship IPv4 and IPv6 apart).
@@ -66,6 +68,8 @@ def lookup(ip):
     a = _asn.record(ip)
     if a.get('autonomous_system_number'):
         out.update(asn=f'AS{a["autonomous_system_number"]}', as_name=a.get('autonomous_system_organization') or '')
+    elif x := asnindex.lookup(ip):  # not in the .mmdb: the index built by import_asn
+        out.update(asn=f'AS{x[0]}', as_name=x[1])
     return out
 
 

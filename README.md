@@ -139,6 +139,8 @@ GEOIP_ASN_DB=/path/backend/geoip-data/dbip-asn.mmdb      # optional: the network
 GEOIP_ONLINE_FALLBACK=false                               # optional: no DNS queries for geolocation
 ```
 
+**ASN gaps (optional, offline).** A `.mmdb` ASN database misses some networks (for example part of the Cloudflare IPv6 space). `manage.py import_asn` builds a second source from [ipverse/as-ip-blocks](https://github.com/ipverse/as-ip-blocks) (BGP prefixes announced by each ASN, CC0, updated daily): it downloads the 17 MB archive, writes a compact index to `ASN_INDEX` (default `backend/geoip-data/asn-index.bin`, 8 MB; empty = off) and the lookup uses it only for addresses the `.mmdb` does not know. Run it once, then nightly from cron; if a run fails the old index stays. The processes reopen the file by themselves. `ASN_IMPORT_URL` changes the source (URL or path of the `.tar.gz`).
+
 The files are re-read by themselves when you replace them. Accuracy is that of the database: the city is an approximation (CDNs and cloud servers often show up in another city).
 
 ## Redis cache

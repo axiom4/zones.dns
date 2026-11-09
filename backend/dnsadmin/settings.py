@@ -250,5 +250,8 @@ LOGIN_ENCRYPTION = os.environ.get('LOGIN_ENCRYPTION', 'off')
 # City gives country, city and coordinates; ASN gives network owner. Without them, country/ASN come from DNS (Team Cymru).
 GEOIP_CITY_DB = os.environ.get('GEOIP_CITY_DB', '')
 GEOIP_ASN_DB = os.environ.get('GEOIP_ASN_DB', '')
+# IP -> ASN index for what the ASN .mmdb lacks, built nightly by `manage.py import_asn` from ipverse/as-ip-blocks (BGP prefixes per ASN, CC0). Empty = off.
+ASN_INDEX = os.environ.get('ASN_INDEX', str(BASE_DIR / 'geoip-data' / 'asn-index.bin'))
+ASN_IMPORT_URL = os.environ.get('ASN_IMPORT_URL', 'https://github.com/ipverse/as-ip-blocks/releases/latest/download/as-ip-blocks.tar.gz')
 # Ask Team Cymru (a DNS query) for what the local databases do not know. Set to false for a fully offline setup.
 GEOIP_ONLINE_FALLBACK = os.environ.get('GEOIP_ONLINE_FALLBACK', 'true').lower() == 'true'
