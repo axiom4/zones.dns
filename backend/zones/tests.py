@@ -313,4 +313,4 @@ class QueryLogClientsTests(TestCase):
         c.force_authenticate(get_user_model().objects.create_user('u', password='x', is_staff=True))
         with override_settings(DEFAULT_ZONE='axiom4.net'):
             r = c.get('/api/logs/clients/')
-        self.assertEqual(r.json(), [{'ip': '192.168.1.11', 'name': '', 'count': 9}, {'ip': '192.168.1.10', 'name': 'pc.axiom4.net', 'count': 7}])
+        self.assertEqual(r.json(), [{'ip': '192.168.1.11', 'name': '', 'host': '', 'count': 9}, {'ip': '192.168.1.10', 'name': 'pc.axiom4.net', 'host': 'pc', 'count': 7}])

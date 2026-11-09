@@ -49,6 +49,7 @@ class QueryLogGroupSerializer(serializers.Serializer):
 class QueryLogClientSerializer(serializers.Serializer):
     ip = serializers.CharField()
     name = serializers.CharField(allow_blank=True, help_text='FQDN in DEFAULT_ZONE whose A/AAAA record is this IP; empty if none')
+    host = serializers.CharField(allow_blank=True, help_text='The same name without the zone (the zone itself for the apex); empty if none')
     count = serializers.IntegerField(help_text='Queries from this client')
 
 

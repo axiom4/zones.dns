@@ -7,6 +7,11 @@ export interface QueryLogClient {
    * Queries from this client
    */
   count: number;
+
+  /**
+   * The same name without the zone (the zone itself for the apex); empty if none
+   */
+  host: string;
   ip: string;
 
   /**

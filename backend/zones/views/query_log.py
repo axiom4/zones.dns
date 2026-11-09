@@ -88,8 +88,8 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             recs = Record.objects.filter(zone__name=zone, zone__enabled=True, enabled=True, type__in=('A', 'AAAA'), value__in=[r['key'] for r in found]).values_list('value', 'name')
             # shortcut: IPv6 compared as text (no normalisation); several names for one IP: the shortest wins. Wildcards are not names of a host
             for ip, n in sorted((r for r in recs if '*' not in r[1]), key=lambda r: (-len(r[1]), r[1])):
-                names[ip] = zone if n == '@' else f'{n}.{zone}'
-        return Response(QueryLogClientSerializer([{'ip': r['key'], 'name': names.get(r['key'], ''), 'count': r['count']} for r in found], many=True).data)
+                names[ip] = (zone, zone) if n == '@' else (f'{n}.{zone}', n)
+        return Response(QueryLogClientSerializer([{'ip': r['key'], 'name': names.get(r['key'], ('', ''))[0], 'host': names.get(r['key'], ('', ''))[1], 'count': r['count']} for r in found], many=True).data)
 
     @extend_schema(request=PurgeRequestSerializer, responses=PurgeResultSerializer)
     @action(detail=False, methods=['post'])

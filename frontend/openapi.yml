@@ -2591,11 +2591,16 @@ components:
           type: string
           description: FQDN in DEFAULT_ZONE whose A/AAAA record is this IP; empty
             if none
+        host:
+          type: string
+          description: The same name without the zone (the zone itself for the apex);
+            empty if none
         count:
           type: integer
           description: Queries from this client
       required:
       - count
+      - host
       - ip
       - name
     QueryLogGroup:
