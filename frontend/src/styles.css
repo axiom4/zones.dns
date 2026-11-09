@@ -580,3 +580,17 @@ pre.whois { max-height: 18rem; overflow: auto; margin: 0; padding: .7rem .9rem; 
   .records.logs li.grp > .ttlv.wide { width: 6.5rem; text-align: right; }
   .records.logs li.grp > :is(button.mini, a.mini) { min-width: 4.6rem; text-align: center; }
 }
+
+/* iPad held sideways (1100-1400 px wide, sidebar layout): narrower sidebar and margins, and the group rows drop the outcome chips and the client count so the name keeps room */
+@media (min-width: 1101px) and (max-width: 1400px) {
+  .shell { grid-template-columns: 220px 1fr; }
+  aside { padding-inline: .6rem; }
+  main { padding: 1.5rem 1.25rem; }
+  .records li, .records.logs li.grp, .logs li { gap: .5rem; }
+  .logs .when { width: 7.5rem; }
+  .logs .acts { width: 8rem; }
+  .records.logs li.grp > .hosts { width: 4.2rem; }
+  .records.logs li.grp > .mix, .records.logs li.grp > .nclients { display: none; }
+  .records.logs li.grp > .ttlv.wide { width: 6.2rem; }
+  .records.logs li.grp > :is(button.mini, a.mini) { min-width: 4rem; padding-inline: .5rem; }
+}

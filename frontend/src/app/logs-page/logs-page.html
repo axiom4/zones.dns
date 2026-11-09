@@ -194,7 +194,7 @@
       @if (g.error) { <span class="out sm" data-o="error" title="Errors">{{ g.error }}</span> }
     </span>
     <span class="ttlv wide"><b>{{ g.count }}</b> queries</span>
-    <span class="ttlv wide">{{ g.clients }} client</span>
+    <span class="ttlv wide nclients">{{ g.clients }} client</span>
     <span class="when">{{ time(g.last) }}</span>
     <button class="mini" [disabled]="g.blocked >= g.count" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name">Answer</button>
     @if (g.name !== '.') { <a class="mini" routerLink="/audit" [queryParams]="{ domain: g.name }" [attr.aria-label]="'Analyse ' + g.name">Audit</a> }
