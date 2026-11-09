@@ -183,3 +183,15 @@ class LocalReverseTests(TestCase):
         from django.test import override_settings
         with override_settings(DNS_LOCAL_REVERSE=False):
             self.assertEqual(self.ask('229.1.168.192.in-addr.arpa').header.rcode, 2)
+
+
+class PartitionPlanTests(TestCase):
+    def test_plan(self):
+        from datetime import date
+        from .partitions import _num, plan
+        today = date(2026, 11, 9)
+        parts = [('pold', _num(date(2026, 11, 2))), ('p20261102', _num(date(2026, 11, 3))), ('p20261109', _num(date(2026, 11, 10))), ('pmax', None)]
+        drop, add = plan(parts, today, date(2026, 11, 2), ahead=2)
+        self.assertEqual(drop, ['pold'])
+        self.assertEqual([n for n, _ in add], ['p20261110', 'p20261111'])
+        self.assertEqual(add[0][1], date(2026, 11, 11))

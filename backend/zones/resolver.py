@@ -10,7 +10,7 @@ from dnslib import AAAA, QTYPE, RCODE, RR, SOA, A, DNSRecord
 from dnslib.server import BaseResolver
 
 from .domains import main_domain
-from . import suspicious
+from . import rollup, suspicious
 from .models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, DataVersion, QueryLog, Record, Setting, StaticHost, Zone
 
 
@@ -287,6 +287,7 @@ class Resolver(BaseResolver):
                 self.log.add(entry)  # saved in a batch a moment later
             else:
                 entry.save()
+                rollup.add([entry])
             return reply
         finally:
             connection.close_if_unusable_or_obsolete()  # the worker thread keeps its connection for the next query, unless it broke or is older than CONN_MAX_AGE

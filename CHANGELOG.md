@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+- Query log partitioned by day on MySQL/MariaDB (`manage.py partition_querylog`, once; rebuilds the table, so run it at a quiet time and back up first): old days are dropped with `DROP PARTITION` instead of a huge `DELETE`, and `rundns` creates the next days' partitions every hour. The primary key becomes `(id, time)`. Other databases are unchanged.
+- Statistics and geolocation read hourly counters (`StatCount`, `GeoStat`) kept up to date with every batch of log rows, instead of grouping the whole log: much faster on an external database. Windows over 2 hours start at the hour in which they begin; the per-minute view (up to 2 hours) still reads the log. Needs `manage.py migrate` (0019), then `manage.py rebuild_stats` once to count the existing log. Purging the log also purges the counters.
+- Statistics: one scan instead of three for total, average and outcomes; the response is cached for 30 seconds.
+- Fewer database round trips: geolocation cache saved with one `bulk_create` upsert instead of two queries per address; the daemon's reload reads both master switches in one query and records and hosts as plain values.
+- Query log indexes on `name`, `(domain, time)` and `(outcome, time)`. Needs `manage.py migrate` (0018).
+
 ## 1.0.1 — 2026-11-08
 - RFC 6303: reverse lookups (PTR) of private and special addresses (10/8, 172.16/12, 192.168/16, 100.64/10, 169.254/16, 127/8, `fc00::/7`, `fe80::/10`, `::1`) that no zone answers get NXDOMAIN from the daemon, with the `aa` flag and an SOA, and never go to the upstream (routers often answer SERVFAIL). `DNS_LOCAL_REVERSE=false` turns it off. A local reverse zone still answers first.
 - Deleting a zone needs a second factor (authenticator code or passkey) from the already signed-in user, no password: step-up endpoints `/api/mfa/stepup/…` give a one-use grant (2 minutes, one zone) that `DELETE /api/zones/<id>/` requires in `X-MFA-Grant`. Users with no second factor are not asked.

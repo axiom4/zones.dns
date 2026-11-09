@@ -6,6 +6,7 @@ from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.utils import timezone
 
+from zones import partitions, rollup
 from zones.models import QueryLog
 from zones.resolver import Resolver
 from dnslib.server import DNSServer
@@ -49,7 +50,13 @@ class Command(BaseCommand):
         try:
             while True:
                 close_old_connections()  # this thread sleeps for an hour: do not reuse a connection the database has closed meanwhile
-                QueryLog.objects.filter(time__lt=timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)).delete()
+                try:
+                    partitions.maintain()  # MySQL partitioned log: drops old days instantly, creates the next ones
+                except Exception as e:
+                    self.stderr.write(f'Log partitions: {e}')
+                cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
+                QueryLog.objects.filter(time__lt=cutoff).delete()
+                rollup.purge(cutoff)
                 time.sleep(3600)
         except KeyboardInterrupt:
             for s in servers:

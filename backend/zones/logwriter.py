@@ -9,6 +9,7 @@ import threading
 
 from django.db import close_old_connections
 
+from . import rollup
 from .models import QueryLog
 
 log = logging.getLogger(__name__)
@@ -55,6 +56,14 @@ class LogWriter:
             close_old_connections()
             for i in range(0, len(rows), self.batch_max):
                 QueryLog.objects.bulk_create(rows[i:i + self.batch_max])
+                self._count(rows[i:i + self.batch_max])
         except Exception:
             log.exception('query log: saving %d rows failed, will retry', len(rows))
             self._retry = rows[-self.queue_max:]  # bounded, newest kept
+
+    @staticmethod
+    def _count(rows):
+        try:
+            rollup.add(rows)
+        except Exception:
+            log.exception('statistics: counting %d saved rows failed (manage.py rebuild_stats recomputes them)', len(rows))

@@ -8,6 +8,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from .. import rollup
 from ..models import QueryLog
 from ..serializers import GroupResolvedSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
 from rest_framework.pagination import LimitOffsetPagination
@@ -81,6 +82,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         count = qs.count()
         if not dry:
             qs.delete()
+            rollup.purge(timezone.now() - timedelta(hours=hours) if hours else None)
         return Response({'count': count, 'dry_run': dry})
 
     @extend_schema(

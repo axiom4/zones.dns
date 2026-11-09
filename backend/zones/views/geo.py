@@ -1,14 +1,15 @@
 import ipaddress
 from datetime import timedelta
 
-from django.db.models import Count
+from django.db.models import Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .. import geo
-from ..models import QueryLog
+from ..models import GeoStat
+from ..rollup import floor_hour
 from ..serializers import DestinationsSerializer, GeoIpsResultSerializer
 
 
@@ -34,8 +35,8 @@ class GeoDestinationsView(APIView):
             hours = min(max(int(request.query_params.get('hours', 24)), 1), 720)
         except ValueError:
             hours = 24
-        # Every answered query of the window, grouped by identical (domain, answers) so the whole period is counted, not a sample.
-        # shortcut: at most 20000 distinct groups, most frequent first.
-        rows = list(QueryLog.objects.filter(time__gte=timezone.now() - timedelta(hours=hours)).exclude(answers=[])
-                    .values('domain', 'answers').annotate(n=Count('id')).order_by('-n')[:20000])
+        # The hourly counters of answered addresses per domain; the window starts at the hour.
+        # shortcut: at most 20000 distinct (domain, address) pairs, most frequent first.
+        rows = [{'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
+                for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:20000]]
         return Response(geo.destinations(rows))
