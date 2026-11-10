@@ -1,7 +1,7 @@
 import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve, geoWhoisRetrieve } from '../api/functions';
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
@@ -30,6 +30,7 @@ interface Open { subs: QueryLogGroup[] | null; total: number; rows: QueryLog[]; 
 export class LogsPage implements OnDestroy {
   private api = inject(Api);
   ui = inject(Ui);
+  private route = inject(ActivatedRoute);
   private pg = viewChild.required<ElementRef<HTMLDialogElement>>('pg');
   PAGE = PAGE;
   types = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR', 'SOA', 'SRV', 'TXT', 'HTTPS'];
@@ -44,6 +45,8 @@ export class LogsPage implements OnDestroy {
   // expanded hosts: their individual log rows
   names = signal<{ [name: string]: Sub }>({});
   q = ''; outcome = ''; type = ''; client = ''; rcode = ''; answer = ''; hours = 24; live = true;
+  country = ''; // set by the link from the geolocation page
+
   grouped = false; ordering: 'last' | 'count' = 'last';
   purgeHours = 168;
   purgeCount = signal<number | null>(null);
@@ -65,7 +68,14 @@ export class LogsPage implements OnDestroy {
     } catch { /* the filter still works with the IP typed before: never an error */ }
   }
 
-  constructor() { this.reset(); this.loadClients(); this.toggleLive(); }
+  constructor() {
+    const p = this.route.snapshot.queryParamMap;  // /logs?country=IT&hours=168, from the geolocation page
+    this.country = (p.get('country') ?? '').toUpperCase();
+    if ([1, 24, 168, 720].includes(Number(p.get('hours')))) this.hours = Number(p.get('hours'));
+    this.reset(); this.loadClients(); this.toggleLive();
+  }
+  countryName = countryName;
+  clearCountry() { this.country = ''; this.reset(); }
 
   // ---- popup with the details of a query / group, fetched only when it is opened ----
   detail = signal<Detail | null>(null);
@@ -133,7 +143,7 @@ export class LogsPage implements OnDestroy {
   search() { clearTimeout(this.timer); this.timer = setTimeout(() => this.reset(), 250); }
 
   private filters() {
-    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined };
+    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined, country: this.country || undefined };
   }
 
   /** Reload from the start. While live, keep as many rows as were already loaded so the list doesn't jump. */

@@ -9,7 +9,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .. import rollup
+from .. import geo, rollup
 from ..models import QueryLog, Record, StatCount
 from ..rollup import floor_hour
 from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
@@ -31,6 +31,7 @@ FILTERS = [
     OpenApiParameter('rcode', str, description='Response code, e.g. NXDOMAIN'),
     OpenApiParameter('answer', str, description='Text contained in the answer records, e.g. an IP address'),
     OpenApiParameter('hours', int, description='Only the last N hours'),
+    OpenApiParameter('country', str, description='Only domains whose answers point to this country (ISO code, PRIV or ??) in the period (24 hours if hours is not given)'),
 ]
 
 
@@ -51,6 +52,9 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.annotate(answers_text=Cast('answers', TextField())).filter(answers_text__icontains=p['answer'].strip())
         if p.get('hours', '').isdigit():
             qs = qs.filter(time__gte=timezone.now() - timedelta(hours=int(p['hours'])))
+        if p.get('country'):
+            hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24  # the counters have no 'all time': 24 h is the page default
+            qs = qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
         return qs
 
     @extend_schema(

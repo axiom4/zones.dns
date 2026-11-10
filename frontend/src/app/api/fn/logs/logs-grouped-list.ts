@@ -27,6 +27,11 @@ export interface LogsGroupedList$Params {
   client?: string;
 
 /**
+ * Only domains whose answers point to this country (ISO code, PRIV or ??) in the period (24 hours if hours is not given)
+ */
+  country?: string;
+
+/**
  * Exact registrable domain, e.g. example.com
  */
   domain?: string;
@@ -79,6 +84,7 @@ export function logsGroupedList(http: HttpClient, rootUrl: string, params?: Logs
     rb.query('answer', params.answer, {});
     rb.query('by', params.by, {});
     rb.query('client', params.client, {});
+    rb.query('country', params.country, {});
     rb.query('domain', params.domain, {});
     rb.query('hours', params.hours, {});
     rb.query('limit', params.limit, {});

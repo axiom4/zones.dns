@@ -58,6 +58,17 @@ def locate(ips, budget=150):
     return out, len(todo) - len(batch)
 
 
+def country_domains(code, hours):
+    """Registrable domains that had an answer pointing to country `code` (PRIV = private addresses, ?? = unknown) in the last `hours`.
+    Same data as the geolocation page. shortcut: a domain also answered from other countries is listed whole; at most 5000 domains."""
+    from .models import GeoStat
+    from .rollup import floor_hour
+    pairs = set(GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values_list('domain', 'ip').distinct())
+    found, _ = locate({ip for _, ip in pairs}, budget=0)  # only what is already known: no network lookups while listing the log
+    want = lambda g: (g['private'] if code == 'PRIV' else not g['private'] and (g['country'] or '??') == code)
+    return sorted({d for d, ip in pairs if d and ip in found and want(found[ip])})[:5000]
+
+
 def destinations(rows):
     """Aggregate answered A/AAAA addresses by country and network. rows: dicts with domain + answers + optional n (how many queries had them)."""
     per_ip = {}

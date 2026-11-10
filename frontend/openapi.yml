@@ -490,6 +490,12 @@ paths:
           type: string
         description: Exact client IP
       - in: query
+        name: country
+        schema:
+          type: string
+        description: Only domains whose answers point to this country (ISO code, PRIV
+          or ??) in the period (24 hours if hours is not given)
+      - in: query
         name: domain
         schema:
           type: string
@@ -644,6 +650,12 @@ paths:
         schema:
           type: string
         description: Exact client IP
+      - in: query
+        name: country
+        schema:
+          type: string
+        description: Only domains whose answers point to this country (ISO code, PRIV
+          or ??) in the period (24 hours if hours is not given)
       - in: query
         name: domain
         schema:

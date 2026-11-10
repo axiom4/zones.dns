@@ -1,7 +1,9 @@
-<svg [attr.viewBox]="'0 0 ' + W + ' ' + H" role="img" aria-label="Map of where the DNS answers point">
+<div class="mapwrap">
+<svg [attr.viewBox]="viewBox()" role="img" aria-label="Map of where the DNS answers point" [class.zoomed]="zoomed()"
+  (wheel)="wheel($event)" (pointerdown)="down($event)" (pointermove)="move($event)" (pointerup)="up()" (pointerleave)="up()">
   <rect class="sea" [attr.width]="W" [attr.height]="H" rx="14" />
   @for (s of shapes(); track s.id) {
-    <path class="land" [class.has]="s.queries > 0" [attr.d]="s.d" [style.fill]="s.fill" (click)="s.queries ? pick.emit(s.code) : null">
+    <path class="land" [class.has]="s.queries > 0" [attr.d]="s.d" [style.fill]="s.fill" (click)="click(s.code, s.queries)">
       <title>{{ s.title }}</title>
     </path>
   }
@@ -9,4 +11,10 @@
     <circle class="dot" [attr.cx]="p.x" [attr.cy]="p.y" [attr.r]="p.r"><title>{{ p.title }}</title></circle>
   }
 </svg>
+<div class="zoombar">
+  <button type="button" class="mini" (click)="zoom(1.5)" aria-label="Zoom in">+</button>
+  <button type="button" class="mini" (click)="zoom(1 / 1.5)" aria-label="Zoom out">−</button>
+  @if (zoomed()) { <button type="button" class="mini" (click)="reset()" aria-label="Reset zoom">⟲</button> }
+</div>
+</div>
 @if (!ready()) { <p class="soft">Carico la mappa…</p> }

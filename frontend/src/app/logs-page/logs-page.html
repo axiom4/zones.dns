@@ -9,6 +9,10 @@
     <button class="ghost" (click)="openPurge()">Purge log…</button>
   </div>
 </header>
+@if (country) {
+  <p class="notice" role="status">Only domains whose answers point to <b>{{ countryName(country) }}</b> ({{ hours > 24 ? 'last ' + hours / 24 + ' days' : hours === 1 ? 'last hour' : 'last 24 hours' }}).
+    <button class="mini" (click)="clearCountry()">Remove filter</button></p>
+}
 @if (notice()) { <p class="notice" role="status">{{ notice() }}</p> }
 
 <div class="composer filters">
@@ -37,6 +41,7 @@
     <option [ngValue]="1">Last hour</option>
     <option [ngValue]="24">Last 24 hours</option>
     <option [ngValue]="168">Last 7 days</option>
+    <option [ngValue]="720">Last 30 days</option>
     <option [ngValue]="0">All time</option>
   </select>
   @if (grouped) {

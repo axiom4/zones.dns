@@ -59,6 +59,7 @@
             }
             <p class="soft">Most requested domains</p>
             <div class="chips">@for (n of c.top_domains; track n) { <a class="chip-a link" routerLink="/audit" [queryParams]="{ domain: n }" title="Analyse the domain">{{ n }}</a> }</div>
+            <a class="ghost" routerLink="/logs" [queryParams]="{ country: c.country, hours }">Show these queries in the log</a>
             @if (c.asns.length) {
               <p class="soft">Networks</p>
               <div class="chips">@for (a of c.asns; track a) { <span class="chip-a">{{ a }}</span> }</div>

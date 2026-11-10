@@ -333,7 +333,9 @@ a.chip-a.link { text-decoration: none; color: inherit; } a.chip-a.link:hover { b
 
 /* map */
 app-geo-map { display: block; }
-app-geo-map svg { width: 100%; height: auto; display: block; }
+app-geo-map svg { width: 100%; height: auto; display: block; touch-action: none; cursor: grab; } app-geo-map svg.zoomed:active { cursor: grabbing; }
+.mapwrap { position: relative; } .zoombar { position: absolute; top: .5rem; right: .5rem; display: flex; flex-direction: column; gap: .25rem; }
+.land, .dot { vector-effect: non-scaling-stroke; }
 .sea { fill: #f3f1ff; }
 .land { fill: #e4e1f2; stroke: #fff; stroke-width: .6; }
 .land.has { cursor: pointer; stroke: #fff; } .land.has:hover { stroke: var(--ink); stroke-width: 1; }
