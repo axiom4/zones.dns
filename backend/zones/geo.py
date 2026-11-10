@@ -58,7 +58,7 @@ def locate(ips, budget=150):
     return out, len(todo) - len(batch)
 
 
-def destinations(rows, top_ips=1500):
+def destinations(rows):
     """Aggregate answered A/AAAA addresses by country and network. rows: dicts with domain + answers + optional n (how many queries had them)."""
     per_ip = {}
     for r in rows:
@@ -67,7 +67,7 @@ def destinations(rows, top_ips=1500):
             n = r.get('n', 1)
             d['q'] += n
             d['domains'][r['domain']] += n
-    ranked = sorted(per_ip.items(), key=lambda kv: -kv[1]['q'])[:top_ips]
+    ranked = sorted(per_ip.items(), key=lambda kv: -kv[1]['q'])  # no cap: a cap hid the rare countries, so a longer period showed fewer
     geo, pending = locate([ip for ip, _ in ranked])
     countries, networks, points = {}, {}, {}
     for ip, d in ranked:
