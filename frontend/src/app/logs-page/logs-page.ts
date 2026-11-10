@@ -51,7 +51,7 @@ export class LogsPage implements OnDestroy {
   purgeHours = 168;
   purgeCount = signal<number | null>(null);
   private timer?: ReturnType<typeof setTimeout>;
-  private poll?: ReturnType<typeof setInterval>;
+  private poll?: ReturnType<typeof setTimeout>;
 
   // distinct client IPs (with their name in the default zone) for the filter; refreshed when the list is opened and when the period changes
   clients = signal<QueryLogClient[]>([]);
@@ -134,7 +134,7 @@ export class LogsPage implements OnDestroy {
     });
   }
 
-  ngOnDestroy() { clearTimeout(this.timer); clearInterval(this.poll); }
+  ngOnDestroy() { clearTimeout(this.timer); clearTimeout(this.poll); }
 
   time(iso: string) { return new Date(iso).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
   isOpen(name: string, level: number) { return name in (level === 0 ? this.domains() : this.names()); }
@@ -257,8 +257,18 @@ export class LogsPage implements OnDestroy {
   }
 
   toggleLive() {
-    clearInterval(this.poll);
-    if (this.live) this.poll = setInterval(() => this.reset(), 3000);
+    clearTimeout(this.poll);
+    if (this.live) this.refresh(3000);
+  }
+
+  /** Live refresh: one request at a time (a slow one used to be overtaken by the next, and they piled up on the server), nothing while the tab is
+   * hidden, and the wait grows with the time the last refresh took (at least 3 s, three times as long as the request). */
+  private refresh(delay: number) {
+    this.poll = setTimeout(async () => {
+      let next = delay;
+      if (!document.hidden) { const t = Date.now(); await this.reset(); next = Math.max(3000, 3 * (Date.now() - t)); }
+      if (this.live) this.refresh(next);
+    }, delay);
   }
 
   notice = signal('');

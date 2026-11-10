@@ -51,6 +51,8 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
     def get_queryset(self):
         p = self.request.query_params
         qs = QueryLog.objects.order_by('-time', '-id')
+        if self.action == 'list':
+            qs = qs.defer('answers')  # the list does not show them (the answers endpoint does): no need to read the JSON of every row
         if p.get('q'):
             qs = qs.filter(name__icontains=p['q'].strip())
         for f in ('name', 'domain', 'type', 'outcome', 'client', 'rcode'):
