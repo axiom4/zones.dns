@@ -1,7 +1,8 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { blockedImportedRetrieve, blockedPublicPartialUpdate, blockedPublicRetrieve } from '../api/functions';
+import { blockedImportedRetrieve, blockedListsList, blockedListsPartialUpdate, blockedPublicPartialUpdate, blockedPublicRetrieve } from '../api/functions';
+import { PublicList } from '../api/models';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -13,6 +14,8 @@ export class BlockedListsPage {
   private api = inject(Api);
   private ui = inject(Ui);
   q = '';
+  list = ''; // show only the domains of this list ('' = all)
+  lists = signal<PublicList[]>([]);
   names = signal<string[]>([]);
   count = signal(0);
 
@@ -20,17 +23,22 @@ export class BlockedListsPage {
 
   constructor() {
     this.search();
-    this.ui.run(async () => this.active.set((await this.api.invoke(blockedPublicRetrieve)).enabled));
+    this.ui.run(async () => { this.active.set((await this.api.invoke(blockedPublicRetrieve)).enabled); this.lists.set(await this.api.invoke(blockedListsList, {})); });
   }
   switchAll() {
     return this.ui.run(async () => { this.active.set((await this.api.invoke(blockedPublicPartialUpdate, { body: { enabled: !this.active() } })).enabled); });
   }
 
+  toggle(l: PublicList) {
+    return this.ui.run(async () => this.lists.set(await this.api.invoke(blockedListsPartialUpdate, { body: { name: l.name, enabled: !l.enabled } })));
+  }
+  pick(name: string) { this.list = this.list === name ? '' : name; return this.search(); }
+
   search() { return this.fetch(0); }
   more() { return this.fetch(this.names().length); }
   private fetch(offset: number) {
     return this.ui.run(async () => {
-      const r = await this.api.invoke(blockedImportedRetrieve, { q: this.q, offset, limit: 100 });
+      const r = await this.api.invoke(blockedImportedRetrieve, { q: this.q, list: this.list || undefined, offset, limit: 100 });
       this.names.set(offset ? [...this.names(), ...r.names] : r.names);
       this.count.set(r.count);
     });

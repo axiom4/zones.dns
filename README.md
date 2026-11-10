@@ -27,7 +27,7 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 |---|---|
 | **Zones** | Forward and reverse zones (from a CIDR), records with a guided form for 13 types (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, NAPTR, HTTPS, CAA, SSHFP, TLSA), wildcards, enable/disable, notes, bulk actions, zone file import/export, automatic PTR records. `DEFAULT_ZONE` picks the zone opened by default. A zone can be switched off (switch next to its name): it is kept but not served, and its names are answered as if it did not exist. Record list sortable by type, host, IP / value or TTL (default: by IP; in a reverse zone "IP" is the full address and "host" the PTR name). Names in a value (CNAME, MX, NS, SRV, PTR) outside the zone need the final dot: `axiom4.net.`, otherwise they are relative to the zone. |
 | **Hosts** | Static host names, like `/etc/hosts`: a name is answered with the IPv4/IPv6 address you set, whatever the real DNS says. Several addresses per name, TTL, note, enable/disable. |
-| **Blacklist** | *Personal blocks* (domains you block by hand or allow as exceptions that win over the public lists, editable, with an on/off switch each and a master switch for all of them; a hint list of names that look like trackers) and *Public lists* (imported, read-only, searchable; each has a master on/off switch next to its title). Blocked domains and their subdomains answer NXDOMAIN. |
+| **Blacklist** | *Personal blocks* (domains you block by hand or allow as exceptions that win over the public lists, editable, with an on/off switch each and a master switch for all of them; a hint list of names that look like trackers) and *Public lists* (imported, read-only, searchable; a master on/off switch next to the title and one for each list; the query log names the list that blocked a name). Blocked domains and their subdomains answer NXDOMAIN. |
 | **Query log** | Search and filters, grouping by domain (with subdomains), the full answer of every query, one-click blocking, a button to purge old entries. |
 | **Geolocation** | Where DNS answers point: countries, networks, cities and a map (see below). |
 | **Domain audit** | Public information about a domain: DNS, DNSSEC, mail (SPF/DMARC/DKIM/MTA-STS), RDAP, TLS, web headers, subdomains; every test has its own "Output". |
@@ -110,7 +110,7 @@ Thresholds are in `.env.example`. Add the legitimate main domains that get flagg
 
 ```sh
 python manage.py import_blocklist                  # the lists in BLOCKLISTS (default: StevenBlack, OISD small, 1Hosts Lite and HaGeZi: Ultimate, TIF, Popup Ads, Fake, native telemetry; about 1.3 million domains), merged
-python manage.py import_blocklist <url|file> ...   # other lists: hosts format or one domain per line
+python manage.py import_blocklist [name=]<url|file> ...   # other lists: hosts format or one domain per line; the name labels the entries
 python manage.py scan_trackers [--apply]       # heuristic: redirect + cookie (see below)
 ```
 

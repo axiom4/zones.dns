@@ -16,6 +16,8 @@
   <input class="grow" name="b" [(ngModel)]="name" placeholder="domain, e.g. ads.example.com" autocomplete="off" aria-label="Domain" required>
   <button class="primary">Block</button>
   <button type="button" (click)="add(true)" [disabled]="!name.trim()" title="Never block this domain and its subdomains">Allow</button>
+  <select name="h" [(ngModel)]="hours" aria-label="How long an Allow lasts" title="How long an Allow lasts"><option [ngValue]="0">always</option><option [ngValue]="1">1 hour</option><option [ngValue]="24">1 day</option><option [ngValue]="168">7 days</option></select>
+  <label class="soft"><input type="checkbox" name="r" [(ngModel)]="regex"> pattern (regex)</label>
 </form>
 @if (suggestions().length) {
   <details class="panel">
@@ -30,7 +32,7 @@
 }
 <ul class="records blocked">
   @for (b of shown(); track b.id) {
-    <li [class.off]="!active() || b.enabled === false">
+    <li [class.off]="!active() || b.enabled === false || expired(b)">
       @if (editing() === b.id) {
         <form class="grow inline" (ngSubmit)="save(b)">
           <input class="grow" name="e" [(ngModel)]="draft" autocomplete="off" aria-label="New name" required autofocus>
@@ -39,7 +41,9 @@
         </form>
       } @else {
         <span class="rvalue">{{ b.name }}</span>
+        @if (b.regex) { <span class="type" data-t="TXT" title="Matches the queried name as a regular expression">regex</span> }
         @if (b.allow) { <span class="out sm" data-o="local" title="Never blocked by the lists">Allowed</span> }
+        @if (b.expires) { <span class="soft" [title]="'Ends ' + until(b)">{{ expired(b) ? 'expired' : 'until ' + until(b) }}</span> }
         <span class="ttlv wide">{{ b.created.slice(0, 10) }}</span>
         <button class="switch" role="switch" [attr.aria-checked]="active() && b.enabled !== false" (click)="toggle(b)" [disabled]="!active()"
                 [title]="!active() ? 'Personal blocks are off' : b.enabled === false ? (b.allow ? 'Disabled: click to allow again' : 'Disabled: click to block again') : (b.allow ? 'Enabled: click to stop allowing' : 'Enabled: click to stop blocking')"><i></i></button>

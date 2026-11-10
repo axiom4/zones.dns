@@ -4,5 +4,7 @@
 export interface BlockedDomainRequest {
   allow?: boolean;
   enabled?: boolean;
+  expires?: string | null;
   name: string;
+  regex?: boolean;
 }

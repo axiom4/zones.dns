@@ -11,6 +11,14 @@ from zones.models import BlockedDomain, DataVersion
 LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
 
 
+def split_source(entry):
+    """('name', 'url or path') from `name=url`; a plain URL or path is named after its file."""
+    m = re.match(r'^([a-z0-9._-]{1,40})=(.+)$', entry)
+    if m and not m[1].startswith(('http', 'file')):
+        return m[1], m[2]
+    return re.sub(r'[^a-z0-9._-]', '-', entry.rstrip('/').rsplit('/', 1)[-1].lower())[:40] or 'list', entry
+
+
 def parse(text):
     """Domains from a hosts file ('0.0.0.0 bad.com') or a plain list (one domain per line); comments ignored."""
     out = set()
@@ -32,8 +40,9 @@ class Command(BaseCommand):
         p.add_argument('sources', nargs='*', help='URLs or file paths (hosts format or one domain per line); default: BLOCKLISTS')
 
     def handle(self, *a, sources, **o):
-        names = set()
-        for source in sources or settings.BLOCKLISTS:
+        names = {}  # domain -> the first list that has it
+        for entry in sources or settings.BLOCKLISTS:
+            label, source = split_source(entry)
             if source.startswith(('http://', 'https://')):
                 req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
                 try:
@@ -46,11 +55,13 @@ class Command(BaseCommand):
             found = parse(text)
             if not found:
                 raise SystemExit(f'{source}: no domains found: blacklist left unchanged')
-            self.stdout.write(f'{source}: {len(found)} domains')
-            names |= found
+            self.stdout.write(f'{label}: {len(found)} domains')
+            for d in found:
+                names.setdefault(d, label)
         manual = set(BlockedDomain.objects.filter(source='manual').values_list('name', flat=True))
+        todo = {n: label for n, label in names.items() if n not in manual}
         with transaction.atomic():
             BlockedDomain.objects.filter(source='list').delete()
-            BlockedDomain.objects.bulk_create([BlockedDomain(name=n, source='list') for n in names - manual], batch_size=2000)
+            BlockedDomain.objects.bulk_create([BlockedDomain(name=n, source='list', list_name=label) for n, label in todo.items()], batch_size=2000)
             transaction.on_commit(DataVersion.bump)  # after the commit, so the daemon never reloads half-way
-        self.stdout.write(f'{len(names - manual)} domains imported')
+        self.stdout.write(f'{len(todo)} domains imported')

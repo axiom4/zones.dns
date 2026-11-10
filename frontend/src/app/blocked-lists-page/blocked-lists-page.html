@@ -6,9 +6,21 @@
               [title]="active() ? 'Public lists are on: click to turn them all off' : 'Public lists are off: click to turn them on'"><i></i></button>
       <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
     </div>
-    <p class="soft">{{ count() }} domains {{ q ? 'found' : 'imported' }}. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
+    <p class="soft">{{ count() }} domains {{ q || list ? 'found' : 'imported' }}. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
   </div>
 </header>
+@if (lists().length) {
+  <ul class="records blocked">
+    @for (l of lists(); track l.name) {
+      <li [class.off]="!active() || !l.enabled">
+        <button class="rvalue linkish" (click)="pick(l.name)" [attr.aria-pressed]="list === l.name" title="Show only the domains of this list">{{ l.name }}</button>
+        <span class="ttlv wide">{{ l.count }} domains</span>
+        <button class="switch" role="switch" [attr.aria-checked]="active() && l.enabled" (click)="toggle(l)" [disabled]="!active()"
+                [title]="!active() ? 'Public lists are off' : l.enabled ? 'On: click to ignore this list' : 'Off: click to use this list again'"><i></i></button>
+      </li>
+    }
+  </ul>
+}
 <form class="composer" (ngSubmit)="search()">
   <input class="grow" name="q" [(ngModel)]="q" placeholder="search the imported lists" autocomplete="off" aria-label="Search the imported lists">
   <button class="primary">Search</button>

@@ -5,6 +5,8 @@ export interface BlockedDomain {
   allow?: boolean;
   created: string;
   enabled?: boolean;
+  expires?: string | null;
   id: number;
   name: string;
+  regex?: boolean;
 }

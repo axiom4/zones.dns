@@ -11,6 +11,11 @@ import { ImportedBlocked } from '../../models/imported-blocked';
 
 export interface BlockedImportedRetrieve$Params {
   limit?: number;
+
+/**
+ * Only this public list
+ */
+  list?: string;
   offset?: number;
   q?: string;
 }
@@ -19,6 +24,7 @@ export function blockedImportedRetrieve(http: HttpClient, rootUrl: string, param
   const rb = new RequestBuilder(rootUrl, blockedImportedRetrieve.PATH, 'get');
   if (params) {
     rb.query('limit', params.limit, {});
+    rb.query('list', params.list, {});
     rb.query('offset', params.offset, {});
     rb.query('q', params.q, {});
   }

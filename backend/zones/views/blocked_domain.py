@@ -1,17 +1,17 @@
 import re
 from datetime import timedelta
 
-from django.db.models import Sum
+from django.db.models import Count, Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from ..models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
+from ..models import LISTS_OFF, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
 from ..resolver import blocked_match
 from ..rollup import floor_hour
-from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer
+from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer, PublicListSwitchSerializer
 from ..serializers.stats import CountSerializer
 
 # a label that names what the host is for: ads, tracking, telemetry
@@ -22,11 +22,14 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
     queryset = BlockedDomain.objects.filter(source='manual').order_by('name')
     serializer_class = BlockedDomainSerializer
 
-    @extend_schema(parameters=[OpenApiParameter('q', str), OpenApiParameter('offset', int), OpenApiParameter('limit', int)], responses=ImportedBlockedSerializer)
+    @extend_schema(parameters=[OpenApiParameter('q', str), OpenApiParameter('list', str, description='Only this public list'), OpenApiParameter('offset', int),
+                               OpenApiParameter('limit', int)], responses=ImportedBlockedSerializer)
     @action(detail=False, methods=['get'])
     def imported(self, request):
         """Domains imported from public blocklists (read-only, searchable, paged: there can be tens of thousands)."""
         qs = BlockedDomain.objects.filter(source='list').order_by('name')
+        if lst := request.query_params.get('list', '').strip():
+            qs = qs.filter(list_name=lst)
         if q := request.query_params.get('q', '').strip().lower():
             qs = qs.filter(name__contains=q)
         try:
@@ -34,6 +37,20 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
         except ValueError:
             offset, limit = 0, 100
         return Response({'count': qs.count(), 'names': list(qs.values_list('name', flat=True)[offset:offset + limit])})
+
+    @extend_schema(request=PublicListSwitchSerializer, responses=PublicListSerializer(many=True))
+    @action(detail=False, methods=['get', 'patch'])
+    def lists(self, request):
+        """The imported public lists, each with its domain count and an on/off switch (off = its domains are kept but ignored)."""
+        off = set(filter(None, (Setting.objects.filter(key=LISTS_OFF).values_list('value', flat=True).first() or '').split(',')))
+        if request.method == 'PATCH':
+            ser = PublicListSwitchSerializer(data=request.data)
+            ser.is_valid(raise_exception=True)
+            name, on = ser.validated_data['name'], ser.validated_data['enabled']
+            off = off - {name} if on else off | {name}
+            Setting.objects.update_or_create(key=LISTS_OFF, defaults={'value': ','.join(sorted(off))})
+        rows = BlockedDomain.objects.filter(source='list').values('list_name').annotate(n=Count('id')).order_by('list_name')
+        return Response([{'name': r['list_name'] or 'list', 'count': r['n'], 'enabled': r['list_name'] not in off} for r in rows])
 
     @extend_schema(parameters=[OpenApiParameter('days', int, description='Look back this many days (default 7, max 30)')], responses=CountSerializer(many=True))
     @action(detail=False, methods=['get'])

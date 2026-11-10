@@ -11,7 +11,7 @@ from zones.tracker_scan import probe
 
 class Command(BaseCommand):
     help = ('Probe the domains seen in the query log over HTTP and blacklist those that redirect to another domain '
-            'AND set persistent / cross-site cookies. Dry run unless --apply.')
+            'or answer with a tracking pixel AND set persistent / cross-site cookies. Dry run unless --apply.')
 
     def add_arguments(self, p):
         p.add_argument('--days', type=int, default=settings.QUERY_LOG_DAYS)
@@ -27,10 +27,10 @@ class Command(BaseCommand):
         with ThreadPoolExecutor(8) as ex:
             results = list(ex.map(probe, todo))
         hits = 0
-        for d, (target, cookies) in zip(todo, results):
-            if target and cookies:
+        for d, (target, cookies, pixel) in zip(todo, results):
+            if cookies and (target or pixel):  # a redirect to another domain, or a tracking pixel, together with persistent / cross-site cookies
                 hits += 1
-                self.stdout.write(f'{d}: redirect -> {target}, cookie {", ".join(sorted(set(cookies)))}')
+                self.stdout.write(f'{d}: {f"redirect -> {target}" if target else "tracking pixel"}, cookie {", ".join(sorted(set(cookies)))}')
                 if apply:
                     BlockedDomain.objects.get_or_create(name=d)
         self.stdout.write(f'{len(todo)} domains probed, {hits} match' + ('' if apply else ' (dry run: use --apply to blacklist)'))

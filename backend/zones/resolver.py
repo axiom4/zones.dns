@@ -1,3 +1,4 @@
+import re
 import threading
 import time
 from collections import defaultdict
@@ -6,12 +7,14 @@ from concurrent.futures import ThreadPoolExecutor
 from django.conf import settings
 from django.core.cache import cache
 from django.db import connection
+from django.db.models import Q
+from django.utils import timezone
 from dnslib import AAAA, EDNS0, OPCODE, QTYPE, RCODE, RR, SOA, A, DNSHeader, DNSRecord
 from dnslib.server import BaseResolver
 
 from .domains import main_domain
 from . import rollup, suspicious
-from .models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, DataVersion, QueryLog, Record, Setting, StaticHost, Zone
+from .models import LISTS_OFF, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, DataVersion, QueryLog, Record, Setting, StaticHost, Zone
 
 
 # The zones, their enabled records and the blacklist answers stay in memory until the data changes. The API runs in another process, so every
@@ -25,7 +28,9 @@ _data_at = 0.0  # when the copy was made
 _data_checked = 0.0  # when the counter was last read
 _data_version = None
 _off_sources = frozenset()  # sources whose master switch is off (Setting): 'manual' = Personal blocks, 'list' = Public lists; read at every reload
-_blocked = {}  # name -> blacklist entry or None; emptied when the data changes
+_off_lists = frozenset()  # public lists switched off one by one (Setting LISTS_OFF)
+_regexes = ()  # enabled personal pattern entries: (compiled pattern, pattern text, allow)
+_blocked = {}  # name -> (blacklist entry, where it came from) or None; emptied when the data changes
 _NONE = ''  # a name that is not blocked, as stored in Redis (a missing key means "not asked yet")
 
 
@@ -46,7 +51,7 @@ def _build():
 
 
 def _load():
-    global _data, _data_at, _data_version, _off_sources
+    global _data, _data_at, _data_version, _off_sources, _off_lists, _regexes
     version = DataVersion.version()  # read before the data: a change during the load makes the next check reload again
     plain = None
     if _shared():
@@ -64,9 +69,26 @@ def _load():
     names, plain_recs, hosts = plain
     by_name = {key: [Record(name=key[1], type=t, value=v, ttl=ttl, zone=Zone(name=key[0])) for t, v, ttl in rows] for key, rows in plain_recs.items()}
     _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name, hosts), time.monotonic(), version
-    off = set(Setting.objects.filter(key__in=[PERSONAL_BLOCKS, PUBLIC_LISTS], value='false').values_list('key', flat=True))  # one query for both switches
-    _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if key in off)
+    st = dict(Setting.objects.filter(key__in=[PERSONAL_BLOCKS, PUBLIC_LISTS, LISTS_OFF]).values_list('key', 'value'))  # one query for the switches
+    _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if st.get(key) == 'false')
+    _off_lists = frozenset(n for n in st.get(LISTS_OFF, '').split(',') if n)
+    _regexes = () if 'manual' in _off_sources else _load_regexes()
     _blocked.clear()
+
+
+def _live(qs):
+    """Entries that have not expired. shortcut: expiry is looked at when the data is (re)loaded and per name, so a temporary entry ends up to DNS_DATA_TTL late."""
+    return qs.filter(Q(expires__isnull=True) | Q(expires__gt=timezone.now()))
+
+
+def _load_regexes():
+    out = []
+    for name, allow in _live(BlockedDomain.objects.filter(enabled=True, regex=True)).values_list('name', 'allow'):
+        try:
+            out.append((re.compile(name), name, allow))
+        except re.error:
+            pass  # the API refuses a bad pattern; one that got in anyway just does nothing
+    return tuple(out)
 
 
 def _snapshot():
@@ -189,8 +211,9 @@ def negative(request, zone, exists):
     return reply
 
 
-def blocked_match(qname):
-    """The blacklist entry that covers qname (itself or a parent), or None. Answers are remembered per name until the data changes."""
+def blocked_entry(qname):
+    """(blacklist entry, where it came from) that covers qname, or None. Domain entries cover the name and its subdomains and the most specific wins;
+    an allow entry (exception) beats a block. A pattern entry is tried last for a block, first for an allow. Remembered per name until the data changes."""
     _snapshot()  # notices a change and empties _blocked
     if qname in _blocked:
         return _blocked[qname]
@@ -198,37 +221,52 @@ def blocked_match(qname):
         try:
             stored = cache.get(f'bl:{_data_version}:{qname}')
             if stored is not None:
-                _blocked[qname] = match = stored or None
-                return match
+                _blocked[qname] = hit = tuple(stored.split('\t')) if stored else None
+                return hit
         except Exception:
             pass
     labels = qname.rstrip('.').lower().split('.')
     suffixes = ['.'.join(labels[i:]) for i in range(len(labels))]
-    found = BlockedDomain.objects.filter(enabled=True, name__in=suffixes)
+    found = _live(BlockedDomain.objects.filter(enabled=True, regex=False, name__in=suffixes))
     if _off_sources:
         found = found.exclude(source__in=_off_sources)  # a feature that is switched off blocks nothing
-    hit = max(found, key=lambda b: len(b.name), default=None)  # the most specific entry wins: an allowed host inside a blocked domain, and the reverse
-    if hit and hit.allow:
+    if _off_lists:
+        found = found.exclude(source='list', list_name__in=_off_lists)
+    top = max(found, key=lambda b: len(b.name), default=None)  # the most specific entry wins: an allowed host inside a blocked domain, and the reverse
+    pats = [(p, allow) for rx, p, allow in _regexes if rx.search(qname)]
+    if any(allow for _, allow in pats) or (top and top.allow):
+        hit = None
+    elif top:
+        hit = (top.name, 'personal' if top.source == 'manual' else top.list_name or 'list')
+    elif pats:
+        hit = (qname, f'pattern {pats[0][0]}')  # the name asked for, not the pattern: it becomes the owner of the SOA of the answer
+    else:
         hit = None
     if len(_blocked) > 20000:  # bounded: names that were asked once are the bulk
         _blocked.clear()
-    _blocked[qname] = match = hit.name if hit else None
+    _blocked[qname] = hit
     if _shared():
         try:
-            cache.set(f'bl:{_data_version}:{qname}', match or _NONE, settings.DNS_DATA_TTL)
+            cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit) if hit else _NONE, settings.DNS_DATA_TTL)
         except Exception:
             pass
-    return match
+    return hit
+
+
+def blocked_match(qname):
+    """The blacklist entry that covers qname, or None."""
+    hit = blocked_entry(qname)
+    return hit[0] if hit else None
 
 
 def cname_blocked(reply):
-    """(target, blacklist entry) of the first CNAME in the answer that points at a blocked name, else None: a tracker hidden behind a
+    """(target, blacklist entry, where it came from) of the first CNAME in the answer that points at a blocked name, else None: a tracker hidden behind a
     subdomain of the site (CNAME cloaking) is only seen in the answer, never in the name that was asked."""
     for rr in reply.rr:
         if rr.rtype == QTYPE.CNAME:
             target = str(rr.rdata.label).rstrip('.').lower()
-            if match := blocked_match(target):
-                return target, match
+            if hit := blocked_entry(target):
+                return target, *hit
     return None
 
 
@@ -323,14 +361,14 @@ class Resolver(BaseResolver):
             elif settings.DNS_LOCAL_REVERSE and (zone := local_reverse(qname)):
                 outcome, via = 'local', f'private reverse zone {zone} (RFC 6303)'
                 reply = negative(request, zone, qname == zone)
-            elif (match := blocked_match(qname)):
-                outcome, reply, via = 'blocked', blocked_reply(request, match), f'blacklist {match}'
+            elif (hit := blocked_entry(qname)):
+                outcome, reply, via = 'blocked', blocked_reply(request, hit[0]), f'blacklist {hit[0]} ({hit[1]})'
             elif (why := suspicious.check(qname, qtype, handler.client_address[0])) and settings.SUSPICIOUS_MODE == 'block':
                 outcome, reply, via = 'blocked', blocked_reply(request, qname), f'suspicious: {why}'
             else:
                 reply, via = self.forward(request)
                 if cloak := cname_blocked(reply):
-                    outcome, reply, via = 'blocked', blocked_reply(request, cloak[1]), f'cname {cloak[0]} -> blacklist {cloak[1]}'
+                    outcome, reply, via = 'blocked', blocked_reply(request, cloak[1]), f'cname {cloak[0]} -> blacklist {cloak[1]} ({cloak[2]})'
                 else:
                     outcome = 'error' if reply.header.rcode == RCODE.SERVFAIL else 'forwarded'
                     if why:  # log-only mode

@@ -17,6 +17,8 @@ export class BlockedPage {
   filter = signal('');
   shown = computed(() => { const q = this.filter().trim().toLowerCase(); return q ? this.blocked().filter(b => b.name.includes(q)) : this.blocked(); });
   name = '';
+  regex = false;
+  hours = 0; // an allow that lasts this many hours; 0 = always
   editing = signal<number | null>(null);
   draft = '';
 
@@ -41,8 +43,11 @@ export class BlockedPage {
     return this.ui.run(async () => { await this.api.invoke(blockedPartialUpdate, { id: b.id, body: { name: this.draft } }); this.editing.set(null); await this.load(); });
   }
   add(allow = false) {
-    return this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name: this.name, allow } }); this.name = ''; await this.load(); });
+    return this.ui.run(async () => { const expires = allow && this.hours ? new Date(Date.now() + this.hours * 3_600_000).toISOString() : null;
+      await this.api.invoke(blockedCreate, { body: { name: this.name, allow, regex: this.regex, expires } }); this.name = ''; await this.load(); });
   }
+  expired(b: BlockedDomain) { return !!b.expires && new Date(b.expires).getTime() < Date.now(); }
+  until(b: BlockedDomain) { return new Date(b.expires!).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }); }
   suggested(name: string) {
     return this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name } }); await this.load(); });
   }

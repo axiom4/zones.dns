@@ -233,16 +233,17 @@ DNS_DATA_TTL = float(os.environ.get('DNS_DATA_TTL', '300'))  # a copy of zones/r
 DNS_STALE_TTL = int(os.environ.get('DNS_STALE_TTL', '86400'))  # seconds an expired answer may still be served when every upstream is down; 0 = never
 
 # Suspicious queries (tunnelling, DGA, recon). off | log (only flag in the query log) | block (answer NXDOMAIN).
-# Public lists loaded by `manage.py import_blocklist` (comma-separated URLs: hosts format or one domain per line).
+# Public lists loaded by `manage.py import_blocklist`: comma-separated `name=url` (or just a URL; hosts format or one domain per line). The name labels
+# the entries (the log says which list blocked a name) and lets the GUI switch one list off.
 # HaGeZi (github.com/hagezi/dns-blocklists): Ultimate already contains Pro++, Pro, Multi and Light, TIF the threat feeds; left out on purpose: lists that
 # block whole categories (social, gambling, nsfw, ...), VPN/DoH, hosters and dynamic DNS, and the allow lists.
 _HAGEZI = 'https://raw.githubusercontent.com/hagezi/dns-blocklists/main/wildcard/%s-onlydomains.txt'
 BLOCKLISTS = [u.strip() for u in os.environ.get('BLOCKLISTS', ','.join([
-    'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts',  # ads + malware
-    'https://small.oisd.nl/domainswild2',  # OISD small: ads, trackers, malware, curated against false positives
-    'https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt',  # 1Hosts Lite
-    *(_HAGEZI % n for n in ('ultimate', 'tif', 'popupads', 'fake', 'native.amazon', 'native.apple', 'native.huawei', 'native.lgwebos',
-                            'native.oppo-realme', 'native.roku', 'native.samsung', 'native.vivo', 'native.winoffice', 'native.xiaomi')),
+    'stevenblack=https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts',  # ads + malware
+    'oisd=https://small.oisd.nl/domainswild2',  # OISD small: ads, trackers, malware, curated against false positives
+    '1hosts=https://raw.githubusercontent.com/badmojr/1Hosts/master/Lite/hosts.txt',  # 1Hosts Lite
+    *(f'hagezi-{n}=' + _HAGEZI % n for n in ('ultimate', 'tif', 'popupads', 'fake')),
+    *(f'hz-{n}=' + _HAGEZI % f'native.{n}' for n in ('amazon', 'apple', 'huawei', 'lgwebos', 'oppo-realme', 'roku', 'samsung', 'vivo', 'winoffice', 'xiaomi')),
 ])).split(',') if u.strip()]
 SUSPICIOUS_MODE = os.environ.get('SUSPICIOUS_MODE', 'block')
 SUSPICIOUS_ALLOW = {d.strip().lower() for d in os.environ.get('SUSPICIOUS_ALLOW', '').split(',') if d.strip()}  # main domains never checked

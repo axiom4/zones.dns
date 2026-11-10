@@ -175,6 +175,11 @@ paths:
         schema:
           type: integer
       - in: query
+        name: list
+        schema:
+          type: string
+        description: Only this public list
+      - in: query
         name: offset
         schema:
           type: integer
@@ -192,6 +197,46 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ImportedBlocked'
+          description: ''
+  /api/blocked/lists/:
+    get:
+      operationId: blocked_lists_list
+      description: The imported public lists, each with its domain count and an on/off
+        switch (off = its domains are kept but ignored).
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicList'
+          description: ''
+    patch:
+      operationId: blocked_lists_partial_update
+      description: The imported public lists, each with its domain count and an on/off
+        switch (off = its domains are kept but ignored).
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedPublicListSwitchRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PublicList'
           description: ''
   /api/blocked/personal/:
     get:
@@ -1711,6 +1756,12 @@ components:
           type: boolean
         allow:
           type: boolean
+        regex:
+          type: boolean
+        expires:
+          type: string
+          format: date-time
+          nullable: true
         created:
           type: string
           format: date-time
@@ -1730,6 +1781,12 @@ components:
           type: boolean
         allow:
           type: boolean
+        regex:
+          type: boolean
+        expires:
+          type: string
+          format: date-time
+          nullable: true
       required:
       - name
     Bucket:
@@ -2500,9 +2557,23 @@ components:
           type: boolean
         allow:
           type: boolean
+        regex:
+          type: boolean
+        expires:
+          type: string
+          format: date-time
+          nullable: true
     PatchedPersonalSwitchRequest:
       type: object
       properties:
+        enabled:
+          type: boolean
+    PatchedPublicListSwitchRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
         enabled:
           type: boolean
     PatchedRecordRequest:
@@ -2571,6 +2642,19 @@ components:
           type: boolean
       required:
       - enabled
+    PublicList:
+      type: object
+      properties:
+        name:
+          type: string
+        count:
+          type: integer
+        enabled:
+          type: boolean
+      required:
+      - count
+      - enabled
+      - name
     PurgeRequestRequest:
       type: object
       properties:
