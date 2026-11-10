@@ -18,7 +18,7 @@
             <p class="label">{{ g.title }}</p>
             @for (z of g.zones; track z.id) {
               <div class="zone" routerLinkActive="active" [class.off]="z.enabled === false">
-                <a class="zname" [routerLink]="['/zones', z.id]" [title]="z.cidr ?? ''">{{ z.name }}</a>
+                <a class="zname" [routerLink]="['/zones', z.id]" [title]="z.cidr ? z.name : ''">{{ z.cidr ?? z.name }}</a>
                 <button class="icon" (click)="store.del(z)" [attr.aria-label]="'Delete ' + z.name">✕</button>
               </div>
             } @empty {
