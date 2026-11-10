@@ -20,6 +20,14 @@ class LogPagination(LimitOffsetPagination):
     default_limit = 50
     max_limit = 500
 
+    def get_count(self, queryset):
+        # shortcut: counts up to COUNT_CAP rows. An exact COUNT(*) over millions of log rows ran on every page and every live refresh;
+        # beyond the cap the total shows as COUNT_CAP (the pages themselves still go on to the end)
+        return queryset.order_by().values('pk')[:COUNT_CAP].count() if queryset.query.group_by is None else queryset.order_by().count()  # no ORDER BY MAX(...) inside the count
+
+
+COUNT_CAP = 100_000
+
 
 FILTERS = [
     OpenApiParameter('q', str, description='Name contains (case-insensitive)'),
