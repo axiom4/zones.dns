@@ -6,16 +6,28 @@
               [title]="active() ? 'Personal blocks are on: click to turn them all off' : 'Personal blocks are off: click to turn them on'"><i></i></button>
       <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
     </div>
-    <p class="soft">{{ blocked().length }} {{ blocked().length === 1 ? 'blocked domain' : 'blocked domains' }}. The domain and its subdomains answer NXDOMAIN (switch a block off to keep it without blocking); internal zones are never blocked.</p>
+    <p class="soft">{{ blocked().length }} {{ blocked().length === 1 ? 'entry' : 'entries' }}. A blocked domain and its subdomains answer NXDOMAIN (switch a block off to keep it without blocking); an allowed one is never blocked by the public lists, and the longest entry wins. Internal zones are never blocked.</p>
   </div>
   @if (blocked().length > 5) {
     <div class="actions"><input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search blocks" aria-label="Search blocks" autocomplete="off"></div>
   }
 </header>
 <form class="composer single" (ngSubmit)="add()">
-  <input class="grow" name="b" [(ngModel)]="name" placeholder="domain to block, e.g. ads.example.com" autocomplete="off" aria-label="Domain to block" required>
+  <input class="grow" name="b" [(ngModel)]="name" placeholder="domain, e.g. ads.example.com" autocomplete="off" aria-label="Domain" required>
   <button class="primary">Block</button>
+  <button type="button" (click)="add(true)" [disabled]="!name.trim()" title="Never block this domain and its subdomains">Allow</button>
 </form>
+@if (suggestions().length) {
+  <details class="panel">
+    <summary>{{ suggestions().length }} names that look like ads or trackers</summary>
+    <p class="soft">Asked for in the last 7 days, not blocked. A hint, not a verdict: check before blocking.</p>
+    <ul class="records blocked">
+      @for (s of suggestions(); track s.name) {
+        <li><span class="rvalue">{{ s.name }}</span><span class="ttlv">{{ s.count }} queries</span><button class="mini" (click)="suggested(s.name)" [attr.aria-label]="'Block ' + s.name">Block</button></li>
+      }
+    </ul>
+  </details>
+}
 <ul class="records blocked">
   @for (b of shown(); track b.id) {
     <li [class.off]="!active() || b.enabled === false">
@@ -27,14 +39,15 @@
         </form>
       } @else {
         <span class="rvalue">{{ b.name }}</span>
+        @if (b.allow) { <span class="out sm" data-o="local" title="Never blocked by the lists">Allowed</span> }
         <span class="ttlv wide">{{ b.created.slice(0, 10) }}</span>
         <button class="switch" role="switch" [attr.aria-checked]="active() && b.enabled !== false" (click)="toggle(b)" [disabled]="!active()"
-                [title]="!active() ? 'Personal blocks are off' : b.enabled === false ? 'Disabled: click to block again' : 'Enabled: click to stop blocking'"><i></i></button>
+                [title]="!active() ? 'Personal blocks are off' : b.enabled === false ? (b.allow ? 'Disabled: click to allow again' : 'Disabled: click to block again') : (b.allow ? 'Enabled: click to stop allowing' : 'Enabled: click to stop blocking')"><i></i></button>
         <button class="mini" (click)="edit(b)" [disabled]="!active()" [attr.aria-label]="'Edit ' + b.name">Edit</button>
         <button class="icon" (click)="del(b)" [disabled]="!active()" [attr.aria-label]="'Unblock ' + b.name">✕</button>
       }
     </li>
   } @empty {
-    <li class="empty">{{ blocked().length ? 'No results for your search.' : 'No blocked domains. Add one above.' }}</li>
+    <li class="empty">{{ blocked().length ? 'No results for your search.' : 'No entries. Add one above.' }}</li>
   }
 </ul>

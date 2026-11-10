@@ -1,10 +1,21 @@
+import re
+from datetime import timedelta
+
+from django.db.models import Sum
+from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from ..models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting
+from ..models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
+from ..resolver import blocked_match
+from ..rollup import floor_hour
 from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer
+from ..serializers.stats import CountSerializer
+
+# a label that names what the host is for: ads, tracking, telemetry
+TRACKER_LABEL = re.compile(r'(^|[-_])(ads?|adserver|adservice|adsystem|analytics?|telemetry|metrics?|track(er|ing)?|pixel|beacon|stats?|doubleclick|popunder|banner)([-_0-9]|$)')
 
 
 class BlockedDomainViewSet(viewsets.ModelViewSet):
@@ -23,6 +34,30 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
         except ValueError:
             offset, limit = 0, 100
         return Response({'count': qs.count(), 'names': list(qs.values_list('name', flat=True)[offset:offset + limit])})
+
+    @extend_schema(parameters=[OpenApiParameter('days', int, description='Look back this many days (default 7, max 30)')], responses=CountSerializer(many=True))
+    @action(detail=False, methods=['get'])
+    def suggestions(self, request):
+        """Names that were asked for and look like ads or trackers (a label such as ads, track, pixel, telemetry), not blocked, not allowed and not
+        in our zones, most asked first. A hint to confirm one by one, not a verdict."""
+        try:
+            days = min(max(int(request.query_params.get('days', 7)), 1), 30)
+        except ValueError:
+            days = 7
+        rows = (StatCount.objects.filter(dim='name', hour__gte=floor_hour(timezone.now() - timedelta(days=days)))
+                .values('key').annotate(c=Sum('n')).order_by('-c', 'key')[:5000])  # shortcut: only the 5000 most asked names are looked at
+        zones = set(Zone.objects.values_list('name', flat=True))
+        allowed = set(BlockedDomain.objects.filter(allow=True).values_list('name', flat=True))
+        out = []
+        for r in rows:
+            name = r['key']
+            labels = name.split('.')
+            suffixes = {'.'.join(labels[i:]) for i in range(len(labels))}
+            if (name and any(TRACKER_LABEL.search(lb) for lb in labels[:-1]) and not suffixes & (zones | allowed) and not blocked_match(name)):
+                out.append({'name': name, 'count': r['c']})
+                if len(out) == 50:
+                    break
+        return Response(out)
 
     @extend_schema(request=PersonalSwitchSerializer, responses=PersonalSwitchSerializer)
     @action(detail=False, methods=['get', 'patch'])

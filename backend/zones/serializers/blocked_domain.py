@@ -6,13 +6,21 @@ from ..models import BlockedDomain
 class BlockedDomainSerializer(serializers.ModelSerializer):
     class Meta:
         model = BlockedDomain
-        fields = ['id', 'name', 'enabled', 'created']
+        fields = ['id', 'name', 'enabled', 'allow', 'created']
+        extra_kwargs = {'name': {'validators': []}}  # uniqueness is checked below: a name that only sits in a public list is taken over
 
     def validate_name(self, v):
         v = v.strip().strip('.').lower()
         if not v:
             raise serializers.ValidationError('Nome vuoto.')
+        if BlockedDomain.objects.filter(name=v, source='manual').exclude(pk=getattr(self.instance, 'pk', None)).exists():
+            raise serializers.ValidationError('This domain is already in the list.')
         return v
+
+    def save(self, **kw):
+        # the same name in a public list gives way to the personal entry (the next import skips it)
+        BlockedDomain.objects.filter(name=self.validated_data.get('name'), source='list').delete()
+        return super().save(**kw)
 
 
 class PersonalSwitchSerializer(serializers.Serializer):

@@ -1,8 +1,8 @@
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { blockedCreate, blockedDestroy, blockedList, blockedPartialUpdate, blockedPersonalPartialUpdate, blockedPersonalRetrieve } from '../api/functions';
-import { BlockedDomain } from '../api/models';
+import { blockedCreate, blockedDestroy, blockedList, blockedPartialUpdate, blockedSuggestionsList, blockedPersonalPartialUpdate, blockedPersonalRetrieve } from '../api/functions';
+import { BlockedDomain, Count } from '../api/models';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -20,6 +20,7 @@ export class BlockedPage {
   editing = signal<number | null>(null);
   draft = '';
 
+  suggestions = signal<Count[]>([]);
   active = signal(true); // master switch: off = the blocks below are kept but ignored
 
   constructor() { this.load(); }
@@ -28,6 +29,7 @@ export class BlockedPage {
     return this.ui.run(async () => {
       this.blocked.set(await this.api.invoke(blockedList));
       this.active.set((await this.api.invoke(blockedPersonalRetrieve)).enabled);
+      this.suggestions.set(await this.api.invoke(blockedSuggestionsList, {}));
     });
   }
   switchAll() {
@@ -38,14 +40,17 @@ export class BlockedPage {
   save(b: BlockedDomain) {
     return this.ui.run(async () => { await this.api.invoke(blockedPartialUpdate, { id: b.id, body: { name: this.draft } }); this.editing.set(null); await this.load(); });
   }
-  add() {
-    return this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name: this.name } }); this.name = ''; await this.load(); });
+  add(allow = false) {
+    return this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name: this.name, allow } }); this.name = ''; await this.load(); });
+  }
+  suggested(name: string) {
+    return this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name } }); await this.load(); });
   }
   toggle(b: BlockedDomain) {
     return this.ui.run(async () => { await this.api.invoke(blockedPartialUpdate, { id: b.id, body: { enabled: b.enabled === false } }); await this.load(); });
   }
   del(b: BlockedDomain) {
-    this.ui.ask(`Unblock ${b.name}?`, 'The domain and its subdomains will resolve again.', () =>
+    this.ui.ask(b.allow ? `Remove the exception for ${b.name}?` : `Unblock ${b.name}?`, b.allow ? 'The public lists can block it again.' : 'The domain and its subdomains will resolve again.', () =>
       this.ui.run(async () => { await this.api.invoke(blockedDestroy, { id: b.id }); await this.load(); }));
   }
 }

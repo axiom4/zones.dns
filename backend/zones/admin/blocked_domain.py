@@ -16,12 +16,12 @@ class SourceAdmin(admin.ModelAdmin):
 
 @admin.register(PersonalBlock)
 class PersonalBlockAdmin(SourceAdmin):
-    """Domains blocked by hand (GUI "Blocchi personali")."""
+    """Domains blocked by hand, and the exceptions (allow) that win over every list (GUI "Personal blocks")."""
     source = 'manual'
-    list_display = ['name', 'enabled', 'created']
+    list_display = ['name', 'allow', 'enabled', 'created']
     list_editable = ['enabled']
-    list_filter = ['enabled']
-    fields = ['name', 'enabled', 'created']
+    list_filter = ['allow', 'enabled']
+    fields = ['name', 'allow', 'enabled', 'created']
 
     def save_model(self, request, obj, form, change):
         obj.name = obj.name.strip().strip('.').lower()  # same normalisation as the API

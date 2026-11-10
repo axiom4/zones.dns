@@ -27,6 +27,8 @@ export type { BlockedPublicRetrieve$Params as BlockedPublicRetrieve$Params } fro
 export { blockedPublicRetrieve as blockedPublicRetrieve } from './fn/blocked/blocked-public-retrieve';
 export type { BlockedPublicPartialUpdate$Params as BlockedPublicPartialUpdate$Params } from './fn/blocked/blocked-public-partial-update';
 export { blockedPublicPartialUpdate as blockedPublicPartialUpdate } from './fn/blocked/blocked-public-partial-update';
+export type { BlockedSuggestionsList$Params as BlockedSuggestionsList$Params } from './fn/blocked/blocked-suggestions-list';
+export { blockedSuggestionsList as blockedSuggestionsList } from './fn/blocked/blocked-suggestions-list';
 export type { GeoDestinationsRetrieve$Params as GeoDestinationsRetrieve$Params } from './fn/geo/geo-destinations-retrieve';
 export { geoDestinationsRetrieve as geoDestinationsRetrieve } from './fn/geo/geo-destinations-retrieve';
 export type { GeoIpsRetrieve$Params as GeoIpsRetrieve$Params } from './fn/geo/geo-ips-retrieve';

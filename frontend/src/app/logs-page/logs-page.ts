@@ -272,4 +272,12 @@ export class LogsPage implements OnDestroy {
         this.notice.set(`${name} blocked: from the next query it answers NXDOMAIN. The log rows stay as they were.`);
       }));
   }
+
+  allow(name: string) {
+    this.ui.ask(`Allow ${name}?`, 'The name and its subdomains will never be blocked by the public lists (a longer personal block still wins). You can remove the exception from Blacklist > Personal blocks.', () =>
+      this.ui.run(async () => {
+        await this.api.invoke(blockedCreate, { body: { name, allow: true } });
+        this.notice.set(`${name} allowed: from the next query it is no longer blocked. The log rows stay as they were.`);
+      }));
+  }
 }

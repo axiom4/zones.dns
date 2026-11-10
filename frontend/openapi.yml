@@ -265,6 +265,31 @@ paths:
               schema:
                 $ref: '#/components/schemas/PersonalSwitch'
           description: ''
+  /api/blocked/suggestions/:
+    get:
+      operationId: blocked_suggestions_list
+      description: |-
+        Names that were asked for and look like ads or trackers (a label such as ads, track, pixel, telemetry), not blocked, not allowed and not
+        in our zones, most asked first. A hint to confirm one by one, not a verdict.
+      parameters:
+      - in: query
+        name: days
+        schema:
+          type: integer
+        description: Look back this many days (default 7, max 30)
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Count'
+          description: ''
   /api/geo/destinations/:
     get:
       operationId: geo_destinations_retrieve
@@ -1684,6 +1709,8 @@ components:
           maxLength: 253
         enabled:
           type: boolean
+        allow:
+          type: boolean
         created:
           type: string
           format: date-time
@@ -1701,6 +1728,8 @@ components:
           maxLength: 253
         enabled:
           type: boolean
+        allow:
+          type: boolean
       required:
       - name
     Bucket:
@@ -1712,7 +1741,12 @@ components:
           description: Start of the minute or hour (UTC)
         count:
           type: integer
+          description: All queries in the bucket
+        blocked:
+          type: integer
+          description: Of which blocked
       required:
+      - blocked
       - count
       - t
     BulkActionRequest:
@@ -2463,6 +2497,8 @@ components:
           minLength: 1
           maxLength: 253
         enabled:
+          type: boolean
+        allow:
           type: boolean
     PatchedPersonalSwitchRequest:
       type: object

@@ -72,6 +72,47 @@ class BlocklistEnabledTests(TestCase):
         resolver._blocked.clear()
         self.assertIsNone(blocked_match('x.ads.example.com'))
 
+    def test_allow_wins_over_a_longer_domain_block_and_the_longest_entry_wins(self):
+        from .models import BlockedDomain
+        from .resolver import blocked_match
+        BlockedDomain.objects.create(name='tracker.example', source='list')
+        BlockedDomain.objects.create(name='cdn.tracker.example', allow=True)
+        BlockedDomain.objects.create(name='bad.cdn.tracker.example')
+        resolver._data = None
+        self.assertEqual(blocked_match('x.tracker.example'), 'tracker.example')
+        self.assertIsNone(blocked_match('a.cdn.tracker.example'))  # allowed host inside a blocked domain
+        self.assertEqual(blocked_match('bad.cdn.tracker.example'), 'bad.cdn.tracker.example')  # but a longer block wins again
+
+    def test_personal_entry_takes_over_a_public_list_name_through_the_api(self):
+        from django.contrib.auth.models import User
+        from rest_framework.test import APIClient
+
+        from .models import BlockedDomain
+        BlockedDomain.objects.create(name='ads.example', source='list')
+        c = APIClient()
+        c.force_authenticate(User.objects.create_user('u', is_staff=True, is_superuser=True))
+        r = c.post('/api/blocked/', {'name': 'ADS.example', 'allow': True}, format='json')
+        self.assertEqual((r.status_code, r.data['allow']), (201, True))
+        self.assertEqual(list(BlockedDomain.objects.filter(name='ads.example').values_list('source', 'allow')), [('manual', True)])
+        self.assertEqual(c.post('/api/blocked/', {'name': 'ads.example'}, format='json').status_code, 400)  # already in the personal list
+
+    def test_suggestions_list_tracker_looking_names_only(self):
+        from django.contrib.auth.models import User
+        from django.utils import timezone
+        from rest_framework.test import APIClient
+
+        from .models import BlockedDomain, StatCount
+        from .rollup import floor_hour
+        h = floor_hour(timezone.now())
+        for name, n in (('track.site.example', 9), ('www.site.example', 50), ('ads.listed.example', 5), ('pixel.fine.example', 4)):
+            StatCount.objects.create(dim='name', hour=h, key=name, n=n)
+        BlockedDomain.objects.create(name='listed.example', source='list')
+        BlockedDomain.objects.create(name='fine.example', allow=True)
+        resolver._data = None
+        c = APIClient()
+        c.force_authenticate(User.objects.create_user('u2', is_staff=True, is_superuser=True))
+        self.assertEqual(c.get('/api/blocked/suggestions/').data, [{'name': 'track.site.example', 'count': 9}])
+
     def test_master_switch_off_ignores_personal_blocks_only(self):
         from .models import PERSONAL_BLOCKS, BlockedDomain, Setting
         from .resolver import blocked_match

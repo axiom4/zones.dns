@@ -207,7 +207,9 @@ def blocked_match(qname):
     found = BlockedDomain.objects.filter(enabled=True, name__in=suffixes)
     if _off_sources:
         found = found.exclude(source__in=_off_sources)  # a feature that is switched off blocks nothing
-    hit = found.order_by('-name').first()
+    hit = max(found, key=lambda b: len(b.name), default=None)  # the most specific entry wins: an allowed host inside a blocked domain, and the reverse
+    if hit and hit.allow:
+        hit = None
     if len(_blocked) > 20000:  # bounded: names that were asked once are the bulk
         _blocked.clear()
     _blocked[qname] = match = hit.name if hit else None
