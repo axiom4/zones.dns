@@ -8,13 +8,11 @@ from ..reverse import find_reverse_zone
 
 
 def make_ptr(rec):
-    """Create (or update) the reverse PTR for an A/AAAA record. IPv4 reverse /24 zones are created on demand."""
+    """Create (or update) the reverse PTR for an A/AAAA record. Missing reverse zones are created on demand: /24 for IPv4, /64 for IPv6."""
     ptr = ipaddress.ip_address(rec.value.strip()).reverse_pointer
     zone = find_reverse_zone(ptr)
     if zone is None:
-        if ':' in rec.value:
-            raise serializers.ValidationError({'create_ptr': 'No IPv6 reverse zone for this address: create it first.'})
-        zone = Zone.objects.create(name=ptr.split('.', 1)[1])
+        zone = Zone.objects.create(name=ptr.split('.', 16 if ':' in rec.value else 1)[-1])
     Record.objects.update_or_create(
         zone=zone, name=ptr[: -len(zone.name) - 1], type='PTR',
         defaults={'value': f'{rec.fqdn}.', 'ttl': rec.ttl},
