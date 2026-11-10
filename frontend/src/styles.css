@@ -93,7 +93,8 @@ main h2 { font-size: 2rem; letter-spacing: -.03em; font-weight: 800; }
   .records li { flex-wrap: wrap; } .rname { width: auto; flex: 1; } .rvalue { order: 5; flex-basis: 100%; }
 }
 @media (prefers-reduced-motion: no-preference) {
-  button, input, select, .zone, .records li { transition: background-color .15s, box-shadow .15s, transform .08s, filter .15s; }
+  button, input, select, .zone { transition: background-color .15s, box-shadow .15s, transform .08s, filter .15s; }
+  .records li { transition: background-color .15s, transform .08s, filter .15s; } /* no box-shadow: it cannot run on the compositor */
 }
 
 .confirm { border: 0; border-radius: 18px; padding: 1.75rem; width: min(420px, 92vw); color: var(--ink); background: var(--surface); box-shadow: 0 24px 64px rgba(27,21,53,.35); }

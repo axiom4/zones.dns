@@ -58,6 +58,9 @@ server {
     add_header X-Frame-Options "DENY" always;
     add_header Referrer-Policy "same-origin" always;
     add_header Alt-Svc 'h3=":443"; ma=86400' always;
+    add_header Cross-Origin-Opener-Policy "same-origin" always;
+    # The app is same-origin only. 'unsafe-inline' is needed by the inline critical CSS and the small inline script of the Angular build.
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
     # Note: a location with its own add_header does not inherit the ones above, so HSTS and Alt-Svc are repeated there.
 
     server_tokens off;
@@ -102,7 +105,8 @@ server {
     index index.html;
 
     # Angular build files carry a hash in their name: cache for good.
-    location ~* "-[A-Za-z0-9]{8}\.(js|css)$" {
+    # The hash is 8 characters and may contain "-" or "_" (chunk-IU9i2-jS.js).
+    location ~* "-[A-Za-z0-9_-]{8}\.(js|css)$" {
         expires 1y;
         add_header Cache-Control "public, immutable";
         add_header X-Content-Type-Options "nosniff" always;
@@ -119,6 +123,18 @@ server {
         add_header X-Content-Type-Options "nosniff" always;
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Alt-Svc 'h3=":443"; ma=86400' always;
+        add_header Cross-Origin-Opener-Policy "same-origin" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    }
+
+    # Icons, logo, map data and robots.txt: no hash in the name, so a day (not forever).
+    location ~* \.(svg|ico|png|json|txt)$ {
+        expires 1d;
+        add_header Cache-Control "public";
+        add_header X-Content-Type-Options "nosniff" always;
+        add_header Strict-Transport-Security "max-age=31536000" always;
+        add_header Alt-Svc 'h3=":443"; ma=86400' always;
+        try_files $uri =404;
     }
 
     # Everything else (routes like /zones/3, /blacklist/lists) is the single-page app.
