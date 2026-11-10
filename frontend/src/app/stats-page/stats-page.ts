@@ -37,12 +37,12 @@ export class StatsPage {
   bars = computed(() => {
     const st = this.stats(), g = this.grain();
     if (!st) return [];
-    const sum = new Map<number, number>();
-    for (const p of st.series) { const k = g.floor(new Date(p.t)).getTime(); sum.set(k, (sum.get(k) ?? 0) + p.count); }
-    const out: { at: number; count: number; label: string; tick: boolean; full: string }[] = [];
+    const sum = new Map<number, { count: number; blocked: number }>();
+    for (const p of st.series) { const k = g.floor(new Date(p.t)).getTime(); const o = sum.get(k) ?? { count: 0, blocked: 0 }; sum.set(k, { count: o.count + p.count, blocked: o.blocked + p.blocked }); }
+    const out: { at: number; count: number; blocked: number; label: string; tick: boolean; full: string }[] = [];
     const now = new Date();
     for (let d = g.floor(new Date(this.from())); d <= now && out.length < 400; d = g.next(d)) {
-      out.push({ at: d.getTime(), count: sum.get(d.getTime()) ?? 0, label: g.label(d), tick: true, full: d.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) });
+      const v = sum.get(d.getTime()); out.push({ at: d.getTime(), count: v?.count ?? 0, blocked: v?.blocked ?? 0, label: g.label(d), tick: true, full: d.toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) });
     }
     out.forEach((b, i) => b.tick = g.tick(new Date(b.at), i, out.length));  // after the loop: some grains label every bar when there are few
     return out;

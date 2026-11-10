@@ -1,7 +1,7 @@
 from datetime import timedelta, timezone as dt_timezone
 
 from django.core.cache import cache
-from django.db.models import Count, Sum
+from django.db.models import Count, Q, Sum
 from django.db.models.functions import TruncMinute
 from django.utils import timezone
 from django.utils.dateparse import parse_datetime
@@ -24,7 +24,7 @@ def _from_log(start):
     qs = QueryLog.objects.filter(time__gte=start)
     outcomes = list(qs.values('outcome').annotate(count=Count('id'), ms=Sum('ms')).order_by('-count'))
     total = sum(r['count'] for r in outcomes)
-    series = qs.annotate(t=TruncMinute('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id')).order_by('t')
+    series = qs.annotate(t=TruncMinute('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id'), blocked=Count('id', filter=Q(outcome='blocked'))).order_by('t')
     return {
         'total': total,
         'avg_ms': (sum(r['ms'] or 0 for r in outcomes) / total) if total else 0,
@@ -45,7 +45,7 @@ def _from_counters(start):
 
     agg = rows.filter(dim='outcome').aggregate(n=Sum('n'), ms=Sum('ms'))
     total = agg['n'] or 0
-    series = rows.filter(dim='outcome').values('hour').annotate(count=Sum('n')).order_by('hour')
+    series = rows.filter(dim='outcome').values('hour').annotate(count=Sum('n'), blocked=Sum('n', filter=Q(key='blocked'))).order_by('hour')
     return {
         'total': total,
         'avg_ms': (agg['ms'] / total) if total else 0,
@@ -54,7 +54,7 @@ def _from_counters(start):
         'top_domains': top('name', 10),
         'top_blocked': top('blocked', 10),
         'top_clients': top('client', 10),
-        'series': [{'t': r['hour'], 'count': r['count']} for r in series],
+        'series': [{'t': r['hour'], 'count': r['count'], 'blocked': r['blocked'] or 0} for r in series],
     }
 
 

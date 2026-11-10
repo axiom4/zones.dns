@@ -8,7 +8,8 @@ class CountSerializer(serializers.Serializer):
 
 class BucketSerializer(serializers.Serializer):
     t = serializers.DateTimeField(help_text='Start of the minute or hour (UTC)')
-    count = serializers.IntegerField()
+    count = serializers.IntegerField(help_text='All queries in the bucket')
+    blocked = serializers.IntegerField(help_text='Of which blocked')
 
 
 class StatsSerializer(serializers.Serializer):

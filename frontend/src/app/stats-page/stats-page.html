@@ -24,13 +24,16 @@
   </div>
 
   <section class="panel">
-    <h3>Queries per {{ grain().name }}</h3>
+    <h3>Queries per {{ grain().name }} <small class="legend"><i></i> executed <i class="blk"></i> blocked</small></h3>
     @if (st.total) {
       <div class="chart" [class.dense]="bars().length > 30">
         @for (p of bars(); track p.at) {
-          <div class="col" [title]="p.full + ': ' + p.count" [style.--h]="pct(p.count, bars()) + '%'">
+          <div class="col" [title]="p.full + ': ' + (p.count - p.blocked) + ' executed, ' + p.blocked + ' blocked'" [style.--h]="pct(p.count, bars()) + '%'">
             <b>{{ p.count }}</b>
-            <i [style.height.%]="pct(p.count, bars())"></i>
+            <div class="stack" [style.height.%]="pct(p.count, bars())">
+              @if (p.blocked) { <i class="blk" [style.flex-grow]="p.blocked"></i> }
+              @if (p.count > p.blocked) { <i [style.flex-grow]="p.count - p.blocked"></i> }
+            </div>
             <span [class.off]="!p.tick">{{ p.label }}</span>
           </div>
         }

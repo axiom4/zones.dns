@@ -130,7 +130,12 @@ main header .actions { display: flex; gap: .5rem; }
 .col span { position: absolute; top: calc(100% + 4px); left: 50%; transform: translateX(-50%); font-size: 10.5px; color: var(--muted, #667); white-space: nowrap; }
 .chart.dense .col b, .col span.off { display: none; } /* many bars: no counts, and labels only on some of them (all show on hover) */
 .chart.dense .col:hover b, .col:hover span.off { display: block; background: var(--surface); padding: 0 .25rem; border-radius: 4px; z-index: 2; }
-.col i { display: block; width: 100%; min-height: 3px; background: var(--brand); border-radius: 4px 4px 0 0; }
+.col .stack { display: flex; flex-direction: column; width: 100%; min-height: 3px; border-radius: 4px 4px 0 0; overflow: hidden; }
+.col i { display: block; width: 100%; min-height: 3px; background: var(--brand); }
+.col i.blk { background: var(--danger); }
+.legend { font-weight: 400; margin-left: .75rem; color: var(--muted, #667); }
+.legend i { display: inline-block; width: .7rem; height: .7rem; border-radius: 3px; background: var(--brand); margin: 0 .25rem 0 .5rem; vertical-align: -1px; }
+.legend i.blk { background: var(--danger); }
 .col:hover i { filter: brightness(1.25); }
 
 .row { position: relative; display: flex; align-items: center; gap: .6rem; padding: .35rem .5rem; border-radius: 8px; overflow: hidden; }
