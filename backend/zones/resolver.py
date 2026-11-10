@@ -219,6 +219,17 @@ def blocked_match(qname):
     return match
 
 
+def cname_blocked(reply):
+    """(target, blacklist entry) of the first CNAME in the answer that points at a blocked name, else None: a tracker hidden behind a
+    subdomain of the site (CNAME cloaking) is only seen in the answer, never in the name that was asked."""
+    for rr in reply.rr:
+        if rr.rtype == QTYPE.CNAME:
+            target = str(rr.rdata.label).rstrip('.').lower()
+            if match := blocked_match(target):
+                return target, match
+    return None
+
+
 def blocked_reply(request, zone):
     """NXDOMAIN for a blocked name: not authoritative, with an SOA so clients can cache it (RFC 2308)."""
     reply = request.reply(aa=0)
@@ -316,9 +327,12 @@ class Resolver(BaseResolver):
                 outcome, reply, via = 'blocked', blocked_reply(request, qname), f'suspicious: {why}'
             else:
                 reply, via = self.forward(request)
-                outcome = 'error' if reply.header.rcode == RCODE.SERVFAIL else 'forwarded'
-                if why:  # log-only mode
-                    via += f' (suspicious: {why})'
+                if cloak := cname_blocked(reply):
+                    outcome, reply, via = 'blocked', blocked_reply(request, cloak[1]), f'cname {cloak[0]} -> blacklist {cloak[1]}'
+                else:
+                    outcome = 'error' if reply.header.rcode == RCODE.SERVFAIL else 'forwarded'
+                    if why:  # log-only mode
+                        via += f' (suspicious: {why})'
             rcode, answers = summarize(reply)
             entry = QueryLog(name=qname, domain=main_domain(qname), type=qtype, outcome=outcome, client=handler.client_address[0],
                              ms=int((time.monotonic() - t0) * 1000), rcode=rcode, via=via, answers=answers)

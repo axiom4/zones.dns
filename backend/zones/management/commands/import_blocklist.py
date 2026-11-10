@@ -1,13 +1,13 @@
 import re
 import urllib.request
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from zones.audit import NAME_RE
 from zones.models import BlockedDomain, DataVersion
 
-DEFAULT_URL = 'https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts'  # ads + malware, hosts format
 LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
 
 
@@ -26,21 +26,28 @@ def parse(text):
 
 
 class Command(BaseCommand):
-    help = 'Replace the imported blacklist (source=list) with a public blocklist. Manual entries are untouched.'
+    help = 'Replace the imported blacklist (source=list) with the union of public blocklists (default: BLOCKLISTS). Manual entries are untouched.'
 
     def add_arguments(self, p):
-        p.add_argument('source', nargs='?', default=DEFAULT_URL, help='URL or file path (hosts format or one domain per line)')
+        p.add_argument('sources', nargs='*', help='URLs or file paths (hosts format or one domain per line); default: BLOCKLISTS')
 
-    def handle(self, *a, source, **o):
-        if source.startswith(('http://', 'https://')):
-            req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
-            text = urllib.request.urlopen(req, timeout=60).read().decode('utf-8', 'replace')
-        else:
-            with open(source, encoding='utf-8', errors='replace') as f:
-                text = f.read()
-        names = parse(text)
-        if not names:
-            raise SystemExit('no domains found: blacklist left unchanged')
+    def handle(self, *a, sources, **o):
+        names = set()
+        for source in sources or settings.BLOCKLISTS:
+            if source.startswith(('http://', 'https://')):
+                req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
+                try:
+                    text = urllib.request.urlopen(req, timeout=60).read().decode('utf-8', 'replace')
+                except OSError as e:  # shortcut: one list down = no update at all (the old entries stay); the next run retries
+                    raise SystemExit(f'{source}: {e}: blacklist left unchanged')
+            else:
+                with open(source, encoding='utf-8', errors='replace') as f:
+                    text = f.read()
+            found = parse(text)
+            if not found:
+                raise SystemExit(f'{source}: no domains found: blacklist left unchanged')
+            self.stdout.write(f'{source}: {len(found)} domains')
+            names |= found
         manual = set(BlockedDomain.objects.filter(source='manual').values_list('name', flat=True))
         with transaction.atomic():
             BlockedDomain.objects.filter(source='list').delete()

@@ -298,7 +298,7 @@ sudo supervisorctl restart dns:*
 
 Restarting `dns-api` makes a new sign-in key: the GUI downloads it again by itself, so users are not disconnected, but a sign-in in progress is retried.
 
-Recurring jobs (cron, as user `dns`): `manage.py import_blocklist` weekly to refresh the public lists.
+Recurring jobs (cron, as user `dns`): `manage.py import_blocklist` nightly to refresh the public lists.
 
 The `.gitignore` excludes `.env`, the GeoIP databases, `staticfiles/` and the build folders.
 
@@ -317,7 +317,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 - **Partitioned log (MySQL/MariaDB or PostgreSQL, optional):** `manage.py partition_querylog` once splits the query log into daily partitions; `rundns` then drops old days instantly instead of running a huge `DELETE`. It rebuilds the table and writes wait meanwhile: back up first, run it when the traffic is low (see "Partitioned log" in the README).
 - **Statistics counters:** the Statistics and Geolocation pages read hourly counters, not the log. `manage.py rebuild_stats` recomputes them from the log if they ever look wrong.
 - **ASN index:** cron as user `dns`, nightly: `30 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_asn` (about 10 s; the old index is kept if the download fails). Run it once by hand after installing.
-- **Blocklists:** cron as user `dns`, for example weekly: `0 4 * * 0  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist`.
+- **Blocklists:** cron as user `dns`, nightly: `0 4 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist`.
 - **Lost second factor:** `manage.py mfa_reset <user>`.
 
 ## 15. Hardening checklist

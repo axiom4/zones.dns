@@ -265,6 +265,21 @@ class RfcConformanceTests(TestCase):
         r = self.ask(DNSRecord.question('x.ads.example', 'A'))
         self.assertEqual((r.header.rcode, r.header.aa, [QTYPE[a.rtype] for a in r.auth]), (3, 0, ['SOA']))
 
+    def test_cname_to_a_blocked_name_is_blocked(self):
+        from unittest import mock
+
+        from dnslib import CNAME, RR
+
+        from .models import BlockedDomain
+        BlockedDomain.objects.create(name='tracker.example')
+        resolver._data = None
+        q = DNSRecord.question('metrics.site.example', 'A')
+        upstream = q.reply()
+        upstream.add_answer(RR('metrics.site.example', QTYPE.CNAME, rdata=CNAME('eu.tracker.example'), ttl=60))
+        with mock.patch.object(Resolver, 'forward', return_value=(upstream, 'upstream test')):
+            r = self.ask(q)
+        self.assertEqual((r.header.rcode, len(r.rr), [QTYPE[a.rtype] for a in r.auth]), (3, 0, ['SOA']))
+
     def test_static_host_nodata_has_soa(self):
         from .models import StaticHost
         StaticHost.objects.create(name='printer.lan', address='10.0.0.5')
@@ -359,3 +374,27 @@ class RootGroupTests(TestCase):
         names = [g['name'] for g in c.get('/api/logs/grouped/').json()['results']]
         self.assertIn('.', names)
         self.assertEqual(c.get('/api/logs/?domain=.').json()['count'], 1)  # not every query: '.' selects the root only
+
+
+class ImportBlocklistTests(TestCase):
+    def test_several_lists_are_merged_and_manual_entries_kept(self):
+        import os
+        import tempfile
+
+        from django.core.management import call_command
+
+        from .models import BlockedDomain
+        BlockedDomain.objects.create(name='mine.example')
+        paths = []
+        for text in ('0.0.0.0 a.example\n', 'b.example\na.example\n'):
+            f = tempfile.NamedTemporaryFile('w', suffix='.txt', delete=False)
+            f.write(text)
+            f.close()
+            paths.append(f.name)
+        try:
+            call_command('import_blocklist', *paths, stdout=open(os.devnull, 'w'))
+        finally:
+            for p in paths:
+                os.unlink(p)
+        self.assertEqual(sorted(BlockedDomain.objects.filter(source='list').values_list('name', flat=True)), ['a.example', 'b.example'])
+        self.assertTrue(BlockedDomain.objects.filter(name='mine.example', source='manual').exists())

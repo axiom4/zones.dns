@@ -109,12 +109,12 @@ Thresholds are in `.env.example`. Add the legitimate main domains that get flagg
 ## Blocklists
 
 ```sh
-python manage.py import_blocklist              # StevenBlack/hosts: ads and malware (default)
-python manage.py import_blocklist <url|file>   # another list: hosts format or one domain per line
+python manage.py import_blocklist                  # the lists in BLOCKLISTS (default: StevenBlack, OISD small, 1Hosts Lite and HaGeZi: Ultimate, TIF, Popup Ads, Fake, native telemetry; about 1.3 million domains), merged
+python manage.py import_blocklist <url|file> ...   # other lists: hosts format or one domain per line
 python manage.py scan_trackers [--apply]       # heuristic: redirect + cookie (see below)
 ```
 
-`import_blocklist` replaces the imported entries on every run (update it from cron); entries added by hand are left alone. Imported entries show in **Blacklist → Public lists** (read-only, searchable) and are deleted from the admin; they come back at the next import.
+`import_blocklist` replaces the imported entries on every run (update it from cron, nightly is fine); if any list cannot be downloaded the old entries stay; entries added by hand are left alone. Imported entries show in **Blacklist → Public lists** (read-only, searchable) and are deleted from the admin; they come back at the next import.
 
 `scan_trackers` probes over HTTP (public IPs only, ports 80/443) the domains forwarded in the log and matches those that redirect to a different main domain **and** set persistent cookies, but only if the chain ends on something that is not an HTML page (a site such as `gmail.com` is not touched). It is cautious and finds few real trackers: without `--apply` it only lists them. For serious blocking use `import_blocklist`.
 
