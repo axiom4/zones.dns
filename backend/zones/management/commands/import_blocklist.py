@@ -2,11 +2,12 @@ import re
 import urllib.request
 
 from django.conf import settings
+from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
 from zones.audit import NAME_RE
-from zones.models import BlockedDomain, DataVersion
+from zones.models import COUNTS_KEY, BlockedDomain, DataVersion
 
 LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
 
@@ -60,8 +61,16 @@ class Command(BaseCommand):
                 names.setdefault(d, label)
         manual = set(BlockedDomain.objects.filter(source='manual').values_list('name', flat=True))
         todo = {n: label for n, label in names.items() if n not in manual}
+        # Only what changed is written: the lists differ by a few percent from one night to the next, and a DELETE + INSERT of a million rows
+        # is the slow, lock-holding way to learn that.
+        have = dict(BlockedDomain.objects.filter(source='list').values_list('name', 'list_name').iterator(chunk_size=50000))
+        drop = [n for n, label in have.items() if todo.get(n) != label]  # gone, or moved to another list
+        add = [n for n, label in todo.items() if have.get(n) != label]
         with transaction.atomic():
-            BlockedDomain.objects.filter(source='list').delete()
-            BlockedDomain.objects.bulk_create([BlockedDomain(name=n, source='list', list_name=label) for n, label in todo.items()], batch_size=2000)
-            transaction.on_commit(DataVersion.bump)  # after the commit, so the daemon never reloads half-way
-        self.stdout.write(f'{len(todo)} domains imported')
+            for i in range(0, len(drop), 5000):
+                BlockedDomain.objects.filter(source='list', name__in=drop[i:i + 5000]).delete()
+            BlockedDomain.objects.bulk_create([BlockedDomain(name=n, source='list', list_name=todo[n]) for n in add], batch_size=5000)
+            if drop or add:
+                transaction.on_commit(DataVersion.bump)  # after the commit, so the daemon never reloads half-way
+        cache.delete(COUNTS_KEY)
+        self.stdout.write(f'{len(todo)} domains imported ({len(add)} added, {sum(1 for n in drop if n not in todo)} removed)')

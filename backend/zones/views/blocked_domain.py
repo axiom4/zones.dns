@@ -1,6 +1,7 @@
 import re
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.db.models import Count, Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -8,7 +9,7 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from ..models import LISTS_OFF, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
+from ..models import COUNTS_KEY, LISTS_OFF, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
 from ..resolver import blocked_match
 from ..rollup import floor_hour
 from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer, PublicListSwitchSerializer
@@ -16,6 +17,19 @@ from ..serializers.stats import CountSerializer
 
 # a label that names what the host is for: ads, tracking, telemetry
 TRACKER_LABEL = re.compile(r'(^|[-_])(ads?|adserver|adservice|adsystem|analytics?|telemetry|metrics?|track(er|ing)?|pixel|beacon|stats?|doubleclick|popunder|banner)([-_0-9]|$)')
+
+
+IMPORTED_COUNT_CAP = 100000  # a search over a million rows is not counted past this, like the query log
+
+
+def list_counts():
+    """{list name: domains}, cached: a GROUP BY over all the imported rows. import_blocklist empties it."""
+    counts = cache.get(COUNTS_KEY)
+    if counts is None:
+        rows = BlockedDomain.objects.filter(source='list').values('list_name').annotate(n=Count('id'))
+        counts = {r['list_name'] or 'list': r['n'] for r in rows}
+        cache.set(COUNTS_KEY, counts, 3600)
+    return counts
 
 
 class BlockedDomainViewSet(viewsets.ModelViewSet):
@@ -28,15 +42,18 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
     def imported(self, request):
         """Domains imported from public blocklists (read-only, searchable, paged: there can be tens of thousands)."""
         qs = BlockedDomain.objects.filter(source='list').order_by('name')
-        if lst := request.query_params.get('list', '').strip():
+        lst, q = request.query_params.get('list', '').strip(), request.query_params.get('q', '').strip().lower()
+        if lst:
             qs = qs.filter(list_name=lst)
-        if q := request.query_params.get('q', '').strip().lower():
+        if q:
             qs = qs.filter(name__contains=q)
         try:
             offset, limit = max(int(request.query_params.get('offset', 0)), 0), min(max(int(request.query_params.get('limit', 100)), 1), 500)
         except ValueError:
             offset, limit = 0, 100
-        return Response({'count': qs.count(), 'names': list(qs.values_list('name', flat=True)[offset:offset + limit])})
+        # no search: the count is the cached one; a search is counted up to IMPORTED_COUNT_CAP (a LIKE '%q%' reads every row anyway)
+        count = qs[:IMPORTED_COUNT_CAP].count() if q else (list_counts().get(lst, 0) if lst else sum(list_counts().values()))
+        return Response({'count': count, 'names': list(qs.values_list('name', flat=True)[offset:offset + limit])})
 
     @extend_schema(request=PublicListSwitchSerializer, responses=PublicListSerializer(many=True))
     @action(detail=False, methods=['get', 'patch'])
@@ -49,8 +66,7 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
             name, on = ser.validated_data['name'], ser.validated_data['enabled']
             off = off - {name} if on else off | {name}
             Setting.objects.update_or_create(key=LISTS_OFF, defaults={'value': ','.join(sorted(off))})
-        rows = BlockedDomain.objects.filter(source='list').values('list_name').annotate(n=Count('id')).order_by('list_name')
-        return Response([{'name': r['list_name'] or 'list', 'count': r['n'], 'enabled': r['list_name'] not in off} for r in rows])
+        return Response([{'name': n, 'count': c, 'enabled': n not in off} for n, c in sorted(list_counts().items())])
 
     @extend_schema(parameters=[OpenApiParameter('days', int, description='Look back this many days (default 7, max 30)')], responses=CountSerializer(many=True))
     @action(detail=False, methods=['get'])

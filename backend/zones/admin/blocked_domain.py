@@ -5,7 +5,7 @@ from ..models import PersonalBlock, PublicBlocklistEntry
 
 class SourceAdmin(admin.ModelAdmin):
     source = ''
-    search_fields = ['name']
+    search_fields = ['^name']  # starts with: uses the index (a contains search reads every row, and there are millions)
     readonly_fields = ['created']
     list_per_page = 100
     show_full_result_count = False  # imported lists have tens of thousands of rows
