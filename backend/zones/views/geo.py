@@ -1,7 +1,10 @@
 import ipaddress
+import threading
+import time
 from datetime import timedelta
 
 from django.core.cache import cache
+from django.db import connection
 from django.db.models import Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -56,13 +59,32 @@ class GeoDestinationsView(APIView):
         except ValueError:
             hours = 24
         key = f'geo-dest-{hours}'
-        if (hit := cache.get(key)) is not None:
-            return Response(hit)
-        # The hourly counters of answered addresses per domain; the window starts at the hour.
-        # shortcut: at most 20000 distinct (domain, address) pairs, most frequent first.
-        rows = [{'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
-                for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:20000]]
-        out = geo.destinations(rows)
-        if not out['pending']:  # unfinished lookups must show up on the next request
-            cache.set(key, out, 120)  # shortcut: not invalidated, the hourly counters are 2 minutes old at most
-        return Response(out)
+        hit = cache.get(key)  # (computed at, result): kept a day, refreshed in the background so a request never waits for the aggregation
+        if hit is None:
+            return Response(_compute(key, hours))
+        age = time.time() - hit[0]
+        # stale, or lookups still pending: one process refreshes (the lock), everybody else gets the last result now
+        if (age > REFRESH or hit[1]['pending']) and age > 5 and cache.add(key + '-lock', 1, 120):
+            threading.Thread(target=_refresh, args=(key, hours), daemon=True).start()
+        return Response(hit[1])
+
+
+REFRESH = 60  # seconds
+
+
+def _compute(key, hours):
+    # The hourly counters of answered addresses per domain; the window starts at the hour.
+    # shortcut: at most 20000 distinct (domain, address) pairs, most frequent first.
+    rows = [{'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
+            for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:20000]]
+    out = geo.destinations(rows)
+    cache.set(key, (time.time(), out), 86400)
+    return out
+
+
+def _refresh(key, hours):
+    try:
+        _compute(key, hours)
+    finally:
+        connection.close()  # this thread's own database connection
+        cache.delete(key + '-lock')
