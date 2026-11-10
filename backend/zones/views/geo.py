@@ -1,6 +1,7 @@
 import ipaddress
 from datetime import timedelta
 
+from django.core.cache import cache
 from django.db.models import Sum
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -54,8 +55,14 @@ class GeoDestinationsView(APIView):
             hours = min(max(int(request.query_params.get('hours', 24)), 1), 720)
         except ValueError:
             hours = 24
+        key = f'geo-dest-{hours}'
+        if (hit := cache.get(key)) is not None:
+            return Response(hit)
         # The hourly counters of answered addresses per domain; the window starts at the hour.
         # shortcut: at most 20000 distinct (domain, address) pairs, most frequent first.
         rows = [{'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
                 for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:20000]]
-        return Response(geo.destinations(rows))
+        out = geo.destinations(rows)
+        if not out['pending']:  # unfinished lookups must show up on the next request
+            cache.set(key, out, 120)  # shortcut: not invalidated, the hourly counters are 2 minutes old at most
+        return Response(out)

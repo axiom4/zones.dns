@@ -17,6 +17,7 @@ import urllib.request
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
+from functools import lru_cache
 
 from django.conf import settings
 from dnslib import QTYPE, DNSRecord
@@ -118,6 +119,12 @@ def public_ips(host):
     return [i for i in dns_values(host, 'A') + dns_values(host, 'AAAA') if is_public(i)]
 
 
+@lru_cache(maxsize=8192)
+def _as_name(asn):  # many addresses share an AS: one DNS query per AS, not per address (a failed lookup is cached too until restart)
+    name = dns_values(f'AS{asn}.asn.cymru.com', 'TXT')
+    return name[0].split('|')[-1].strip() if name else None
+
+
 def asn_info(ip):
     """Origin AS, prefix, country and registry from Team Cymru's DNS service (no extra connection to the host)."""
     try:
@@ -130,9 +137,8 @@ def asn_info(ip):
         return None
     p = [x.strip() for x in txt[0].split('|')]
     asn = p[0].split()[0]
-    name = dns_values(f'AS{asn}.asn.cymru.com', 'TXT')
     return {'asn': f'AS{asn}', 'prefix': p[1] if len(p) > 1 else None, 'country': p[2] if len(p) > 2 else None, 'registry': p[3] if len(p) > 3 else None,
-            'as_name': name[0].split('|')[-1].strip() if name else None}
+            'as_name': _as_name(asn)}
 
 
 # ---------- RDAP / hosts ----------
