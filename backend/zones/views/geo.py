@@ -74,9 +74,9 @@ REFRESH = 60  # seconds
 
 def _compute(key, hours):
     # The hourly counters of answered addresses per domain; the window starts at the hour.
-    # shortcut: at most 20000 distinct (domain, address) pairs, most frequent first.
+    # shortcut: at most 300000 distinct (domain, address) pairs, most frequent first; past that a long period loses its rarest addresses (then aggregate per address in SQL).
     rows = [{'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
-            for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:20000]]
+            for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:300000]]
     out = geo.destinations(rows)
     cache.set(key, (time.time(), out), 86400)
     return out
