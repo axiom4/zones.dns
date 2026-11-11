@@ -74,9 +74,15 @@ REFRESH = 60  # seconds
 
 def _compute(key, hours):
     # The hourly counters of answered addresses per domain; the window starts at the hour.
-    # shortcut: at most 300000 distinct (domain, address) pairs, most frequent first; past that a long period loses its rarest addresses (then aggregate per address in SQL).
-    rows = [{'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
-            for r in GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:300000]]
+    # Totals per address are never cut (a cap hid the rare addresses, so a longer period showed fewer); the domain names come from
+    # the 100000 most frequent (domain, address) pairs, the rest of an address's queries is counted without a name.
+    qs = GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours)))
+    total = dict(qs.values_list('ip').annotate(c=Sum('n')))
+    rows = []
+    for r in qs.values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:100000]:
+        rows.append({'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']})
+        total[r['ip']] -= r['c']
+    rows += [{'domain': '', 'answers': [{'type': 'A', 'value': ip}], 'n': n} for ip, n in total.items() if n > 0]
     out = geo.destinations(rows)
     cache.set(key, (time.time(), out), 86400)
     return out

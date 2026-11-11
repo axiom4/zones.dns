@@ -77,7 +77,8 @@ def destinations(rows):
             d = per_ip.setdefault(ip, {'q': 0, 'domains': Counter()})
             n = r.get('n', 1)
             d['q'] += n
-            d['domains'][r['domain']] += n
+            if r['domain']:
+                d['domains'][r['domain']] += n
     ranked = sorted(per_ip.items(), key=lambda kv: -kv[1]['q'])  # no cap: a cap hid the rare countries, so a longer period showed fewer
     geo, pending = locate([ip for ip, _ in ranked])
     countries, networks, points = {}, {}, {}
