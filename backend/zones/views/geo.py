@@ -60,7 +60,7 @@ class GeoDestinationsView(APIView):
             hours = 24
         key = f'geo-dest-{hours}'
         hit = cache.get(key)  # (computed at, result): kept a day, refreshed in the background so a request never waits for the aggregation
-        if hit is None:
+        if hit is None or time.time() - hit[0] > STALE:  # a result older than STALE is not shown: it would miss the last hours (a long period looked smaller than a short one)
             return Response(_compute(key, hours))
         age = time.time() - hit[0]
         # stale, or lookups still pending: one process refreshes (the lock), everybody else gets the last result now
@@ -70,6 +70,7 @@ class GeoDestinationsView(APIView):
 
 
 REFRESH = 60  # seconds
+STALE = 600  # seconds
 
 
 def _compute(key, hours):
