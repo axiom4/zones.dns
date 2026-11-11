@@ -206,7 +206,7 @@
     @else { <button class="mini" disabled>Audit</button> }
     @if (blockedNow().has(g.name)) {
       <button class="mini" disabled>Blocked</button>
-    } @else {
+    } @else if (g.forwarded || !g.blocked) {
       <button class="mini" [disabled]="!g.forwarded || g.name === '.'" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
               [title]="level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
     }
@@ -229,8 +229,8 @@
       }
       @if (!sub) {
         @if (blockedNow().has(l.name)) { <span class="out sm" data-o="blocked">Blocked</span> }
+        @else if (l.outcome === 'blocked') { <button class="mini" (click)="allow(l.name)" [attr.aria-label]="'Allow ' + l.name" title="Never block this name">Allow</button> }
         @else { <button class="mini" [disabled]="l.outcome !== 'forwarded'" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
-        @if (l.outcome === 'blocked') { <button class="mini" (click)="allow(l.name)" [attr.aria-label]="'Allow ' + l.name" title="Never block this name">Allow</button> }
       }
     </span>
   </li>
