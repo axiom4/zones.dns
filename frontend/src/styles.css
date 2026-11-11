@@ -160,6 +160,7 @@ a.zname { text-decoration: none; color: inherit; }
 .filters input.ip { width: 140px; } .filters select { width: auto; }
 .logs li { gap: .75rem; padding-block: .45rem; }
 .logs .acts { display: flex; gap: .4rem; justify-content: flex-end; width: 9rem; flex: none; }  /* fixed slot: client and ms stay in line when a row has no Block */
+.logs .rc { flex: none; width: 5.6rem; text-align: center; }
 .logs .when { color: var(--muted); font-size: 13px; width: 8.5rem; flex: none; font-variant-numeric: tabular-nums; }
 .out { flex: none; width: 5.5rem; text-align: center; padding: .2rem 0; border-radius: 999px; font-size: 12px; font-weight: 800; color: color-mix(in srgb, var(--c) 70%, #000); background: color-mix(in srgb, var(--c) 14%, white); }
 .out[data-o=local] { --c: #059669; } .out[data-o=forwarded] { --c: #2563eb; } .out[data-o=blocked] { --c: #e5484d; } .out[data-o=error] { --c: #d97706; }
@@ -445,7 +446,7 @@ app-geo-map svg { width: 100%; height: auto; display: block; touch-action: none;
   .records.logs li:has(> .out:not(.sm)) { flex-wrap: wrap; align-items: center; row-gap: .45rem; }
   .records.logs li:has(> .out:not(.sm)) > .rvalue { flex: 1 1 100%; }
   .records.logs li:has(> .out:not(.sm)) > .rvalue:empty { display: none; }
-  .records.logs li:has(> .out:not(.sm)) > :is(.out, .type) { order: 1; }
+  .records.logs li:has(> .out:not(.sm)) > :is(.out, .type, .rc) { order: 1; }
   .records.logs li:has(> .out:not(.sm)) > .when { order: 2; margin-left: auto; text-align: right; }
   .records.logs li:has(> .out:not(.sm))::before, .records.logs li:has(> .out:not(.sm))::after { content: ''; flex: 1 0 100%; height: 0; margin: -.25rem 0; }
   .records.logs li:has(> .out:not(.sm))::before { order: 3; }

@@ -220,6 +220,7 @@
     <span class="when">{{ time(l.time) }}</span>
     <span class="out" [attr.data-o]="l.outcome">{{ labels[l.outcome] }}</span>
     <span class="type" [attr.data-t]="l.type">{{ l.type }}</span>
+    <span class="rc" [attr.data-rc]="l.rcode">{{ l.rcode }}</span>
     @if (!sub) { <button class="rvalue linkish" (click)="q = l.name; reset()" title="Filter by this name">{{ l.name }}</button> }
     @else { <span class="rvalue"></span> }
     <button class="ttlv linkish" (click)="client = l.client; reset()" [title]="'Filter by this client' + (who(l.client) !== l.client ? ' (' + l.client + ')' : '')">{{ who(l.client) }}</button>
