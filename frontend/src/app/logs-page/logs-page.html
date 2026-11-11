@@ -206,11 +206,12 @@
     @else { <button class="mini" disabled>Audit</button> }
     @if (blockedNow().has(g.name)) {
       <button class="mini" disabled>Blocked</button>
-    } @else if (g.forwarded || !g.blocked) {
+    } @else if (g.blocked) {
+      <button class="mini" (click)="allow(g.name)" [attr.aria-label]="'Allow ' + g.name" title="Never block this name">Allow</button>
+    } @else {
       <button class="mini" [disabled]="!g.forwarded || g.name === '.'" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
               [title]="level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
     }
-    @if (g.blocked) { <button class="mini" (click)="allow(g.name)" [attr.aria-label]="'Allow ' + g.name" title="Never block this name">Allow</button> }
   </li>
 </ng-template>
 
