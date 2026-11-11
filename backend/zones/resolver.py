@@ -175,8 +175,9 @@ def authority(qname):
 
 
 # RFC 6303: reverse zones of addresses that mean nothing outside the local network. Nobody else can answer for them, so they are never sent upstream.
+# resolver.arpa (RFC 9462, discovery of encrypted DNS) is the same: only the resolver the client talks to can answer, and this one offers none, so the answer is negative.
 _LOCAL_REVERSE = frozenset(
-    ['10.in-addr.arpa', '168.192.in-addr.arpa', '254.169.in-addr.arpa', '127.in-addr.arpa', '0.in-addr.arpa', '255.255.255.255.in-addr.arpa']
+    ['resolver.arpa', '10.in-addr.arpa', '168.192.in-addr.arpa', '254.169.in-addr.arpa', '127.in-addr.arpa', '0.in-addr.arpa', '255.255.255.255.in-addr.arpa']
     + [f'{n}.172.in-addr.arpa' for n in range(16, 32)]  # 172.16.0.0/12
     + [f'{n}.100.in-addr.arpa' for n in range(64, 128)]  # 100.64.0.0/10 (RFC 6598)
     + ['1.' + '0.' * 31 + 'ip6.arpa', '0.' * 32 + 'ip6.arpa', 'd.f.ip6.arpa', 'c.f.ip6.arpa', '8.e.f.ip6.arpa', '9.e.f.ip6.arpa', 'a.e.f.ip6.arpa', 'b.e.f.ip6.arpa'])  # ::1, ::, fc00::/7, fe80::/10
@@ -355,7 +356,7 @@ class Resolver(BaseResolver):
                 outcome, via = 'local', f'zone {auth[0]} (no such {"record" if auth[1] else "name"})'
                 reply = negative(request, *auth)
             elif settings.DNS_LOCAL_REVERSE and (zone := local_reverse(qname)):
-                outcome, via = 'local', f'private reverse zone {zone} (RFC 6303)'
+                outcome, via = 'local', f'local-only zone {zone} (RFC 6303 / 9462)'
                 reply = negative(request, zone, qname == zone)
             elif (hit := blocked_entry(qname)):
                 outcome, reply, via = 'blocked', blocked_reply(request, hit[0]), f'blacklist {hit[0]} ({hit[1]})'
