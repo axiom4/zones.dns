@@ -8,6 +8,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 
 from django.conf import settings
+from django.db import connection
 from django.utils import timezone
 
 from . import geoip
@@ -44,7 +45,7 @@ def locate(ips, budget=150):
         for ip, info in zip(batch, infos):
             info = info or {}
             rows.append(IpGeo(ip=ip, country=(info.get('country') or '')[:2].upper(), asn=info.get('asn') or '', as_name=(info.get('as_name') or '')[:200], prefix=info.get('prefix') or ''))
-        IpGeo.objects.bulk_create(rows, update_conflicts=True, unique_fields=['ip'], update_fields=['country', 'asn', 'as_name', 'prefix', 'updated'])  # one round trip, not two per address
+        IpGeo.objects.bulk_create(rows, update_conflicts=True, unique_fields=['ip'] if connection.features.supports_update_conflicts_with_target else None, update_fields=['country', 'asn', 'as_name', 'prefix', 'updated'])  # one round trip, not two per address
         cached.update({g.ip: g for g in rows})
     for ip in public:
         loc, g = local[ip], cached.get(ip)
