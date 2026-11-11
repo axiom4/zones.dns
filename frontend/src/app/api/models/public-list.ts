@@ -3,6 +3,5 @@
 
 export interface PublicList {
   count: number;
-  enabled: boolean;
   name: string;
 }

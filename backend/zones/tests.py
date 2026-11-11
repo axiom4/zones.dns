@@ -106,12 +106,12 @@ class BlocklistEnabledTests(TestCase):
         self.assertIsNone(blocked_entry('ads9.good.example'))
         self.assertIsNone(blocked_entry('www.site.example'))
 
-    def test_expired_entry_is_ignored_and_a_list_can_be_switched_off(self):
+    def test_expired_entry_is_ignored(self):
         from datetime import timedelta
 
         from django.utils import timezone
 
-        from .models import LISTS_OFF, BlockedDomain, Setting
+        from .models import BlockedDomain
         from .resolver import blocked_entry
         BlockedDomain.objects.create(name='old.example', expires=timezone.now() - timedelta(hours=1))
         BlockedDomain.objects.create(name='soon.example', expires=timezone.now() + timedelta(hours=1))
@@ -120,11 +120,8 @@ class BlocklistEnabledTests(TestCase):
         self.assertIsNone(blocked_entry('old.example'))
         self.assertEqual(blocked_entry('soon.example'), ('soon.example', 'personal'))
         self.assertEqual(blocked_entry('a.example'), ('a.example', 'hagezi-tif'))
-        Setting.objects.create(key=LISTS_OFF, value='hagezi-tif')
-        resolver._data = None
-        self.assertIsNone(blocked_entry('a.example'))
 
-    def test_lists_endpoint_counts_and_switches(self):
+    def test_lists_endpoint_counts(self):
         from django.contrib.auth.models import User
         from rest_framework.test import APIClient
 
@@ -134,8 +131,7 @@ class BlocklistEnabledTests(TestCase):
         BlockedDomain.objects.create(name='c.example', source='list', list_name='two')
         c = APIClient()
         c.force_authenticate(User.objects.create_user('u3', is_staff=True, is_superuser=True))
-        r = c.patch('/api/blocked/lists/', {'name': 'two', 'enabled': False}, format='json')
-        self.assertEqual(r.data, [{'name': 'one', 'count': 2, 'enabled': True}, {'name': 'two', 'count': 1, 'enabled': False}])
+        self.assertEqual(c.get('/api/blocked/lists/').data, [{'name': 'one', 'count': 2}, {'name': 'two', 'count': 1}])
         self.assertEqual(c.post('/api/blocked/', {'name': '(', 'regex': True}, format='json').status_code, 400)  # not a valid pattern
 
     def test_suggestions_list_tracker_looking_names_only(self):

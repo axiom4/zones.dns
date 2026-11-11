@@ -9,10 +9,10 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from ..models import COUNTS_KEY, LISTS_OFF, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
+from ..models import COUNTS_KEY, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
 from ..resolver import blocked_match
 from ..rollup import floor_hour
-from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer, PublicListSwitchSerializer
+from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer
 from ..serializers.stats import CountSerializer
 
 # a label that names what the host is for: ads, tracking, telemetry
@@ -55,18 +55,11 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
         count = qs[:IMPORTED_COUNT_CAP].count() if q else (list_counts().get(lst, 0) if lst else sum(list_counts().values()))
         return Response({'count': count, 'names': list(qs.values_list('name', flat=True)[offset:offset + limit])})
 
-    @extend_schema(request=PublicListSwitchSerializer, responses=PublicListSerializer(many=True))
-    @action(detail=False, methods=['get', 'patch'])
+    @extend_schema(responses=PublicListSerializer(many=True))
+    @action(detail=False, methods=['get'])
     def lists(self, request):
-        """The imported public lists, each with its domain count and an on/off switch (off = its domains are kept but ignored)."""
-        off = set(filter(None, (Setting.objects.filter(key=LISTS_OFF).values_list('value', flat=True).first() or '').split(',')))
-        if request.method == 'PATCH':
-            ser = PublicListSwitchSerializer(data=request.data)
-            ser.is_valid(raise_exception=True)
-            name, on = ser.validated_data['name'], ser.validated_data['enabled']
-            off = off - {name} if on else off | {name}
-            Setting.objects.update_or_create(key=LISTS_OFF, defaults={'value': ','.join(sorted(off))})
-        return Response([{'name': n, 'count': c, 'enabled': n not in off} for n, c in sorted(list_counts().items())])
+        """The imported public lists, each with its domain count."""
+        return Response([{'name': n, 'count': c} for n, c in sorted(list_counts().items())])
 
     @extend_schema(parameters=[OpenApiParameter('days', int, description='Look back this many days (default 7, max 30)')], responses=CountSerializer(many=True))
     @action(detail=False, methods=['get'])

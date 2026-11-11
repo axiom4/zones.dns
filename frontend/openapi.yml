@@ -201,32 +201,9 @@ paths:
   /api/blocked/lists/:
     get:
       operationId: blocked_lists_list
-      description: The imported public lists, each with its domain count and an on/off
-        switch (off = its domains are kept but ignored).
+      description: The imported public lists, each with its domain count.
       tags:
       - blocked
-      security:
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/PublicList'
-          description: ''
-    patch:
-      operationId: blocked_lists_partial_update
-      description: The imported public lists, each with its domain count and an on/off
-        switch (off = its domains are kept but ignored).
-      tags:
-      - blocked
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/PatchedPublicListSwitchRequest'
       security:
       - tokenAuth: []
       responses:
@@ -2568,14 +2545,6 @@ components:
       properties:
         enabled:
           type: boolean
-    PatchedPublicListSwitchRequest:
-      type: object
-      properties:
-        name:
-          type: string
-          minLength: 1
-        enabled:
-          type: boolean
     PatchedRecordRequest:
       type: object
       properties:
@@ -2649,11 +2618,8 @@ components:
           type: string
         count:
           type: integer
-        enabled:
-          type: boolean
       required:
       - count
-      - enabled
       - name
     PurgeRequestRequest:
       type: object

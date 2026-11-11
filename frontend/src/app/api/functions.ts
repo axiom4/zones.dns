@@ -21,8 +21,6 @@ export type { BlockedImportedRetrieve$Params as BlockedImportedRetrieve$Params }
 export { blockedImportedRetrieve as blockedImportedRetrieve } from './fn/blocked/blocked-imported-retrieve';
 export type { BlockedListsList$Params as BlockedListsList$Params } from './fn/blocked/blocked-lists-list';
 export { blockedListsList as blockedListsList } from './fn/blocked/blocked-lists-list';
-export type { BlockedListsPartialUpdate$Params as BlockedListsPartialUpdate$Params } from './fn/blocked/blocked-lists-partial-update';
-export { blockedListsPartialUpdate as blockedListsPartialUpdate } from './fn/blocked/blocked-lists-partial-update';
 export type { BlockedPersonalRetrieve$Params as BlockedPersonalRetrieve$Params } from './fn/blocked/blocked-personal-retrieve';
 export { blockedPersonalRetrieve as blockedPersonalRetrieve } from './fn/blocked/blocked-personal-retrieve';
 export type { BlockedPersonalPartialUpdate$Params as BlockedPersonalPartialUpdate$Params } from './fn/blocked/blocked-personal-partial-update';

@@ -52,7 +52,6 @@ export type { PaginatedQueryLogList } from './models/paginated-query-log-list';
 export type { PasskeyInfo } from './models/passkey-info';
 export type { PatchedBlockedDomainRequest } from './models/patched-blocked-domain-request';
 export type { PatchedPersonalSwitchRequest } from './models/patched-personal-switch-request';
-export type { PatchedPublicListSwitchRequest } from './models/patched-public-list-switch-request';
 export type { PatchedRecordRequest } from './models/patched-record-request';
 export type { PatchedStaticHostRequest } from './models/patched-static-host-request';
 export type { PatchedZoneRequest } from './models/patched-zone-request';

@@ -1,7 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { blockedImportedRetrieve, blockedListsList, blockedListsPartialUpdate, blockedPublicPartialUpdate, blockedPublicRetrieve } from '../api/functions';
+import { blockedImportedRetrieve, blockedListsList, blockedPublicPartialUpdate, blockedPublicRetrieve } from '../api/functions';
 import { PublicList } from '../api/models';
 import { Ui } from '../services/ui';
 
@@ -29,9 +29,6 @@ export class BlockedListsPage {
     return this.ui.run(async () => { this.active.set((await this.api.invoke(blockedPublicPartialUpdate, { body: { enabled: !this.active() } })).enabled); });
   }
 
-  toggle(l: PublicList) {
-    return this.ui.run(async () => this.lists.set(await this.api.invoke(blockedListsPartialUpdate, { body: { name: l.name, enabled: !l.enabled } })));
-  }
   pick(name: string) { this.list = this.list === name ? '' : name; return this.search(); }
 
   search() { return this.fetch(0); }

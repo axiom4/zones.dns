@@ -12,11 +12,9 @@
 @if (lists().length) {
   <ul class="records blocked">
     @for (l of lists(); track l.name) {
-      <li [class.off]="!active() || !l.enabled">
+      <li [class.off]="!active()">
         <button class="rvalue linkish" (click)="pick(l.name)" [attr.aria-pressed]="list === l.name" title="Show only the domains of this list">{{ l.name }}</button>
         <span class="ttlv wide">{{ l.count }} domains</span>
-        <button class="switch" role="switch" [attr.aria-checked]="active() && l.enabled" (click)="toggle(l)" [disabled]="!active()"
-                [title]="!active() ? 'Public lists are off' : l.enabled ? 'On: click to ignore this list' : 'Off: click to use this list again'"><i></i></button>
       </li>
     }
   </ul>

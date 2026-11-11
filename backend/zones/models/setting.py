@@ -17,4 +17,3 @@ class Setting(models.Model):
 
 PERSONAL_BLOCKS = 'personal_blocks'  # the whole feature: false = blocks added by hand are ignored
 PUBLIC_LISTS = 'public_lists'  # false = the imported public lists are ignored
-LISTS_OFF = 'lists_off'  # comma-separated names of the public lists that are switched off

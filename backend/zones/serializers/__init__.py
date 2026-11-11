@@ -1,6 +1,6 @@
 from .geo import DestinationsSerializer, GeoIpsResultSerializer, WhoisSerializer
 from .audit import AuditReportSerializer, AuditRequestSerializer
-from .blocked_domain import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer, PublicListSwitchSerializer
+from .blocked_domain import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer
 from .bulk import BulkActionSerializer, BulkResultSerializer, ZoneImportResultSerializer, ZoneImportSerializer
 from .mfa import AdminTicketSerializer, MeSerializer, LoginResultSerializer, MfaCodeSerializer, MfaCredentialSerializer, MfaOptionsSerializer, MfaStatusSerializer, MfaTicketSerializer, StepUpCodeSerializer, StepUpCredentialSerializer, StepUpGrantSerializer, StepUpScopeSerializer, TokenResultSerializer, TotpSetupSerializer
 from .login import EncryptedPacketSerializer, LoginKeySerializer

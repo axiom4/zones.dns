@@ -46,12 +46,6 @@ class PersonalSwitchSerializer(serializers.Serializer):
 class PublicListSerializer(serializers.Serializer):
     name = serializers.CharField()
     count = serializers.IntegerField()
-    enabled = serializers.BooleanField()
-
-
-class PublicListSwitchSerializer(serializers.Serializer):
-    name = serializers.CharField()
-    enabled = serializers.BooleanField()
 
 
 class ImportedBlockedSerializer(serializers.Serializer):
