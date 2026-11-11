@@ -15,9 +15,9 @@
 <form class="composer single" (ngSubmit)="add()">
   <input class="grow" name="b" [(ngModel)]="name" placeholder="domain, e.g. ads.example.com" autocomplete="off" aria-label="Domain" required>
   <button class="primary">Block</button>
-  <button type="button" (click)="add(true)" [disabled]="!name.trim()" title="Never block this domain and its subdomains">Allow</button>
+  <button type="button" class="ghost" (click)="add(true)" [disabled]="!name.trim()" title="Never block this domain and its subdomains">Allow</button>
   <select name="h" [(ngModel)]="hours" aria-label="How long an Allow lasts" title="How long an Allow lasts"><option [ngValue]="0">always</option><option [ngValue]="1">1 hour</option><option [ngValue]="24">1 day</option><option [ngValue]="168">7 days</option></select>
-  <label class="soft"><input type="checkbox" name="r" [(ngModel)]="regex"> pattern (regex)</label>
+  <label class="check"><input type="checkbox" name="r" [(ngModel)]="regex"> pattern (regex)</label>
 </form>
 @if (suggestions().length) {
   <details class="panel">
