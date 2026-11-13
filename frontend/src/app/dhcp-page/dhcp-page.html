@@ -1,0 +1,70 @@
+<header>
+  <div>
+    <h2>DHCP leases</h2>
+    <p class="soft">{{ leases().length }} {{ all ? 'leases' : 'active leases' }} from the DHCP servers (addresses and delegated prefixes). Configure DHCPv4, DHCPv6 and Router Advertisements below or in <code>.env</code>.</p>
+  </div>
+  <div class="actions">
+    <label class="check"><input type="checkbox" name="all" [(ngModel)]="all" (ngModelChange)="load()"> include ended</label>
+    <button class="ghost" type="button" (click)="showSettings.set(!showSettings())">{{ showSettings() ? 'Hide settings' : 'DHCP settings' }}</button>
+    <button class="ghost" type="button" (click)="load()">Refresh</button>
+  </div>
+</header>
+@if (showSettings()) {
+  <form class="composer" (ngSubmit)="saveSettings()">
+    <label class="check"><input type="checkbox" name="DHCP" [(ngModel)]="cfg().DHCP"> DHCPv4</label>
+    <input name="DHCP_SERVER" [(ngModel)]="cfg().DHCP_SERVER" placeholder="Server IP (192.168.1.2)" aria-label="DHCPv4 server IP">
+    <input name="DHCP_NETMASK" [(ngModel)]="cfg().DHCP_NETMASK" placeholder="Netmask (255.255.255.0)" aria-label="DHCPv4 netmask">
+    <input class="grow" name="DHCP_RANGE" [(ngModel)]="cfg().DHCP_RANGE" placeholder="Range (first-last)" aria-label="DHCPv4 range">
+    <input name="DHCP_ROUTER" [(ngModel)]="cfg().DHCP_ROUTER" placeholder="Router IP" aria-label="DHCPv4 router">
+    <input name="DHCP_DNS" [(ngModel)]="cfg().DHCP_DNS" placeholder="DNS IPs (empty = Server IP)" aria-label="DHCPv4 DNS servers">
+    <input name="DHCP_DOMAIN" [(ngModel)]="cfg().DHCP_DOMAIN" placeholder="Domain (lan)" aria-label="DHCP domain">
+    <input name="DHCP_SEARCH" [(ngModel)]="cfg().DHCP_SEARCH" placeholder="Search domains" aria-label="DHCP search domains">
+    <input type="number" name="DHCP_LEASE" [(ngModel)]="cfg().DHCP_LEASE" placeholder="Lease (s)" aria-label="DHCPv4 lease seconds">
+    <input name="DHCP_INTERFACE" [(ngModel)]="cfg().DHCP_INTERFACE" placeholder="Interface (eth0)" aria-label="DHCP network interface">
+    <input name="DHCP_NTP" [(ngModel)]="cfg().DHCP_NTP" placeholder="NTP IPs" aria-label="DHCPv4 NTP servers">
+    <input class="grow" name="DHCP_ROUTES" [(ngModel)]="cfg().DHCP_ROUTES" placeholder="Routes (net=gw ...)" aria-label="DHCPv4 static routes">
+    <input type="number" name="DHCP_MTU" [(ngModel)]="cfg().DHCP_MTU" placeholder="MTU (0=off)" aria-label="DHCPv4 MTU">
+    <input name="DHCP_BOOT_SERVER" [(ngModel)]="cfg().DHCP_BOOT_SERVER" placeholder="PXE boot server" aria-label="PXE boot server">
+    <input name="DHCP_BOOT_FILE" [(ngModel)]="cfg().DHCP_BOOT_FILE" placeholder="PXE boot file" aria-label="PXE boot file">
+    <input type="number" name="DHCP_FAILOVER_SECS" [(ngModel)]="cfg().DHCP_FAILOVER_SECS" placeholder="Failover secs (0=primary)" aria-label="DHCPv4 failover delay seconds">
+    <input class="grow" name="DHCP_RESERVATIONS" [(ngModel)]="cfg().DHCP_RESERVATIONS" placeholder="Reservations (mac=ip ...)" aria-label="DHCPv4 reservations">
+    <input class="grow" name="DHCP_SUBNETS" [(ngModel)]="cfg().DHCP_SUBNETS" placeholder="Relayed subnets JSON ([{&quot;network&quot;:&quot;...&quot;,&quot;range&quot;:&quot;...&quot;}])" aria-label="Relayed subnets JSON">
+    <label class="check"><input type="checkbox" name="DHCP_PROBE" [(ngModel)]="cfg().DHCP_PROBE"> ARP/ICMP probe</label>
+    <label class="check"><input type="checkbox" name="DHCP_NAMES" [(ngModel)]="cfg().DHCP_NAMES"> DNS lease names</label>
+    <label class="check"><input type="checkbox" name="DHCP_UNICAST" [(ngModel)]="cfg().DHCP_UNICAST"> L2 unicast</label>
+    <label class="check"><input type="checkbox" name="DHCP_DNR" [(ngModel)]="cfg().DHCP_DNR"> DNR (RFC 9463)</label>
+    <label class="check"><input type="checkbox" name="DHCP6" [(ngModel)]="cfg().DHCP6"> DHCPv6</label>
+    <input name="DHCP6_PREFIX" [(ngModel)]="cfg().DHCP6_PREFIX" placeholder="IPv6 prefix (2001:db8:1::/64)" aria-label="DHCPv6 prefix">
+    <input class="grow" name="DHCP6_POOL" [(ngModel)]="cfg().DHCP6_POOL" placeholder="IPv6 IA_NA/IA_TA pool (first-last)" aria-label="DHCPv6 pool">
+    <input name="DHCP6_PD_POOL" [(ngModel)]="cfg().DHCP6_PD_POOL" placeholder="IA_PD pool (2001:db8:ff00::/40)" aria-label="DHCPv6 PD pool">
+    <input type="number" name="DHCP6_PD_LEN" [(ngModel)]="cfg().DHCP6_PD_LEN" placeholder="PD len (56)" aria-label="DHCPv6 PD prefix length">
+    <input name="DHCP6_DNS" [(ngModel)]="cfg().DHCP6_DNS" placeholder="DHCPv6 DNS IPs" aria-label="DHCPv6 DNS servers">
+    <input type="number" name="DHCP6_LEASE" [(ngModel)]="cfg().DHCP6_LEASE" placeholder="DHCPv6 lease (s)" aria-label="DHCPv6 lease seconds">
+    <input type="number" name="DHCP6_PREFERENCE" [(ngModel)]="cfg().DHCP6_PREFERENCE" placeholder="Preference (0-255)" aria-label="DHCPv6 preference">
+    <label class="check"><input type="checkbox" name="DHCP6_RAPID" [(ngModel)]="cfg().DHCP6_RAPID"> Rapid commit</label>
+    <label class="check"><input type="checkbox" name="DHCP6_PD_ROUTES" [(ngModel)]="cfg().DHCP6_PD_ROUTES"> PD kernel routes</label>
+    <label class="check"><input type="checkbox" name="DHCP_RA" [(ngModel)]="cfg().DHCP_RA"> RA</label>
+    <input type="number" name="DHCP_RA_INTERVAL" [(ngModel)]="cfg().DHCP_RA_INTERVAL" placeholder="RA interval (s)" aria-label="RA interval seconds">
+    <input type="number" name="DHCP_RA_ROUTER_LIFETIME" [(ngModel)]="cfg().DHCP_RA_ROUTER_LIFETIME" placeholder="RA lifetime (0=not router)" aria-label="RA router lifetime">
+    <label class="check"><input type="checkbox" name="DHCP_RA_SLAAC" [(ngModel)]="cfg().DHCP_RA_SLAAC"> RA SLAAC</label>
+    <button class="primary" type="submit">Save settings</button>
+    @if (saved()) { <span class="soft">Saved.</span> }
+  </form>
+}
+<form class="composer" (ngSubmit)="load()">
+  <input class="grow" name="q" [(ngModel)]="q" placeholder="search address, MAC / DUID or host name" autocomplete="off" aria-label="Search the leases">
+  <button class="primary">Search</button>
+</form>
+<ul class="records">
+  @for (l of leases(); track l.family + '-' + l.id) {
+    <li [class.off]="!l.active">
+      <span class="type" [attr.data-t]="l.family === 6 ? 'AAAA' : 'A'">{{ l.kind === 'prefix' ? 'PD' : 'v' + l.family }}</span>
+      <span class="rname">{{ l.address }}@if (l.hostname) {<small class="note-t">{{ l.hostname }}</small>}</span>
+      <span class="rvalue">{{ l.client }}</span>
+      <span class="ttlv">{{ l.active ? 'until' : 'ended' }} {{ when(l.expires) }}</span>
+      <button class="icon" (click)="end(l)" [attr.aria-label]="'End the lease of ' + l.address">✕</button>
+    </li>
+  } @empty {
+    <li class="empty">No leases. Turn the DHCP server on with DHCP=true in .env and run <code>manage.py rundhcp</code>.</li>
+  }
+</ul>
