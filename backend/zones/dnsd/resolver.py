@@ -243,8 +243,9 @@ def blocked_entry(qname):
     if _shared():
         try:
             stored = cache.get(f'bl:{_data_version}:{qname}')
-            if stored is not None:
-                hit = tuple(stored.split('\t', 1)) if stored else None
+            parts = stored.split('\t', 1) if stored else []
+            if stored is not None and (not stored or len(parts) == 2):  # an entry without the tab is the old name-only format: ask the database
+                hit = tuple(parts) or None
                 with _blocked_lock:
                     _blocked[qname] = hit
                 return hit
