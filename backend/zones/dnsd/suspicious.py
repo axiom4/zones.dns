@@ -13,6 +13,8 @@ _lock = threading.Lock()
 
 
 def entropy(s):
+    if not s:
+        return 0.0
     n = len(s)
     return -sum(c / n * math.log2(c / n) for c in Counter(s).values())
 
@@ -37,10 +39,17 @@ def check(qname, qtype, client):
     if sub:  # many distinct subdomains of one domain from one client in a short time
         now, win = time.monotonic(), settings.SUSPICIOUS_WINDOW
         with _lock:
+            if len(_seen) > 10000:
+                for ck in [ck for ck, d in list(_seen.items()) if not d or max(d.values()) < now - win]:
+                    del _seen[ck]
+                if len(_seen) > 10000:
+                    _seen.clear()
             seen = _seen[(client, domain)]
             seen[qname] = now
             for k in [k for k, t in seen.items() if now - t > win]:
                 del seen[k]
-            if len(seen) > settings.SUSPICIOUS_MAX_UNIQUE:
+            if not seen:
+                del _seen[(client, domain)]
+            elif len(seen) > settings.SUSPICIOUS_MAX_UNIQUE:
                 return f'{len(seen)} distinct subdomains in {win}s'
     return None

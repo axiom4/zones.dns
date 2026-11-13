@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from . import geoip
 from .audit import asn_info, is_public
-from .models import IpGeo
+from ..models import IpGeo
 
 FRESH_KNOWN = timedelta(days=30)
 FRESH_UNKNOWN = timedelta(days=1)
@@ -47,7 +47,10 @@ def locate(ips, budget=150):
             rows.append(IpGeo(ip=ip, country=(info.get('country') or '')[:2].upper(), asn=info.get('asn') or '', as_name=(info.get('as_name') or '')[:200], prefix=info.get('prefix') or ''))
         IpGeo.objects.bulk_create(rows, update_conflicts=True, unique_fields=['ip'] if connection.features.supports_update_conflicts_with_target else None, update_fields=['country', 'asn', 'as_name', 'prefix', 'updated'])  # one round trip, not two per address
         cached.update({g.ip: g for g in rows})
+    skipped = set(todo[budget:])
     for ip in public:
+        if ip in skipped and not local[ip].get('country'):
+            continue  # over budget and no local country: not located yet
         loc, g = local[ip], cached.get(ip)
         country = loc.get('country') or (g.country if g else '')
         out[ip] = {
@@ -62,12 +65,12 @@ def locate(ips, budget=150):
 def country_domains(code, hours):
     """Registrable domains that had an answer pointing to country `code` (PRIV = private addresses, ?? = unknown) in the last `hours`.
     Same data as the geolocation page. shortcut: a domain also answered from other countries is listed whole; at most 5000 domains."""
-    from .models import GeoStat
+    from ..models import GeoStat
     from .rollup import floor_hour
     pairs = set(GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values_list('domain', 'ip').distinct())
     found, _ = locate({ip for _, ip in pairs}, budget=0)  # only what is already known: no network lookups while listing the log
     want = lambda g: (g['private'] if code == 'PRIV' else not g['private'] and (g['country'] or '??') == code)
-    return sorted({d for d, ip in pairs if d and ip in found and want(found[ip])})[:5000]
+    return sorted({d for d, ip in pairs if d and ip in found and want(found[ip])})
 
 
 def destinations(rows):

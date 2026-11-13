@@ -6,9 +6,11 @@ so a crash between the two can lose a few counts; `manage.py rebuild_stats` reco
 from collections import Counter
 from datetime import timezone as dt_timezone
 
-from django.db import connection
+from django.db import connection, transaction
 
-from .models import GeoStat, StatCount
+from ..models import DomainStat, GeoStat, StatCount
+
+_OUTCOME_IDX = {'local': 1, 'forwarded': 2, 'blocked': 3, 'error': 4}
 
 
 def floor_hour(t):
@@ -26,13 +28,13 @@ def _upsert(model, keys, values, rows):
     else:
         tail = f'ON CONFLICT ({", ".join(q(k) for k in keys)}) DO UPDATE SET ' + ', '.join(f'{q(v)} = {table}.{q(v)} + excluded.{q(v)}' for v in values)
     sql = f'INSERT INTO {table} ({cols}) VALUES ({", ".join(["%s"] * (len(keys) + len(values)))}) {tail}'
-    with connection.cursor() as c:
+    with transaction.atomic(), connection.cursor() as c:
         c.executemany(sql, sorted(rows, key=lambda r: tuple(str(x) for x in r[:len(keys)])))
 
 
 def add(entries):
     """Count a batch of saved QueryLog rows."""
-    stats, geo = {}, Counter()
+    stats, geo, doms = {}, Counter(), {}
     for e in entries:
         hour = floor_hour(e.time)
         dims = [('outcome', e.outcome), ('type', e.type), ('name', e.name), ('client', e.client)]
@@ -44,12 +46,18 @@ def add(entries):
             s[1] += e.ms
         for ip in {a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')}:
             geo[(hour, e.domain, ip)] += 1
+        d = doms.setdefault((hour, e.domain), [0, 0, 0, 0, 0, 0])
+        d[0] += 1
+        if idx := _OUTCOME_IDX.get(e.outcome):
+            d[idx] += 1
+        d[5] += e.ms
     _upsert(StatCount, ['dim', 'hour', 'key'], ['n', 'ms'], [(*k, *v) for k, v in stats.items()])
     _upsert(GeoStat, ['hour', 'domain', 'ip'], ['n'], [(*k, n) for k, n in geo.items()])
+    _upsert(DomainStat, ['hour', 'domain'], ['n', 'local', 'forwarded', 'blocked', 'error', 'ms'], [(*k, *v) for k, v in doms.items()])
 
 
 def purge(cutoff=None):
     """Forget the counters older than cutoff (a datetime), or all of them."""
-    for model in (StatCount, GeoStat):
+    for model in (StatCount, GeoStat, DomainStat):
         qs = model.objects.filter(hour__lt=floor_hour(cutoff)) if cutoff else model.objects.all()
         qs.delete()

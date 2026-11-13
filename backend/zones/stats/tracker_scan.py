@@ -1,7 +1,7 @@
 import urllib.parse
 
 from .audit import NAME_RE, fetch, public_ips
-from .domains import main_domain
+from ..dnsd.domains import main_domain
 
 REDIRECTS = (301, 302, 303, 307, 308)
 

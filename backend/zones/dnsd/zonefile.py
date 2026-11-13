@@ -3,7 +3,7 @@ import re
 
 from dnslib import QTYPE, RR
 
-from .models import RECORD_TYPES, Record
+from ..models import RECORD_TYPES, Record
 
 
 def export_zone(zone):
@@ -14,7 +14,8 @@ def export_zone(zone):
     for r in zone.records.order_by('name', 'type'):
         line = f'{r.name} {r.ttl} IN {r.type} {r.value}'
         if r.note:
-            line += f' ; {r.note}'
+            note = r.note.replace('\r', ' ').replace('\n', ' ')
+            line += f' ; {note}'
         lines.append(line if r.enabled else f';{line}')  # disabled records stay as comments
     return '\n'.join(lines) + '\n'
 

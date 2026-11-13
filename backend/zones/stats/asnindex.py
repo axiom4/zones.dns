@@ -56,7 +56,9 @@ def read_archive(fileobj):
             if not hit:
                 continue
             asn, fam = int(hit[1]), hit[2]
-            lines = tar.extractfile(m).read().decode('utf-8', 'replace').splitlines()
+            if asn > 0xFFFFFFFF:
+                continue
+            lines = tar.extractfile(m).read(50_000_000).decode('utf-8', 'replace').splitlines()
             if asn not in names and len(lines) > 1 and lines[1].startswith('# '):
                 names[asn] = lines[1][2:].strip()[:200]  # header: "# AS1234 (HANDLE)" then "# description"
             for line in lines:
@@ -89,7 +91,7 @@ def write(path, v4, v6, names):
 
 class _Index:
     def __init__(self):
-        self.lock, self.mtime, self.mm, self.n4, self.n6, self.names = threading.Lock(), None, None, 0, 0, {}
+        self.lock, self.mtime, self.state = threading.Lock(), None, None
 
     def _open(self, path):
         try:
@@ -107,25 +109,27 @@ class _Index:
                             return False
                         try:
                             with open(path + '.json') as f:
-                                self.names = {int(k): v for k, v in json.load(f).items()}
+                                names = {int(k): v for k, v in json.load(f).items()}
                         except (OSError, ValueError):
-                            self.names = {}
-                        self.mm, self.n4, self.n6, self.mtime = mm, n4, n6, mtime
+                            names = {}
+                        self.state = (mm, n4, n6, names)
+                        self.mtime = mtime
                     except (OSError, ValueError, struct.error):
                         return False
-        return True
+        return self.state is not None
 
     def lookup(self, ip):
         """(asn, name) of the range containing ip, or None."""
         path = getattr(settings, 'ASN_INDEX', '')
         if not path or not self._open(path):
             return None
-        mm, a = self.mm, ipaddress.ip_address(ip)
+        mm, n4, n6, names = self.state
+        a = ipaddress.ip_address(ip)
         if a.version == 4:
-            base, n, rec, key = HEAD.size, self.n4, R4, int(a)
+            base, n, rec, key = HEAD.size, n4, R4, int(a)
             get = lambda i: rec.unpack_from(mm, base + i * rec.size)
         else:
-            base, n, rec, key = HEAD.size + self.n4 * R4.size, self.n6, R6, a.packed
+            base, n, rec, key = HEAD.size + n4 * R4.size, n6, R6, a.packed
             get = lambda i: rec.unpack_from(mm, base + i * rec.size)
         lo, hi = 0, n  # last range whose start <= key
         while lo < hi:
@@ -137,7 +141,7 @@ class _Index:
         if lo == 0:
             return None
         s, e, asn = get(lo - 1)
-        return (asn, self.names.get(asn, '')) if key <= e else None
+        return (asn, names.get(asn, '')) if key <= e else None
 
 
 _index = _Index()

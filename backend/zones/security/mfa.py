@@ -16,7 +16,7 @@ from django.core import signing
 from django.core.cache import cache
 from rest_framework.authtoken.models import Token
 
-from .models import Passkey, TotpDevice
+from ..models import Passkey, TotpDevice
 
 TICKET_AGE = 600  # seconds
 MAX_FAILS = 5  # wrong codes per user per FAIL_WINDOW
@@ -48,18 +48,26 @@ class MfaError(Exception):
 
 # ---- tickets and brute-force guard
 def make_ticket(user, kind):
-    return signing.dumps({'u': user.pk, 'k': kind}, salt='mfa-ticket')
+    return signing.dumps({'u': user.pk, 'k': kind, 'j': secrets.token_urlsafe(12)}, salt='mfa-ticket')
 
 
-def read_ticket(ticket, kind):
+def read_ticket(ticket, kind, consume=False):
     from django.contrib.auth import get_user_model
     try:
         d = signing.loads(ticket or '', salt='mfa-ticket', max_age=TICKET_AGE)
-        if d['k'] != kind:
+        if d.get('k') != kind:
             raise signing.BadSignature
-        return get_user_model().objects.get(pk=d['u'], is_staff=True, is_active=True)
+        user = get_user_model().objects.get(pk=d['u'], is_staff=True, is_active=True)
     except (signing.BadSignature, get_user_model().DoesNotExist):
         raise MfaError('expired')
+    jti = d.get('j')
+    if jti and cache.get(f'mfa-ticket-used:{jti}'):
+        raise MfaError('expired')
+    if kind == 'setup' and methods(user):
+        raise MfaError('expired')
+    if consume and jti and not cache.add(f'mfa-ticket-used:{jti}', 1, TICKET_AGE + 60):
+        raise MfaError('expired')
+    return user
 
 
 def guard(user):
@@ -74,6 +82,19 @@ def fail(user):
     except ValueError:
         pass  # the counter expired between add() and incr(): the attempt just is not counted
     raise MfaError('wrong_code')
+
+
+def login_guard(key):
+    if cache.get(f'login-fail:{key}', 0) >= MAX_FAILS * 2:
+        raise MfaError('locked')
+
+
+def login_fail(key):
+    cache.add(f'login-fail:{key}', 0, 300)
+    try:
+        cache.incr(f'login-fail:{key}')
+    except ValueError:
+        pass
 
 
 # ---- step-up: a logged-in user proves a factor again for one dangerous action (e.g. deleting a zone)
@@ -112,9 +133,10 @@ def check_totp(device, code):
     code = (code or '').replace(' ', '')
     for step in (now - 1, now, now + 1):
         if step > device.last_step and hmac.compare_digest(totp_code(device.secret, step), code):
-            device.last_step = step
             if device.pk:
-                device.save(update_fields=['last_step'])
+                if not TotpDevice.objects.filter(pk=device.pk, last_step__lt=step).update(last_step=step):
+                    return False
+            device.last_step = step
             return True
     return False
 

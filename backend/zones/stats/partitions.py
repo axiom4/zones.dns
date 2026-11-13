@@ -15,7 +15,7 @@ from django.conf import settings
 from django.db import connection, transaction
 from django.utils import timezone
 
-from .models import QueryLog
+from ..models import QueryLog
 
 AHEAD = 7  # days of empty partitions kept ready in front of today
 

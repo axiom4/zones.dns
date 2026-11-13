@@ -32,7 +32,9 @@ class AdminSsoMiddleware:
 
     def __call__(self, request):
         p = request.path
-        if p.startswith('/admin/') and not p.startswith(OPEN) and request.user.is_authenticated and not (request.session.get(SESSION_KEY) and request.user.is_superuser):
+        sso_at = request.session.get(SESSION_KEY)
+        valid_sso = isinstance(sso_at, int) and (time.time() - sso_at <= settings.SESSION_MAX_AGE)
+        if p.startswith('/admin/') and not p.startswith(OPEN) and request.user.is_authenticated and not (valid_sso and request.user.is_superuser):
             logout(request)
             return redirect('admin:login')
         return self.get_response(request)

@@ -7,10 +7,10 @@ import logging
 import queue
 import threading
 
-from django.db import close_old_connections
+from django.db import DataError, IntegrityError, close_old_connections
 
 from . import rollup
-from .models import QueryLog
+from ..models import QueryLog
 
 log = logging.getLogger(__name__)
 
@@ -52,14 +52,29 @@ class LogWriter:
             pass
         if not rows:
             return
+        saved = 0
         try:
             close_old_connections()
             for i in range(0, len(rows), self.batch_max):
-                QueryLog.objects.bulk_create(rows[i:i + self.batch_max])
-                self._count(rows[i:i + self.batch_max])
+                batch = rows[i:i + self.batch_max]
+                try:
+                    QueryLog.objects.bulk_create(batch)
+                except (DataError, IntegrityError, ValueError, TypeError):
+                    good = []
+                    for row in batch:
+                        try:
+                            row.save()
+                            good.append(row)
+                        except (DataError, IntegrityError, ValueError, TypeError):
+                            self.dropped += 1
+                            log.warning('query log: dropping malformed row for %r', getattr(row, 'name', ''))
+                    batch = good
+                saved = i + len(rows[i:i + self.batch_max])
+                if batch:
+                    self._count(batch)
         except Exception:
-            log.exception('query log: saving %d rows failed, will retry', len(rows))
-            self._retry = rows[-self.queue_max:]  # bounded, newest kept
+            log.exception('query log: saving %d rows failed, will retry', len(rows) - saved)
+            self._retry = rows[saved:][-self.queue_max:]  # bounded, newest kept
 
     @staticmethod
     def _count(rows):

@@ -116,7 +116,16 @@ def is_public(ip):
 
 
 def public_ips(host):
-    return [i for i in dns_values(host, 'A') + dns_values(host, 'AAAA') if is_public(i)]
+    all_ips = dns_values(host, 'A') + dns_values(host, 'AAAA')
+    return all_ips if all_ips and all(is_public(i) for i in all_ips) else []
+
+
+def _os_public_ips(host):
+    try:
+        addrs = {info[4][0].split('%')[0] for info in socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)}
+    except OSError:
+        return False
+    return bool(addrs) and all(is_public(a) for a in addrs)
 
 
 @lru_cache(maxsize=8192)
@@ -136,16 +145,28 @@ def asn_info(ip):
     if not txt:
         return None
     p = [x.strip() for x in txt[0].split('|')]
+    if not p[0].split():
+        return None
     asn = p[0].split()[0]
     return {'asn': f'AS{asn}', 'prefix': p[1] if len(p) > 1 else None, 'country': p[2] if len(p) > 2 else None, 'registry': p[3] if len(p) > 3 else None,
             'as_name': _as_name(asn)}
+
+
+class _SafeRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        u = urllib.parse.urlsplit(newurl)
+        host = (u.hostname or '').lower()
+        if u.scheme != 'https' or (u.port and u.port != 443) or not NAME_RE.match(host) or not public_ips(host) or not _os_public_ips(host):
+            raise urllib.error.URLError('unsafe redirect')
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 # ---------- RDAP / hosts ----------
 def rdap(path):
     req = urllib.request.Request(f'https://rdap.org/{path}', headers={'User-Agent': UA, 'Accept': 'application/rdap+json'})
     try:
-        with urllib.request.urlopen(req, timeout=8) as r:
+        opener = urllib.request.build_opener(_SafeRedirect)
+        with opener.open(req, timeout=8) as r:
             return json.loads(r.read(1_000_000))
     except (urllib.error.URLError, OSError, ValueError):
         return None
@@ -165,17 +186,29 @@ def registration(domain):
         name = '.'.join(labels[i:])
         data = rdap('domain/' + urllib.parse.quote(name))
         if data and data.get('ldhName'):
-            ev = {e.get('eventAction'): e.get('eventDate') for e in data.get('events', [])}
-            registrar = next((e for e in data.get('entities', []) if 'registrar' in e.get('roles', [])), {})
-            abuse = next((_vcard(e, 'email') for e in registrar.get('entities', []) if 'abuse' in e.get('roles', [])), None)
+            ev = {e.get('eventAction'): e.get('eventDate') for e in (data.get('events') or []) if isinstance(e, dict)}
+            entities = [e for e in (data.get('entities') or []) if isinstance(e, dict)]
+            registrar = next((e for e in entities if 'registrar' in (e.get('roles') or [])), {})
+            abuse = next((_vcard(e, 'email') for e in (registrar.get('entities') or []) if isinstance(e, dict) and 'abuse' in (e.get('roles') or [])), None)
             age = None
             if ev.get('registration'):
-                age = (datetime.now(timezone.utc) - datetime.fromisoformat(ev['registration'].replace('Z', '+00:00'))).days
+                try:
+                    dt = datetime.fromisoformat(str(ev['registration']).replace('Z', '+00:00'))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    age = (datetime.now(timezone.utc) - dt).days
+                    try:
+                        from django.core.cache import cache
+                        cache.set(f'dom-age:{name}', age, 86400)
+                    except Exception:
+                        pass
+                except (ValueError, TypeError):
+                    age = None
             return {
                 'name': name, 'registrar': _vcard(registrar, 'fn'), 'created': ev.get('registration'), 'expires': ev.get('expiration'),
-                'updated': ev.get('last changed'), 'status': data.get('status', []), 'age_days': age,
+                'updated': ev.get('last changed'), 'status': data.get('status') or [], 'age_days': age,
                 'dnssec_signed': (data.get('secureDNS') or {}).get('delegationSigned'), 'abuse_email': abuse or None,
-                'nameservers': sorted(n.get('ldhName', '').lower() for n in data.get('nameservers', [])),
+                'nameservers': sorted(n.get('ldhName', '').lower() for n in (data.get('nameservers') or []) if isinstance(n, dict)),
             }
     return None
 
@@ -187,10 +220,11 @@ def ip_info(ip):
     info = {'ip': ip, 'ptr': ptr[0] if ptr else None, 'network': None, 'org': None, 'country': None,
             'asn': None, 'as_name': None, 'prefix': None, 'registry': None}
     if data:
-        cidr = (data.get('cidr0_cidrs') or [{}])[0]
+        cidr = (data.get('cidr0_cidrs') or [{}])[0] or {}
         pre = cidr.get('v4prefix') or cidr.get('v6prefix')
-        info.update(network=f'{pre}/{cidr["length"]}' if pre else data.get('name'), country=data.get('country'),
-                    org=next((_vcard(e, 'fn') for e in data.get('entities', []) if _vcard(e, 'fn')), data.get('name')))
+        length = cidr.get('length')
+        info.update(network=f'{pre}/{length}' if pre and length is not None else data.get('name'), country=data.get('country'),
+                    org=next((_vcard(e, 'fn') for e in (data.get('entities') or []) if isinstance(e, dict) and _vcard(e, 'fn')), data.get('name')))
     cym = asn_info(ip) if pub else None
     if cym:
         info.update(asn=cym['asn'], as_name=cym['as_name'], prefix=cym['prefix'], registry=cym['registry'], country=info['country'] or cym['country'])
@@ -246,7 +280,7 @@ def spf_lookups(record, depth=0, budget=None):
         name = re.split(r'[:=/]', body)[0].lower()
         if name in ('include', 'a', 'mx', 'ptr', 'exists', 'redirect'):
             count += 1
-        if name in ('include', 'redirect') and depth < 5 and budget[0] > 0:
+        if name in ('include', 'redirect') and (':' in body or '=' in body) and depth < 5 and budget[0] > 0:
             target = re.split(r'[:=]', body, 1)[1].lower()
             includes.append(target)
             budget[0] -= 1
@@ -297,12 +331,14 @@ def _read_response(sock, body_limit=0):
 
 
 def _request(host, path='/', method='HEAD'):
+    if re.search(r'[\s\x00-\x1f\x7f]', path) or re.search(r'[\s\x00-\x1f\x7f]', host):
+        raise ValueError('invalid HTTP target')
     return f'{method} {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: {UA}\r\nAccept: */*\r\nConnection: close\r\n\r\n'.encode()
 
 
 def fetch(host, ip, port, use_tls, path='/', method='HEAD', body_limit=0):
     """One request to an already validated public address. Certificates are not verified here (probe_https reports them)."""
-    if port not in (80, 443):
+    if port not in (80, 443) or re.search(r'[\s\x00-\x1f\x7f]', path) or re.search(r'[\s\x00-\x1f\x7f]', host):
         return None, {}, [], b''
     try:
         with socket.create_connection((ip, port), timeout=TIMEOUT) as s:
@@ -582,7 +618,7 @@ def audit(domain, deep=False):
     if soa_rd:
         r = soa_rd[0]
         soa = {'mname': str(r.mname).rstrip('.'), 'rname': str(r.rname).rstrip('.'), 'serial': r.times[0], 'refresh': r.times[1], 'retry': r.times[2], 'expire': r.times[3], 'minimum': r.times[4]}
-    algos = sorted({DNSSEC_ALGOS.get(r.algorithm, f'algoritmo {r.algorithm}') for r in ds + keys})
+    algos = sorted({DNSSEC_ALGOS.get(r.algorithm, f'algorithm {r.algorithm}') for r in ds + keys})
     weak = {r.algorithm for r in ds + keys} & WEAK_DNSSEC
     mail = {
         'mx': [{'priority': int(m.split()[0]), 'host': m.split()[1], 'ips': mx_info[m.split()[1]][0][:4], 'cname': mx_info[m.split()[1]][1]} for m in real_mx[:5]],
@@ -645,7 +681,7 @@ def audit(domain, deep=False):
     if not domain.startswith('www.') and dns['A'] + dns['AAAA'] and not www_ips:
         add('info', 'DNS', f'www.{domain} does not resolve', 'Anyone who types "www." in front of the name cannot reach the site.')
     if ds or keys:
-        add('ok', 'DNSSEC', 'DNSSEC attivo', 'Algorithms: ' + ', '.join(algos))
+        add('ok', 'DNSSEC', 'DNSSEC active', 'Algorithms: ' + ', '.join(algos))
         if weak:
             add('warn', 'DNSSEC', 'Weak DNSSEC algorithm', 'SHA-1 is considered obsolete: switch to RSA/SHA-256, ECDSA or Ed25519.')
     else:
@@ -672,23 +708,23 @@ def audit(domain, deep=False):
     elif spf:
         a = spf['all']
         if a == '-':
-            add('ok', 'Mail', 'SPF restrittivo (-all)', spf['record'])
+            add('ok', 'Mail', 'Strict SPF (-all)', spf['record'])
         elif a == '~':
             add('warn', 'Mail', 'Permissive SPF (~all)', 'Unauthorised messages are only marked as suspicious. ' + spf['record'])
         elif a in ('?', '+'):
             add('bad', 'Mail', f'SPF does not protect ({a}all)', spf['record'])
         elif not spf['redirect']:
-            add('warn', 'Mail', 'SPF senza regola finale "all"', spf['record'])
+            add('warn', 'Mail', 'SPF without a final "all" rule', spf['record'])
         if spf['lookups'] > 10:
             add('bad' if spf['lookups_exact'] else 'warn', 'Mail', f'SPF with {spf["lookups"]} DNS lookups', 'The limit is 10: beyond it, SPF fails.' + ('' if spf['lookups_exact'] else ' (first level only: use the deep analysis for the exact count)'))
         if any(t.lstrip('+-~?').lower().startswith('ptr') for t in spf['mechanisms']):
-            add('warn', 'Mail', 'SPF usa il meccanismo "ptr"', 'È sconsigliato: lento e inaffidabile.')
+            add('warn', 'Mail', 'SPF uses the "ptr" mechanism', 'Not recommended: slow and unreliable.')
     elif real_mx:
         add('warn', 'Mail', 'SPF missing', 'Anyone can send mail pretending to be this domain.')
     if dmarc:
         pol = (dmarc['policy'] or '').lower()
         if pol in ('quarantine', 'reject'):
-            add('ok', 'Mail', f'DMARC attivo (p={pol})', dmarc['record'])
+            add('ok', 'Mail', f'DMARC active (p={pol})', dmarc['record'])
         else:
             add('warn', 'Mail', 'DMARC not enforced (p=none)', 'The domain collects reports but does not block forged messages. ' + dmarc['record'])
         if dmarc['pct'] < 100:
@@ -714,9 +750,9 @@ def audit(domain, deep=False):
     elif real_mx:
         add('info', 'Mail', 'MTA-STS not configured', 'Requires TLS encryption between mail servers.')
     if rpt:
-        add('ok', 'Mail', 'TLS-RPT configurato', rpt)
+        add('ok', 'Mail', 'TLS-RPT configured', rpt)
     if bimi:
-        add('ok', 'Mail', 'BIMI configurato', bimi)
+        add('ok', 'Mail', 'BIMI configured', bimi)
 
     # --- registration ---
     if reg:
@@ -760,11 +796,11 @@ def audit(domain, deep=False):
         if not hsts:
             add('warn', 'HTTPS', 'HSTS missing', 'Without HSTS the browser can be tricked into using plain HTTP.')
         else:
-            add('ok', 'HTTPS', 'HSTS attivo', headers['strict-transport-security'])
+            add('ok', 'HTTPS', 'HSTS active', headers['strict-transport-security'])
             if hsts['max_age'] < 15552000:
                 add('warn', 'HTTPS', f'HSTS with a short duration ({hsts["max_age"]} s)', 'At least 6 months (15552000 s) recommended.')
             if not hsts['include_subdomains']:
-                add('info', 'HTTPS', 'HSTS senza includeSubDomains')
+                add('info', 'HTTPS', 'HSTS without includeSubDomains')
         for h in SECURITY_HEADERS:
             if h not in headers:
                 add(SECURITY_HEADERS[h][0], 'HTTP headers', SECURITY_HEADERS[h][1], SECURITY_HEADERS[h][2])
@@ -786,7 +822,7 @@ def audit(domain, deep=False):
     if chain:
         first, last = chain[0], chain[-1]
         if first['status'] in (301, 302, 307, 308) and (first['location'] or '').startswith('https://'):
-            add('ok', 'Web', 'HTTP reindirizza a HTTPS')
+            add('ok', 'Web', 'HTTP redirects to HTTPS')
         elif first['status']:
             add('warn', 'Web', 'HTTP does not redirect to HTTPS', f'Response {first["status"]} on port 80.')
         if len(chain) > 3:

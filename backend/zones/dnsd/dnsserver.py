@@ -15,6 +15,8 @@ class _Pooled:
         self._room = threading.BoundedSemaphore(workers * 8)  # queries waiting for a worker; more than that are dropped (flood protection)
 
     def process_request(self, request, client_address):
+        if isinstance(request, tuple) and (len(request[0]) < 12 or request[0][2] & 0x80):
+            return  # RFC 5625 §4.1: silently drop UDP responses (QR=1) and truncated headers to prevent port-53 ping-pong loops
         if not self._room.acquire(blocking=False):
             self.shutdown_request(request)  # UDP: the client retries; TCP: the connection is closed
             return
@@ -56,3 +58,7 @@ class PooledTCPServer(_Pooled, TCPServer):
     def __init__(self, server_address, handler):
         super().__init__(server_address, handler)
         self._start_pool(self.workers)
+
+    def finish_request(self, request, client_address):
+        request.settimeout(5.0)
+        super().finish_request(request, client_address)
