@@ -23,6 +23,9 @@ class LogPagination(LimitOffsetPagination):
     max_limit = 500
 
     def get_count(self, queryset):
+        fast = stat_count(self.request.query_params)
+        if fast is not None:
+            return fast
         # exact, but remembered COUNT_TTL seconds per filter: the live refresh asks every few seconds and a COUNT(*) over millions of rows is slow
         if queryset.query.group_by is None:
             q = queryset.order_by().values('pk')
@@ -40,6 +43,33 @@ class LogPagination(LimitOffsetPagination):
 
 
 COUNT_TTL = 30
+
+
+def stat_count(p):
+    """The number of rows read from the hourly counters (a few thousand rows at most, never the log) when the filters allow it:
+    none, or one of outcome / type / client, plus the period. The hours at the two ends of the period are not whole, so the first one is
+    counted in the log (one hour of rows through the time index). None = this filter needs the log itself."""
+    other = [f for f in ('q', 'name', 'domain', 'rcode', 'answer', 'country') if p.get(f)]
+    one = [f for f in ('outcome', 'type', 'client') if p.get(f)]
+    if other or len(one) > 1:
+        return None
+    dim, val = (one[0], p[one[0]].strip()) if one else ('outcome', '')
+    if dim == 'type':
+        val = val.upper()
+    elif dim == 'outcome':
+        val = val.lower()
+    if not StatCount.objects.filter(dim=dim).exists():
+        return None  # counters not built yet (manage.py rebuild_stats)
+    counters = StatCount.objects.filter(dim=dim, **({'key': val} if val else {}))
+    logs = QueryLog.objects.filter(**{dim: val} if val else {})
+    if p.get('hours', '').isdigit() and int(p['hours']):
+        cutoff = timezone.now() - timedelta(hours=int(p['hours']))
+        first = floor_hour(cutoff)
+        if first < cutoff:
+            first += timedelta(hours=1)
+        edge = logs.filter(time__gte=cutoff, time__lt=first).count()
+        return (counters.filter(hour__gte=first).aggregate(n=Sum('n'))['n'] or 0) + edge
+    return counters.aggregate(n=Sum('n'))['n'] or 0
 
 
 FILTERS = [

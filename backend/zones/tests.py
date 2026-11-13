@@ -468,6 +468,32 @@ class QueryLogClientsTests(TestCase):
         self.assertEqual(r.json(), [{'ip': '192.168.1.11', 'name': '', 'host': '', 'count': 9}, {'ip': '192.168.1.10', 'name': 'pc.axiom4.net', 'host': 'pc', 'count': 7}])
 
 
+class QueryLogCountTests(TestCase):
+    def test_count_comes_from_the_counters_and_matches_the_log(self):
+        from datetime import timedelta
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        from .stats import rollup
+        now = timezone.now()
+        rows = [QueryLog(time=now - timedelta(minutes=m), name='a.example', domain='example', type=t, outcome=o, client=c, ms=1)
+                for m, t, o, c in [(5, 'A', 'local', '10.0.0.1'), (90, 'AAAA', 'blocked', '10.0.0.1'), (200, 'A', 'forwarded', '10.0.0.2'),
+                                   (3000, 'A', 'forwarded', '10.0.0.2'), (100000, 'A', 'error', '10.0.0.3')]]
+        QueryLog.objects.bulk_create(rows)
+        rollup.add(rows)
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('u', password='x', is_staff=True))
+        cases = [('', 5), ('hours=1', 1), ('hours=2', 2), ('hours=24', 3), ('hours=720', 4), ('type=A', 4), ('client=10.0.0.2', 2), ('outcome=forwarded&hours=24', 1),
+                 ('type=aaaa', 1), ('q=a.example', 5)]  # the last one needs the log itself
+        for query, expected in cases:
+            with self.subTest(query):
+                self.assertEqual(api.get('/api/logs/?limit=1&' + query).json()['count'], expected)
+        from .views.query_log import stat_count
+        self.assertEqual(stat_count({}), 5)
+        self.assertIsNone(stat_count({'q': 'x'}))
+
+
 class WhoisTests(TestCase):
     def setUp(self):
         from django.contrib.auth import get_user_model
