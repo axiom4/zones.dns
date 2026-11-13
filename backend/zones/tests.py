@@ -474,7 +474,7 @@ class QueryLogCountTests(TestCase):
         from django.contrib.auth import get_user_model
         from django.utils import timezone
         from rest_framework.test import APIClient
-        from .models import QueryLog
+        from .models import LogTotal, QueryLog
         from .stats import rollup
         now = timezone.now()
         rows = [QueryLog(time=now - timedelta(minutes=m), name='a.example', domain='example', type=t, outcome=o, client=c, ms=1)
@@ -492,6 +492,10 @@ class QueryLogCountTests(TestCase):
         from .views.query_log import stat_count
         self.assertEqual(stat_count({}), 5)
         self.assertIsNone(stat_count({'q': 'x'}))
+        self.assertEqual(LogTotal.objects.get(dim='client', key='10.0.0.2').n, 2)
+        rollup.purge(now - timedelta(hours=48))  # forgets the hours older than two days: 3 rows
+        self.assertEqual(stat_count({}), 3)
+        self.assertEqual(stat_count({'client': '10.0.0.3'}), 0)
 
 
 class WhoisTests(TestCase):

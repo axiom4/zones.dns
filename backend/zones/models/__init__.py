@@ -7,8 +7,8 @@ from .lease import DhcpLease
 from .lease6 import Dhcp6Lease
 from .setting import PERSONAL_BLOCKS, PUBLIC_LISTS, Setting
 from .record import RECORD_TYPES, Record, build_rr
-from .stat import DomainStat, GeoStat, StatCount
+from .stat import DomainStat, GeoStat, LogTotal, StatCount
 from .static_host import StaticHost
 from .zone import Zone
 
-__all__ = ['DhcpLease', 'Dhcp6Lease', 'DataVersion', 'Passkey', 'TotpDevice', 'IpGeo', 'DomainStat', 'GeoStat', 'StatCount', 'BlockedDomain', 'PersonalBlock', 'PublicBlocklistEntry', 'QueryLog', 'RECORD_TYPES', 'Record', 'StaticHost', 'Zone', 'build_rr', 'Setting', 'PERSONAL_BLOCKS', 'PUBLIC_LISTS', 'COUNTS_KEY']
+__all__ = ['DhcpLease', 'Dhcp6Lease', 'DataVersion', 'Passkey', 'TotpDevice', 'IpGeo', 'DomainStat', 'GeoStat', 'LogTotal', 'StatCount', 'BlockedDomain', 'PersonalBlock', 'PublicBlocklistEntry', 'QueryLog', 'RECORD_TYPES', 'Record', 'StaticHost', 'Zone', 'build_rr', 'Setting', 'PERSONAL_BLOCKS', 'PUBLIC_LISTS', 'COUNTS_KEY']

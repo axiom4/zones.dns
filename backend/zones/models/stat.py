@@ -41,3 +41,14 @@ class DomainStat(models.Model):
     class Meta:
         constraints = [models.UniqueConstraint(fields=['hour', 'domain'], name='unique_domain_stat')]
         indexes = [models.Index(fields=['domain', 'hour'], name='idx_domain_stat_dom_hr')]
+
+
+class LogTotal(models.Model):
+    """All-time number of log rows per outcome / type / client: one row each, so the total of the log is read in O(1) (see rollup.py).
+    Added to with every batch, reduced by rollup.purge when old hours are forgotten."""
+    dim = models.CharField(max_length=10)
+    key = models.CharField(max_length=253, blank=True)
+    n = models.PositiveBigIntegerField(default=0)
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['dim', 'key'], name='unique_log_total')]

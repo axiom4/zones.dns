@@ -7,9 +7,12 @@ from collections import Counter
 from datetime import timezone as dt_timezone
 
 from django.db import connection, transaction
+from django.db.models import F, Sum, Value
+from django.db.models.functions import Greatest
 
-from ..models import DomainStat, GeoStat, StatCount
+from ..models import DomainStat, GeoStat, LogTotal, StatCount
 
+TOTAL_DIMS = ('outcome', 'type', 'client')  # what LogTotal counts
 _OUTCOME_IDX = {'local': 1, 'forwarded': 2, 'blocked': 3, 'error': 4}
 
 
@@ -32,6 +35,15 @@ def _upsert(model, keys, values, rows):
         c.executemany(sql, sorted(rows, key=lambda r: tuple(str(x) for x in r[:len(keys)])))
 
 
+def _totals(stats):
+    """The per-hour counters of a batch added up over the hours: {(dim, None, key): [n]} for the dims LogTotal keeps."""
+    t = {}
+    for (dim, hour, key), v in stats.items():
+        if dim in TOTAL_DIMS:
+            t.setdefault((dim, None, key), [0])[0] += v[0]
+    return t
+
+
 def add(entries):
     """Count a batch of saved QueryLog rows."""
     stats, geo, doms = {}, Counter(), {}
@@ -52,12 +64,19 @@ def add(entries):
             d[idx] += 1
         d[5] += e.ms
     _upsert(StatCount, ['dim', 'hour', 'key'], ['n', 'ms'], [(*k, *v) for k, v in stats.items()])
+    _upsert(LogTotal, ['dim', 'key'], ['n'], [(d, k, v[0]) for (d, h, k), v in _totals(stats).items()])
     _upsert(GeoStat, ['hour', 'domain', 'ip'], ['n'], [(*k, n) for k, n in geo.items()])
     _upsert(DomainStat, ['hour', 'domain'], ['n', 'local', 'forwarded', 'blocked', 'error', 'ms'], [(*k, *v) for k, v in doms.items()])
 
 
 def purge(cutoff=None):
     """Forget the counters older than cutoff (a datetime), or all of them."""
+    if not cutoff:
+        LogTotal.objects.all().delete()
+    else:
+        old = StatCount.objects.filter(dim__in=TOTAL_DIMS, hour__lt=floor_hour(cutoff))
+        for r in old.values('dim', 'key').annotate(n=Sum('n')):
+            LogTotal.objects.filter(dim=r['dim'], key=r['key']).update(n=Greatest(F('n') - Value(r['n']), Value(0)))
     for model in (StatCount, GeoStat, DomainStat):
         qs = model.objects.filter(hour__lt=floor_hour(cutoff)) if cutoff else model.objects.all()
         qs.delete()

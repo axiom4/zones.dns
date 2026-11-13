@@ -12,7 +12,7 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from ..stats import geo, rollup
-from ..models import DomainStat, QueryLog, Record, StatCount
+from ..models import DomainStat, LogTotal, QueryLog, Record, StatCount
 from ..stats.rollup import floor_hour
 from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
 from rest_framework.pagination import LimitOffsetPagination
@@ -58,9 +58,8 @@ def stat_count(p):
         val = val.upper()
     elif dim == 'outcome':
         val = val.lower()
-    if not StatCount.objects.filter(dim=dim).exists():
+    if not LogTotal.objects.exists():
         return None  # counters not built yet (manage.py rebuild_stats)
-    counters = StatCount.objects.filter(dim=dim, **({'key': val} if val else {}))
     logs = QueryLog.objects.filter(**{dim: val} if val else {})
     if p.get('hours', '').isdigit() and int(p['hours']):
         cutoff = timezone.now() - timedelta(hours=int(p['hours']))
@@ -68,8 +67,9 @@ def stat_count(p):
         if first < cutoff:
             first += timedelta(hours=1)
         edge = logs.filter(time__gte=cutoff, time__lt=first).count()
-        return (counters.filter(hour__gte=first).aggregate(n=Sum('n'))['n'] or 0) + edge
-    return counters.aggregate(n=Sum('n'))['n'] or 0
+        counters = StatCount.objects.filter(dim=dim, hour__gte=first, **({'key': val} if val else {}))
+        return (counters.aggregate(n=Sum('n'))['n'] or 0) + edge
+    return LogTotal.objects.filter(dim=dim, **({'key': val} if val else {})).aggregate(n=Sum('n'))['n'] or 0  # at most 4 rows, usually 1
 
 
 FILTERS = [
