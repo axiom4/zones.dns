@@ -9,9 +9,10 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from ..dnsd.domains import main_domain
 from ..models import COUNTS_KEY, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
-from ..resolver import blocked_match
-from ..rollup import floor_hour
+from ..dnsd.resolver import _live, blocked_match
+from ..stats.rollup import floor_hour
 from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer
 from ..serializers.stats import CountSerializer
 
@@ -24,11 +25,17 @@ IMPORTED_COUNT_CAP = 100000  # a search over a million rows is not counted past 
 
 def list_counts():
     """{list name: domains}, cached: a GROUP BY over all the imported rows. import_blocklist empties it."""
-    counts = cache.get(COUNTS_KEY)
+    try:
+        counts = cache.get(COUNTS_KEY)
+    except Exception:
+        counts = None
     if counts is None:
         rows = BlockedDomain.objects.filter(source='list').values('list_name').annotate(n=Count('id'))
         counts = {r['list_name'] or 'list': r['n'] for r in rows}
-        cache.set(COUNTS_KEY, counts, 3600)
+        try:
+            cache.set(COUNTS_KEY, counts, 3600)
+        except Exception:
+            pass
     return counts
 
 
@@ -72,14 +79,22 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
             days = 7
         rows = (StatCount.objects.filter(dim='name', hour__gte=floor_hour(timezone.now() - timedelta(days=days)))
                 .values('key').annotate(c=Sum('n')).order_by('-c', 'key')[:5000])  # shortcut: only the 5000 most asked names are looked at
-        zones = set(Zone.objects.values_list('name', flat=True))
-        allowed = set(BlockedDomain.objects.filter(allow=True).values_list('name', flat=True))
+        zones = set(Zone.objects.filter(enabled=True).values_list('name', flat=True))
+        allowed = set(_live(BlockedDomain.objects.filter(allow=True, enabled=True, regex=False)).values_list('name', flat=True))
         out = []
         for r in rows:
             name = r['key']
+            if not name:
+                continue
             labels = name.split('.')
             suffixes = {'.'.join(labels[i:]) for i in range(len(labels))}
-            if (name and any(TRACKER_LABEL.search(lb) for lb in labels[:-1]) and not suffixes & (zones | allowed) and not blocked_match(name)):
+            if suffixes & (zones | allowed) or blocked_match(name):
+                continue
+            try:
+                age = cache.get(f'dom-age:{main_domain(name)}')
+            except Exception:
+                age = None
+            if any(TRACKER_LABEL.search(lb) for lb in labels[:-1]) or (age is not None and age < 30):
                 out.append({'name': name, 'count': r['c']})
                 if len(out) == 50:
                     break

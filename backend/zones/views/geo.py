@@ -13,9 +13,9 @@ from rest_framework.views import APIView
 
 from rest_framework.exceptions import APIException, ValidationError
 
-from .. import geo, whois
+from ..stats import geo, whois
 from ..models import GeoStat
-from ..rollup import floor_hour
+from ..stats.rollup import floor_hour
 from ..serializers import DestinationsSerializer, GeoIpsResultSerializer, WhoisSerializer
 
 
@@ -59,12 +59,19 @@ class GeoDestinationsView(APIView):
         except ValueError:
             hours = 24
         key = f'geo-dest-{hours}'
-        hit = cache.get(key)  # (computed at, result): kept a day, refreshed in the background so a request never waits for the aggregation
+        try:
+            hit = cache.get(key)  # (computed at, result): kept a day, refreshed in the background so a request never waits for the aggregation
+        except Exception:
+            hit = None
         if hit is None or time.time() - hit[0] > STALE:  # a result older than STALE is not shown: it would miss the last hours (a long period looked smaller than a short one)
             return Response(_compute(key, hours))
         age = time.time() - hit[0]
         # stale, or lookups still pending: one process refreshes (the lock), everybody else gets the last result now
-        if (age > REFRESH or hit[1]['pending']) and age > 5 and cache.add(key + '-lock', 1, 120):
+        try:
+            can_refresh = (age > REFRESH or hit[1]['pending']) and age > 5 and cache.add('geo-dest-refresh-lock', 1, 120)
+        except Exception:
+            can_refresh = False
+        if can_refresh:
             threading.Thread(target=_refresh, args=(key, hours), daemon=True).start()
         return Response(hit[1])
 
@@ -75,17 +82,17 @@ STALE = 600  # seconds
 
 def _compute(key, hours):
     # The hourly counters of answered addresses per domain; the window starts at the hour.
-    # Totals per address are never cut (a cap hid the rare addresses, so a longer period showed fewer); the domain names come from
-    # the 100000 most frequent (domain, address) pairs, the rest of an address's queries is counted without a name.
+    # Streams all (domain, ip) pairs in one unsorted GROUP BY query so both address totals and domain names are exact.
     qs = GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours)))
-    total = dict(qs.values_list('ip').annotate(c=Sum('n')))
-    rows = []
-    for r in qs.values('domain', 'ip').annotate(c=Sum('n')).order_by('-c')[:100000]:
-        rows.append({'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']})
-        total[r['ip']] -= r['c']
-    rows += [{'domain': '', 'answers': [{'type': 'A', 'value': ip}], 'n': n} for ip, n in total.items() if n > 0]
+    rows = [
+        {'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
+        for r in qs.values('domain', 'ip').annotate(c=Sum('n')).order_by().iterator(chunk_size=10000)
+    ]
     out = geo.destinations(rows)
-    cache.set(key, (time.time(), out), 86400)
+    try:
+        cache.set(key, (time.time(), out), 86400)
+    except Exception:
+        pass
     return out
 
 
@@ -94,4 +101,7 @@ def _refresh(key, hours):
         _compute(key, hours)
     finally:
         connection.close()  # this thread's own database connection
-        cache.delete(key + '-lock')
+        try:
+            cache.delete('geo-dest-refresh-lock')
+        except Exception:
+            pass

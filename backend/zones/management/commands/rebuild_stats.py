@@ -1,6 +1,6 @@
 from django.core.management.base import BaseCommand
 
-from ... import rollup
+from ...stats import rollup
 from ...models import QueryLog
 
 

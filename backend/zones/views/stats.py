@@ -11,7 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import QueryLog, StatCount
-from ..rollup import floor_hour
+from ..stats.rollup import floor_hour
 from ..serializers import StatsSerializer
 
 
@@ -69,18 +69,27 @@ class StatsView(APIView):
             hours = min(max(int(request.query_params.get('hours', 24)), 1), 720)
         except ValueError:
             hours = 24
-        key = f"stats:{hours}:{request.query_params.get('since', '')}"
-        if (hit := cache.get(key)) is not None:
-            return Response(hit)
         now = timezone.now()
         start = now - timedelta(hours=hours)
-        since = parse_datetime(request.query_params.get('since', ''))
+        since_raw = request.query_params.get('since', '')
+        since = parse_datetime(since_raw) if len(since_raw) <= 40 else None
+        since_key = ''
         if since and timezone.is_aware(since):
             start = min(max(since, now - timedelta(hours=720)), now)
+            since_key = start.replace(second=0, microsecond=0).isoformat()
+        key = f'stats:{hours}:{since_key}'
+        try:
+            if (hit := cache.get(key)) is not None:
+                return Response(hit)
+        except Exception:
+            pass
         step = 60 if (now - start) <= timedelta(hours=2) else 3600
         # Windows up to 2 hours (per minute) are exact and small: read the log. Longer ones (per hour, UTC buckets) read the hourly counters,
         # and start at the hour in which the window begins.
         data = (_from_log if step == 60 else _from_counters)(start)
         data['step'] = step
-        cache.set(key, data, 30)  # shortcut: numbers up to 30 s old, to spare the repeated full scans of the log; lower it if that matters
+        try:
+            cache.set(key, data, 30)  # shortcut: numbers up to 30 s old, to spare the repeated full scans of the log; lower it if that matters
+        except Exception:
+            pass
         return Response(data)

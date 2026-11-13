@@ -266,6 +266,37 @@ Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or 
 
 **Address already in use.** On Ubuntu `systemd-resolved` listens on `127.0.0.53:53`. Bind `rundns` to the server's own address (`--address 192.0.2.10`) or disable the stub (`DNSStubListener=no` in `/etc/systemd/resolved.conf`). Do not leave `--address 0.0.0.0` on a server that is reachable from the internet: an open resolver is abused for DDoS amplification. Firewall port 53 to your own networks.
 
+### Optional: DHCP, DHCPv6 and Router Advertisements
+
+`rundhcp` is a DHCP server for your network, set in `.env` (see `.env.example`; everything is off by default). It can run DHCPv4 (an address range, fixed addresses by MAC, router, DNS servers, domain, NTP, routes, PXE, relay agents), DHCPv6 (addresses, delegated prefixes, or only the DNS information), and IPv6 Router Advertisements with the DNS servers. With `DNS_DDR` set it tells clients about your encrypted resolvers (RFC 9463). The leases are in the database (GUI page *DHCP*, Django admin).
+
+**Turn off the DHCP server of your router first: two DHCP servers on one network hand out conflicting addresses.** Then in `.env` set `DHCP=true`, `DHCP_SERVER` (the address of this host), `DHCP_RANGE` and, on a host with several interfaces, `DHCP_INTERFACE`. `DHCP6=true` and `DHCP_RA=true` need `DHCP_INTERFACE`. Run `manage.py migrate` first (tables of leases).
+
+It binds UDP ports 67 and 547: the same `setcap` as port 53 (next section) is enough. `DHCP_UNICAST` and `DHCP_RA` also need `CAP_NET_RAW`, and `DHCP_PROBE` needs the `ping` program (package `iputils-ping`):
+
+```sh
+sudo setcap 'cap_net_bind_service,cap_net_raw=+ep' "$(readlink -f /opt/dns/.venv/bin/python)"
+```
+
+Add to the supervisor file and start it:
+
+```ini
+[program:dns-dhcp]
+directory=/opt/dns/app/backend
+command=/opt/dns/.venv/bin/python manage.py rundhcp
+user=dns
+autostart=false
+autorestart=true
+stdout_logfile=/var/log/supervisor/dns-dhcp.log
+stderr_logfile=/var/log/supervisor/dns-dhcp.err.log
+```
+
+```sh
+sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl start dns-dhcp
+```
+
+Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving the whole network. Open the **DHCP** page in the GUI to check that the lease appears with its IP/prefix, MAC or DUID, client host name and expiry time (tick **include ended** to see expired leases, or click **✕** to end a lease). With `DHCP_NAMES=true` and `DHCP_DOMAIN=lan`, check forward and reverse resolution with `dig @192.0.2.10 <hostname>.lan` and `dig @192.0.2.10 -x <leased-ip>`. Router Advertisements: this host announces itself as *not* a default router (`DHCP_RA_ROUTER_LIFETIME=0`), so your real router keeps that role.
+
 ## 9. Firewall
 
 Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). Keep `8000`, the database and Redis closed to the outside.
@@ -279,6 +310,7 @@ curl -s https://dns.example.com/api/login-key/               # {"key": "..."}  (
 dig @192.0.2.10 example.com                                 # forwarded upstream: NOERROR
 dig @192.0.2.10 www.corp.lan                                # an internal zone you created: your record
 sudo -u dns /opt/dns/.venv/bin/python /opt/dns/app/backend/manage.py check --deploy    # no warnings except HSTS subdomains/preload
+sudo -u dns /opt/dns/.venv/bin/python /opt/dns/app/backend/manage.py check_ddr         # when DNS_DDR is set: verifies each DoT/DoH endpoint over TLS
 ```
 
 Then open the GUI, sign in with the superuser and set up the second factor (authenticator app or passkey) when asked. Create a zone, query it with `dig`, and check the query shows in **Query log**.

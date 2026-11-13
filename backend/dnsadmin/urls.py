@@ -1,13 +1,16 @@
 from django.contrib import admin
 from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
-from zones import admin_sso, views as v
+from zones.security import admin_sso
+from zones import views as v
 from zones.views import EncryptedTokenView, LoginKeyView, TokenView
+from zones.views.doh import DohView
 
 urlpatterns = [
     path('admin/login/', admin_sso.admin_login),
     path('admin/sso/', admin_sso.admin_sso),
     path('admin/', admin.site.urls),
+    path('dns-query', DohView.as_view()),
     path('api/token/', TokenView.as_view()),
     path('api/token/encrypted/', EncryptedTokenView.as_view()),
     path('api/login-key/', LoginKeyView.as_view()),

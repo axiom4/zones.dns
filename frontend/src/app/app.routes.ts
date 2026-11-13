@@ -13,6 +13,7 @@ export const routes: Routes = [
       { path: 'zones', loadComponent: () => import('./zones-index/zones-index').then(m => m.ZonesIndex) },
       { path: 'zones/:id', loadComponent: () => import('./zone-page/zone-page').then(m => m.ZonePage) },
       { path: 'hosts', loadComponent: () => import('./hosts-page/hosts-page').then(m => m.HostsPage) },
+      { path: 'dhcp', loadComponent: () => import('./dhcp-page/dhcp-page').then(m => m.DhcpPage) },
       { path: 'blacklist', pathMatch: 'full', redirectTo: 'blacklist/manual' },
       { path: 'blacklist/manual', loadComponent: () => import('./blocked-page/blocked-page').then(m => m.BlockedPage) },
       { path: 'blacklist/lists', loadComponent: () => import('./blocked-lists-page/blocked-lists-page').then(m => m.BlockedListsPage) },

@@ -4,7 +4,7 @@ from django.db import transaction
 from rest_framework import serializers
 
 from ..models import Record, Zone, build_rr
-from ..reverse import find_reverse_zone
+from ..dnsd.reverse import find_reverse_zone
 
 
 def make_ptr(rec):
@@ -14,8 +14,8 @@ def make_ptr(rec):
     if zone is None:
         zone = Zone.objects.create(name=ptr.split('.', 16 if ':' in rec.value else 1)[-1])
     Record.objects.update_or_create(
-        zone=zone, name=ptr[: -len(zone.name) - 1], type='PTR',
-        defaults={'value': f'{rec.fqdn}.', 'ttl': rec.ttl},
+        zone=zone, name=ptr[: -len(zone.name) - 1], type='PTR', value=f'{rec.fqdn}.',
+        defaults={'ttl': rec.ttl},
     )
 
 
@@ -28,6 +28,9 @@ class RecordSerializer(serializers.ModelSerializer):
 
     def validate_name(self, v):
         return v.strip().strip('.').lower() or '@'
+
+    def validate_note(self, v):
+        return (v or '').replace('\r', ' ').replace('\n', ' ')
 
     def validate(self, d):
         # Round-trip through the same parser the daemon uses, so bad RDATA is rejected here.

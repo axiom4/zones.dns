@@ -16,7 +16,7 @@ class RecordViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Record.objects.order_by('name', 'type')
         zone = self.request.query_params.get('zone')
-        return qs.filter(zone=zone) if zone else qs
+        return qs.filter(zone=int(zone)) if zone and zone.isdigit() else qs.none() if zone else qs
 
     @extend_schema(request=BulkActionSerializer, responses=BulkResultSerializer)
     @action(detail=False, methods=['post'])

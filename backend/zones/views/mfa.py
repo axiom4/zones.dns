@@ -1,15 +1,18 @@
 import re
 
 from django.conf import settings
+from django.contrib.auth import get_user_model
 from django.core.cache import cache
+from django.db import transaction
 from drf_spectacular.utils import extend_schema
-from rest_framework.authentication import TokenAuthentication
+from rest_framework.authtoken.models import Token
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .. import mfa
+from ..security import mfa
+from ..security.authentication import ExpiringTokenAuthentication
 from ..models import Passkey, TotpDevice
 from ..serializers import (AdminTicketSerializer, MeSerializer, MfaCodeSerializer, MfaCredentialSerializer, MfaOptionsSerializer, MfaStatusSerializer, MfaTicketSerializer,
                            StepUpCodeSerializer, StepUpCredentialSerializer, StepUpGrantSerializer, StepUpScopeSerializer, TokenResultSerializer, TotpSetupSerializer)
@@ -17,17 +20,25 @@ from .token import EncryptedView
 
 
 # ---- the second-factor steps. Each takes (data, auth_user) and returns the reply body; used by the plain and the encrypted endpoints.
-def _login_user(d, auth):
-    return mfa.read_ticket(d.get('ticket'), 'verify')
+def _login_user(d, auth, consume=False):
+    return mfa.read_ticket(d.get('ticket'), 'verify', consume=consume)
 
 
-def _enrol_user(d, auth):
+def _enrol_user(d, auth, consume=False):
     """Already logged in (Security page) or holding the 'setup' ticket of the password step."""
     if auth and auth.is_authenticated:
         if not auth.is_staff:
             raise mfa.MfaError('forbidden')
         return auth
-    return mfa.read_ticket(d.get('ticket'), 'setup')
+    return mfa.read_ticket(d.get('ticket'), 'setup', consume=consume)
+
+
+def _enrol_token(d, auth, user):
+    if auth and auth.is_authenticated:
+        tok = Token.objects.filter(user=user).first()
+        return tok.key if tok else mfa.token_for(user)
+    _enrol_user(d, auth, consume=True)
+    return mfa.token_for(user)
 
 
 def totp_verify(d, auth):
@@ -36,6 +47,7 @@ def totp_verify(d, auth):
     dev = TotpDevice.objects.filter(user=user, confirmed=True).first()
     if not dev or not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
+    _login_user(d, auth, consume=True)
     return {'token': mfa.token_for(user)}
 
 
@@ -51,6 +63,7 @@ def passkey_verify(d, auth):
     mfa.guard(user)
     if not mfa.check_passkey(user, d.get('credential')):
         mfa.fail(user)
+    _login_user(d, auth, consume=True)
     return {'token': mfa.token_for(user)}
 
 
@@ -74,22 +87,27 @@ def stepup_totp(d, auth):
 
 
 def stepup_passkey_options(d, auth):
-    user, _ = _stepup(d, auth)
+    user, scope = _stepup(d, auth)
     if not user.passkeys.exists():
         raise mfa.MfaError('no_passkey')
+    cache.set(f'webauthn-stepup-scope:{user.pk}', scope, 300)
     return {'options': mfa.authentication_options(user)}
 
 
 def stepup_passkey_verify(d, auth):
     user, scope = _stepup(d, auth)
     mfa.guard(user)
-    if not mfa.check_passkey(user, d.get('credential')):
+    expected_scope = cache.get(f'webauthn-stepup-scope:{user.pk}')
+    cache.delete(f'webauthn-stepup-scope:{user.pk}')
+    if expected_scope != scope or not mfa.check_passkey(user, d.get('credential')):
         mfa.fail(user)
     return {'grant': mfa.make_grant(user, scope)}
 
 
 def totp_setup(d, auth):
     user = _enrol_user(d, auth)
+    if TotpDevice.objects.filter(user=user, confirmed=True).exists():
+        raise mfa.MfaError('forbidden')
     secret = mfa.new_secret()
     cache.set(f'totp-new:{user.pk}', secret, 600)
     return {'secret': secret, 'uri': mfa.totp_uri(user, secret)}
@@ -97,6 +115,8 @@ def totp_setup(d, auth):
 
 def totp_confirm(d, auth):
     user = _enrol_user(d, auth)
+    if TotpDevice.objects.filter(user=user, confirmed=True).exists():
+        raise mfa.MfaError('forbidden')
     mfa.guard(user)
     secret = cache.get(f'totp-new:{user.pk}')
     if not secret:
@@ -107,7 +127,7 @@ def totp_confirm(d, auth):
     TotpDevice.objects.filter(user=user).delete()
     dev.save()
     cache.delete(f'totp-new:{user.pk}')
-    return {'token': mfa.token_for(user)}
+    return {'token': _enrol_token(d, auth, user)}
 
 
 def passkey_register_options(d, auth):
@@ -117,7 +137,7 @@ def passkey_register_options(d, auth):
 def passkey_register(d, auth):
     user = _enrol_user(d, auth)
     mfa.register_passkey(user, d.get('credential'), d.get('name'))
-    return {'token': mfa.token_for(user)}
+    return {'token': _enrol_token(d, auth, user)}
 
 
 ACTIONS = {'totp': totp_verify, 'passkey-options': passkey_options, 'passkey-verify': passkey_verify, 'totp-setup': totp_setup,
@@ -127,7 +147,7 @@ ACTIONS = {'totp': totp_verify, 'passkey-options': passkey_options, 'passkey-ver
 
 class _Plain(APIView):
     """One step over a plain request. Refused when LOGIN_ENCRYPTION=required: use the encrypted endpoint."""
-    authentication_classes = [TokenAuthentication]  # only the enrolment steps use it (Security page)
+    authentication_classes = [ExpiringTokenAuthentication]  # only the enrolment steps use it (Security page)
     permission_classes = [AllowAny]
     parser_classes = [JSONParser]
     action = ''
@@ -163,7 +183,7 @@ PasskeyStepUpVerifyView = _plain('stepup-passkey-verify', StepUpCredentialSerial
 
 class MfaEncryptedView(EncryptedView):
     """Every second-factor step inside the encrypted channel: payload {a: step, d: its data}, reply = the step's body. Nothing readable on the wire."""
-    authentication_classes = [TokenAuthentication]  # a logged-in user adding a factor from the Security page
+    authentication_classes = [ExpiringTokenAuthentication]  # a logged-in user adding a factor from the Security page
 
     def handle(self, request, payload):
         step, data = ACTIONS.get(payload.get('a')), payload.get('d')
@@ -192,9 +212,11 @@ class TotpRemoveView(APIView):
     @extend_schema(request=None, responses={204: None})
     def delete(self, request):
         """Remove the authenticator app (not if it is the last factor and MFA is required)."""
-        if settings.MFA_REQUIRED and not request.user.passkeys.exists():
-            return Response({'detail': 'It is your only second factor and MFA is mandatory: add another one first.'}, status=400)
-        TotpDevice.objects.filter(user=request.user).delete()
+        with transaction.atomic():
+            get_user_model().objects.select_for_update().get(pk=request.user.pk)
+            if settings.MFA_REQUIRED and not request.user.passkeys.exists():
+                return Response({'detail': 'It is your only second factor and MFA is mandatory: add another one first.'}, status=400)
+            TotpDevice.objects.filter(user=request.user).delete()
         return Response(status=204)
 
 
@@ -205,10 +227,12 @@ class PasskeyRemoveView(APIView):
     def delete(self, request, pk):
         """Remove a passkey (not if it is the last factor and MFA is required)."""
         user = request.user
-        has_totp = TotpDevice.objects.filter(user=user, confirmed=True).exists()
-        if settings.MFA_REQUIRED and not has_totp and user.passkeys.count() <= 1:
-            return Response({'detail': 'It is your only second factor and MFA is mandatory: add another one first.'}, status=400)
-        Passkey.objects.filter(user=user, pk=pk).delete()
+        with transaction.atomic():
+            get_user_model().objects.select_for_update().get(pk=user.pk)
+            has_totp = TotpDevice.objects.filter(user=user, confirmed=True).exists()
+            if settings.MFA_REQUIRED and not has_totp and user.passkeys.count() <= 1:
+                return Response({'detail': 'It is your only second factor and MFA is mandatory: add another one first.'}, status=400)
+            Passkey.objects.filter(user=user, pk=pk).delete()
         return Response(status=204)
 
 
@@ -232,5 +256,5 @@ class AdminTicketView(APIView):
     @extend_schema(request=None, responses=AdminTicketSerializer)
     def post(self, request):
         """One-use ticket (60 s) that opens the Django admin: the GUI posts it to /admin/sso/."""
-        from .. import admin_sso
+        from ..security import admin_sso
         return Response({'ticket': admin_sso.make_ticket(request.user)})

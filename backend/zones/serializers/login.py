@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 
 class EncryptedPacketSerializer(serializers.Serializer):
-    p = serializers.CharField(max_length=32768, help_text='Base64 encrypted packet (see zones/login_crypto.py)')
+    p = serializers.CharField(max_length=32768, help_text='Base64 encrypted packet (see zones/security/login_crypto.py)')
 
 
 class LoginKeySerializer(serializers.Serializer):

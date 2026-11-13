@@ -6,7 +6,7 @@ from django.core.cache import cache
 from django.core.management.base import BaseCommand
 from django.db import transaction
 
-from zones.audit import NAME_RE
+from zones.stats.audit import NAME_RE
 from zones.models import COUNTS_KEY, BlockedDomain, DataVersion
 
 LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
@@ -47,7 +47,11 @@ class Command(BaseCommand):
             if source.startswith(('http://', 'https://')):
                 req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
                 try:
-                    text = urllib.request.urlopen(req, timeout=60).read().decode('utf-8', 'replace')
+                    with urllib.request.urlopen(req, timeout=60) as r:
+                        raw = r.read(50_000_001)
+                    if len(raw) > 50_000_000:
+                        raise OSError('response exceeds 50 MB limit')
+                    text = raw.decode('utf-8', 'replace')
                 except OSError as e:  # shortcut: one list down = no update at all (the old entries stay); the next run retries
                     raise SystemExit(f'{source}: {e}: blacklist left unchanged')
             else:

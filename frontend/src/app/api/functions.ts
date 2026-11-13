@@ -31,6 +31,14 @@ export type { BlockedPublicPartialUpdate$Params as BlockedPublicPartialUpdate$Pa
 export { blockedPublicPartialUpdate as blockedPublicPartialUpdate } from './fn/blocked/blocked-public-partial-update';
 export type { BlockedSuggestionsList$Params as BlockedSuggestionsList$Params } from './fn/blocked/blocked-suggestions-list';
 export { blockedSuggestionsList as blockedSuggestionsList } from './fn/blocked/blocked-suggestions-list';
+export type { DhcpLeasesList$Params as DhcpLeasesList$Params } from './fn/dhcp/dhcp-leases-list';
+export { dhcpLeasesList as dhcpLeasesList } from './fn/dhcp/dhcp-leases-list';
+export type { DhcpLeasesDestroy$Params as DhcpLeasesDestroy$Params } from './fn/dhcp/dhcp-leases-destroy';
+export { dhcpLeasesDestroy as dhcpLeasesDestroy } from './fn/dhcp/dhcp-leases-destroy';
+export type { DhcpSettingsRetrieve$Params as DhcpSettingsRetrieve$Params } from './fn/dhcp/dhcp-settings-retrieve';
+export { dhcpSettingsRetrieve as dhcpSettingsRetrieve } from './fn/dhcp/dhcp-settings-retrieve';
+export type { DhcpSettingsPartialUpdate$Params as DhcpSettingsPartialUpdate$Params } from './fn/dhcp/dhcp-settings-partial-update';
+export { dhcpSettingsPartialUpdate as dhcpSettingsPartialUpdate } from './fn/dhcp/dhcp-settings-partial-update';
 export type { GeoDestinationsRetrieve$Params as GeoDestinationsRetrieve$Params } from './fn/geo/geo-destinations-retrieve';
 export { geoDestinationsRetrieve as geoDestinationsRetrieve } from './fn/geo/geo-destinations-retrieve';
 export type { GeoIpsRetrieve$Params as GeoIpsRetrieve$Params } from './fn/geo/geo-ips-retrieve';

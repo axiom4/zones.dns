@@ -1,7 +1,8 @@
 from rest_framework import serializers
 
 from ..models import Zone
-from ..reverse import zone_to_cidr
+from ..dnsd.reverse import zone_to_cidr
+from .static_host import HOST_RE
 
 
 class ZoneSerializer(serializers.ModelSerializer):
@@ -19,7 +20,10 @@ class ZoneSerializer(serializers.ModelSerializer):
         return zone_to_cidr(z.name)
 
     def validate_name(self, v):
-        return v.strip().strip('.').lower()
+        v = v.strip().strip('.').lower()
+        if not HOST_RE.match(v):
+            raise serializers.ValidationError('Invalid zone name.')
+        return v
 
 
 class ReverseZoneRequestSerializer(serializers.Serializer):

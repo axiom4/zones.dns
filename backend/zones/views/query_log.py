@@ -9,9 +9,9 @@ from rest_framework import viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .. import geo, rollup
-from ..models import QueryLog, Record, StatCount
-from ..rollup import floor_hour
+from ..stats import geo, rollup
+from ..models import DomainStat, QueryLog, Record, StatCount
+from ..stats.rollup import floor_hour
 from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
 from rest_framework.pagination import LimitOffsetPagination
 
@@ -23,7 +23,11 @@ class LogPagination(LimitOffsetPagination):
     def get_count(self, queryset):
         # shortcut: counts up to COUNT_CAP rows. An exact COUNT(*) over millions of log rows ran on every page and every live refresh;
         # beyond the cap the total shows as COUNT_CAP (the pages themselves still go on to the end)
-        return queryset.order_by().values('pk')[:COUNT_CAP].count() if queryset.query.group_by is None else queryset.order_by().count()  # no ORDER BY MAX(...) inside the count
+        if queryset.query.group_by is None:
+            return queryset.order_by().values('pk')[:COUNT_CAP].count()
+        q = queryset.order_by()
+        q.query.annotations.clear()
+        return q[:COUNT_CAP].count()
 
 
 COUNT_CAP = 100_000
@@ -54,10 +58,15 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         if self.action == 'list':
             qs = qs.defer('answers')  # the list does not show them (the answers endpoint does): no need to read the JSON of every row
         if p.get('q'):
-            qs = qs.filter(name__icontains=p['q'].strip())
+            qs = qs.filter(name__contains=p['q'].strip().lower())  # QueryLog.name is always stored lowercase
         for f in ('name', 'domain', 'type', 'outcome', 'client', 'rcode'):
             if p.get(f):
-                qs = qs.filter(**{f: '' if p[f] == '.' and f in ('name', 'domain') else p[f]})  # '.' is how the root (an empty name) is shown
+                val = p[f].strip()
+                if f in ('name', 'domain'):
+                    val = '' if val == '.' else val.rstrip('.').lower()
+                elif f in ('type', 'rcode'):
+                    val = val.upper()
+                qs = qs.filter(**{f: val})  # '.' is how the root (an empty name) is shown
         if p.get('answer'):
             qs = qs.annotate(answers_text=Cast('answers', TextField())).filter(answers_text__icontains=p['answer'].strip())
         if p.get('hours', '').isdigit():
@@ -75,16 +84,75 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'])
     def grouped(self, request):
         """Same filters as the list, one row per registrable domain (or per host name with by=name)."""
-        key = 'name' if request.query_params.get('by') == 'name' else 'domain'
+        p = request.query_params
+        key = 'name' if p.get('by') == 'name' else 'domain'
+        by_count = p.get('ordering') == 'count'
+        base = self.get_queryset().order_by()
+        ranked = None
+        stat_totals = {}
+        if key == 'domain' and not any(p.get(f) for f in ('q', 'name', 'type', 'client', 'rcode', 'answer')):
+            d_qs = DomainStat.objects.all()
+            if p.get('domain'):
+                val = p['domain'].strip()
+                d_qs = d_qs.filter(domain='' if val == '.' else val.rstrip('.').lower())
+            if p.get('hours', '').isdigit():
+                d_qs = d_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(p['hours']))))
+            if p.get('country'):
+                hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
+                d_qs = d_qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
+            outcome = p.get('outcome', '').strip().lower()
+            if outcome in ('local', 'forwarded', 'blocked', 'error'):
+                d_qs = d_qs.filter(**{f'{outcome}__gt': 0})
+            if (by_count or (p.get('hours', '').isdigit() and int(p['hours']) >= 24)) and d_qs.exists():
+                sort_agg = (Sum(outcome) if outcome in ('local', 'forwarded', 'blocked', 'error') else Sum('n')) if by_count else Max('hour')
+                ranked = d_qs.values('domain').annotate(sort_val=sort_agg).order_by('-sort_val', 'domain')
+                page_keys = [r['domain'] for r in self.paginate_queryset(ranked)]
+                if not page_keys:
+                    return self.get_paginated_response([])
+                if not outcome:
+                    stat_totals = {
+                        r['domain']: r
+                        for r in d_qs.filter(domain__in=page_keys).values('domain').annotate(
+                            count=Sum('n'), local=Sum('local'), forwarded=Sum('forwarded'), blocked=Sum('blocked'), error=Sum('error'), total_ms=Sum('ms'), last=Max('hour'),
+                        )
+                    }
+        elif key == 'name' and by_count and not any(p.get(f) for f in ('domain', 'type', 'client', 'rcode', 'answer', 'outcome')):
+            s_qs = StatCount.objects.filter(dim='name')
+            if p.get('q'):
+                s_qs = s_qs.filter(key__contains=p['q'].strip().lower())
+            if p.get('name'):
+                val = p['name'].strip()
+                s_qs = s_qs.filter(key='' if val == '.' else val.rstrip('.').lower())
+            if p.get('hours', '').isdigit():
+                s_qs = s_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(p['hours']))))
+            if s_qs.exists():
+                ranked = s_qs.values(name=models_F('key') if False else 'key').annotate(sort_val=Sum('n')).order_by('-sort_val', 'key')
+                page_keys = [r['key'] for r in self.paginate_queryset(ranked)]
+                if not page_keys:
+                    return self.get_paginated_response([])
+        if ranked is None:
+            ranked = base.values(key).annotate(sort_val=Count('id') if by_count else Max('time')).order_by('-sort_val', key)
+            page_keys = [r[key] for r in self.paginate_queryset(ranked)]
+            if not page_keys:
+                return self.get_paginated_response([])
         count = lambda o: Count('id', filter=Q(outcome=o))
-        qs = (self.get_queryset().order_by().values(key).annotate(
+        details = {r[key]: r for r in base.filter(**{f'{key}__in': page_keys}).values(key).annotate(
             names=Count('name', distinct=True), count=Count('id'), last=Max('time'), avg_ms=Avg('ms'), clients=Count('client', distinct=True),
             local=count('local'), forwarded=count('forwarded'), blocked=count('blocked'), error=count('error'),
-        ))
-        qs = qs.order_by('-count' if request.query_params.get('ordering') == 'count' else '-last', key)
-        page = self.paginate_queryset(qs)
-        for r in page:
-            r['name'] = r[key] or '.'  # the root name is empty in the log: an empty group name could not be asked for again
+        )}
+        page = []
+        for k in page_keys:
+            r = details.get(k)
+            if k in stat_totals:
+                st = stat_totals[k]
+                avg = (st['total_ms'] / st['count']) if st['count'] else 0.0
+                r = {
+                    **(r or {key: k, 'names': 1, 'clients': 1, 'last': st['last']}),
+                    'count': st['count'], 'local': st['local'], 'forwarded': st['forwarded'], 'blocked': st['blocked'], 'error': st['error'], 'avg_ms': avg,
+                }
+            if r:
+                r['name'] = r[key] or '.'  # the root name is empty in the log: an empty group name could not be asked for again
+                page.append(r)
         return self.get_paginated_response(QueryLogGroupSerializer(page, many=True).data)
 
     @extend_schema(parameters=[OpenApiParameter('hours', int, description='Only the last N hours (whole hours); 0 or missing = all')], responses=QueryLogClientSerializer(many=True))
@@ -113,9 +181,10 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         s.is_valid(raise_exception=True)
         hours, dry = s.validated_data['older_than_hours'], s.validated_data['dry_run']
         qs = QueryLog.objects.filter(time__lt=timezone.now() - timedelta(hours=hours)) if hours else QueryLog.objects.all()
-        count = qs.count()
-        if not dry:
-            qs.delete()
+        if dry:
+            count = qs.count()
+        else:
+            count, _ = qs.delete()
             rollup.purge(timezone.now() - timedelta(hours=hours) if hours else None)
         return Response({'count': count, 'dry_run': dry})
 

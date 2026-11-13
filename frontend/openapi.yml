@@ -312,6 +312,94 @@ paths:
                 items:
                   $ref: '#/components/schemas/Count'
           description: ''
+  /api/dhcp/leases/:
+    get:
+      operationId: dhcp_leases_list
+      description: The addresses and prefixes given out by the DHCP servers (DHCPv4
+        and DHCPv6), newest first; the ones that ended are listed with all=true.
+      parameters:
+      - in: query
+        name: all
+        schema:
+          type: boolean
+        description: Include the leases that ended
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Search address, client or host name
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DhcpLease'
+          description: ''
+  /api/dhcp/leases/{family}/{id}/:
+    delete:
+      operationId: dhcp_leases_destroy
+      description: 'End a lease: the address is free again (the client keeps using
+        it until it renews, then is told it cannot).'
+      parameters:
+      - in: path
+        name: family
+        schema:
+          type: integer
+        required: true
+      - in: path
+        name: id
+        schema:
+          type: integer
+        required: true
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/dhcp/settings/:
+    get:
+      operationId: dhcp_settings_retrieve
+      description: Current DHCPv4, DHCPv6 and Router Advertisement configuration (settings
+        overlaid with GUI changes).
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpSettings'
+          description: ''
+    patch:
+      operationId: dhcp_settings_partial_update
+      description: Update DHCPv4, DHCPv6 and Router Advertisement settings and validate
+        them before saving.
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDhcpSettingsRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpSettings'
+          description: ''
   /api/geo/destinations/:
     get:
       operationId: geo_destinations_retrieve
@@ -1947,6 +2035,145 @@ components:
       - pending
       - points
       - scanned
+    DhcpLease:
+      type: object
+      properties:
+        id:
+          type: integer
+        family:
+          type: integer
+          description: 4 or 6
+        kind:
+          $ref: '#/components/schemas/KindEnum'
+        address:
+          type: string
+          description: The address, or the delegated prefix
+        client:
+          type: string
+          description: MAC address (DHCPv4) or DUID (DHCPv6)
+        hostname:
+          type: string
+        expires:
+          type: string
+          format: date-time
+        active:
+          type: boolean
+      required:
+      - active
+      - address
+      - client
+      - expires
+      - family
+      - hostname
+      - id
+      - kind
+    DhcpSettings:
+      type: object
+      properties:
+        DHCP:
+          type: boolean
+        DHCP_SERVER:
+          type: string
+          maxLength: 45
+        DHCP_NETMASK:
+          type: string
+          maxLength: 45
+        DHCP_RANGE:
+          type: string
+          maxLength: 120
+        DHCP_ROUTER:
+          type: string
+          maxLength: 45
+        DHCP_DNS:
+          type: string
+          maxLength: 255
+        DHCP_DOMAIN:
+          type: string
+          maxLength: 253
+        DHCP_LEASE:
+          type: integer
+          minimum: 60
+        DHCP_RESERVATIONS:
+          type: string
+          maxLength: 4000
+        DHCP_INTERFACE:
+          type: string
+          maxLength: 64
+        DHCP_NTP:
+          type: string
+          maxLength: 255
+        DHCP_SEARCH:
+          type: string
+          maxLength: 500
+        DHCP_ROUTES:
+          type: string
+          maxLength: 2000
+        DHCP_MTU:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        DHCP_BOOT_SERVER:
+          type: string
+          maxLength: 255
+        DHCP_BOOT_FILE:
+          type: string
+          maxLength: 128
+        DHCP_PROBE:
+          type: boolean
+        DHCP_NAMES:
+          type: boolean
+        DHCP_UNICAST:
+          type: boolean
+        DHCP_DNR:
+          type: boolean
+        DHCP_FAILOVER_SECS:
+          type: integer
+          maximum: 3600
+          minimum: 0
+        DHCP_SUBNETS:
+          type: string
+          maxLength: 8000
+        DHCP6:
+          type: boolean
+        DHCP6_PREFIX:
+          type: string
+          maxLength: 64
+        DHCP6_POOL:
+          type: string
+          maxLength: 128
+        DHCP6_PD_POOL:
+          type: string
+          maxLength: 64
+        DHCP6_PD_LEN:
+          type: integer
+          maximum: 128
+          minimum: 1
+        DHCP6_PD_ROUTES:
+          type: boolean
+        DHCP6_LEASE:
+          type: integer
+          minimum: 120
+        DHCP6_PREFERENCE:
+          type: integer
+          maximum: 255
+          minimum: 0
+        DHCP6_RAPID:
+          type: boolean
+        DHCP6_DNS:
+          type: string
+          maxLength: 255
+        DHCP_RA:
+          type: boolean
+        DHCP_RA_INTERVAL:
+          type: integer
+          maximum: 1800
+          minimum: 4
+        DHCP_RA_ROUTER_LIFETIME:
+          type: integer
+          maximum: 9000
+          minimum: 0
+        DHCP_RA_SLAAC:
+          type: boolean
     Dmarc:
       type: object
       properties:
@@ -2226,6 +2453,14 @@ components:
       required:
       - count
       - names
+    KindEnum:
+      enum:
+      - address
+      - prefix
+      type: string
+      description: |-
+        * `address` - address
+        * `prefix` - prefix
     LoginKey:
       type: object
       properties:
@@ -2540,6 +2775,113 @@ components:
           type: string
           format: date-time
           nullable: true
+    PatchedDhcpSettingsRequest:
+      type: object
+      properties:
+        DHCP:
+          type: boolean
+        DHCP_SERVER:
+          type: string
+          maxLength: 45
+        DHCP_NETMASK:
+          type: string
+          maxLength: 45
+        DHCP_RANGE:
+          type: string
+          maxLength: 120
+        DHCP_ROUTER:
+          type: string
+          maxLength: 45
+        DHCP_DNS:
+          type: string
+          maxLength: 255
+        DHCP_DOMAIN:
+          type: string
+          maxLength: 253
+        DHCP_LEASE:
+          type: integer
+          minimum: 60
+        DHCP_RESERVATIONS:
+          type: string
+          maxLength: 4000
+        DHCP_INTERFACE:
+          type: string
+          maxLength: 64
+        DHCP_NTP:
+          type: string
+          maxLength: 255
+        DHCP_SEARCH:
+          type: string
+          maxLength: 500
+        DHCP_ROUTES:
+          type: string
+          maxLength: 2000
+        DHCP_MTU:
+          type: integer
+          maximum: 65535
+          minimum: 0
+        DHCP_BOOT_SERVER:
+          type: string
+          maxLength: 255
+        DHCP_BOOT_FILE:
+          type: string
+          maxLength: 128
+        DHCP_PROBE:
+          type: boolean
+        DHCP_NAMES:
+          type: boolean
+        DHCP_UNICAST:
+          type: boolean
+        DHCP_DNR:
+          type: boolean
+        DHCP_FAILOVER_SECS:
+          type: integer
+          maximum: 3600
+          minimum: 0
+        DHCP_SUBNETS:
+          type: string
+          maxLength: 8000
+        DHCP6:
+          type: boolean
+        DHCP6_PREFIX:
+          type: string
+          maxLength: 64
+        DHCP6_POOL:
+          type: string
+          maxLength: 128
+        DHCP6_PD_POOL:
+          type: string
+          maxLength: 64
+        DHCP6_PD_LEN:
+          type: integer
+          maximum: 128
+          minimum: 1
+        DHCP6_PD_ROUTES:
+          type: boolean
+        DHCP6_LEASE:
+          type: integer
+          minimum: 120
+        DHCP6_PREFERENCE:
+          type: integer
+          maximum: 255
+          minimum: 0
+        DHCP6_RAPID:
+          type: boolean
+        DHCP6_DNS:
+          type: string
+          maxLength: 255
+        DHCP_RA:
+          type: boolean
+        DHCP_RA_INTERVAL:
+          type: integer
+          maximum: 1800
+          minimum: 4
+        DHCP_RA_ROUTER_LIFETIME:
+          type: integer
+          maximum: 9000
+          minimum: 0
+        DHCP_RA_SLAAC:
+          type: boolean
     PatchedPersonalSwitchRequest:
       type: object
       properties:

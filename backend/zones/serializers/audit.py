@@ -1,6 +1,6 @@
 from rest_framework import serializers
 
-from ..audit import clean_domain
+from ..stats.audit import clean_domain
 
 
 class AuditRequestSerializer(serializers.Serializer):

@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.db.models import Count
 
 from ..models import Zone
-from ..reverse import zone_to_cidr
+from ..dnsd.reverse import zone_to_cidr
 
 
 @admin.register(Zone)

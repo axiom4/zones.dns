@@ -6,13 +6,13 @@ from django.core.management.base import BaseCommand
 from django.db import close_old_connections
 from django.utils import timezone
 
-from zones import partitions, rollup
+from zones.stats import partitions, rollup
 from zones.models import QueryLog
-from zones.resolver import Resolver
+from zones.dnsd.resolver import Resolver
 from dnslib.server import DNSServer
 
-from zones.logwriter import LogWriter
-from zones.dnsserver import PooledTCPServer, PooledUDPServer
+from zones.stats.logwriter import LogWriter
+from zones.dnsd.dnsserver import PooledTCPServer, PooledUDPServer
 
 
 class Command(BaseCommand):

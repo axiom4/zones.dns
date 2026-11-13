@@ -1,6 +1,8 @@
+import re
+
 from django.core.exceptions import ValidationError
 from django.db import models
-from dnslib import RR, DNSLabel
+from dnslib import QTYPE, RR, DNSLabel
 
 from .zone import Zone
 
@@ -9,9 +11,17 @@ RECORD_TYPES = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR', 'TXT', 'SRV', 'CAA', 'S
 
 def build_rr(zone, name, rtype, value, ttl):
     """Parse one record. Relative names in value resolve against the zone; '@' means the zone apex."""
+    if any(c in f'{name}{value}' for c in '\r\n') or any(c.isspace() for c in name):
+        raise ValueError('newline or whitespace in record')
     fqdn = zone if name == '@' else f'{name}.{zone}'
-    value = ' '.join(f'{zone}.' if t == '@' else t for t in value.split(' '))
-    return RR.fromZone(f'{fqdn}. {ttl} IN {rtype} {value}', origin=zone)
+    parts = value.split('"')
+    for i in range(0, len(parts), 2):
+        parts[i] = re.sub(r'(?:^|(?<=\s))@(?=\s|$)', f'{zone}.', parts[i])
+    expanded = '"'.join(parts)
+    rrs = RR.fromZone(f'{fqdn}. {ttl} IN {rtype} {expanded}', origin=zone)
+    if len(rrs) != 1 or QTYPE[rrs[0].rtype] != rtype or str(rrs[0].rname).rstrip('.').lower() != fqdn.lower():
+        raise ValueError('unexpected record parsed from RDATA')
+    return rrs
 
 
 class Record(models.Model):
@@ -30,6 +40,7 @@ class Record(models.Model):
     def clean(self):
         # Same RDATA check as the API serializer, so the Django admin can't store a record the daemon can't serve.
         self.name = (self.name or '@').strip().strip('.').lower() or '@'
+        self.note = (self.note or '').replace('\r', ' ').replace('\n', ' ')
         try:
             build_rr(self.zone.name, self.name, self.type, self.value, self.ttl or 0)
         except Exception as e:
@@ -37,8 +48,11 @@ class Record(models.Model):
 
     def to_rr(self, owner=None):
         """owner overrides the name, used when a wildcard record answers for another name."""
-        rrs = build_rr(self.zone.name, self.name, self.type, self.value, self.ttl)
+        key = (self.zone.name, self.name, self.type, self.value, self.ttl)
+        if getattr(self, '_rr_key', None) != key:
+            self._rr_cache = tuple(build_rr(*key))
+            self._rr_key = key
         if owner:
-            for rr in rrs:
-                rr.rname = DNSLabel(owner)
-        return rrs
+            lbl = DNSLabel(owner)
+            return [RR(lbl, rr.rtype, rr.rclass, rr.ttl, rr.rdata) for rr in self._rr_cache]
+        return list(self._rr_cache)

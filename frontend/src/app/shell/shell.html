@@ -4,6 +4,7 @@
     <div class="tabs">
       <a routerLink="/zones" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: false }">Zones</a>
       <a routerLink="/hosts" routerLinkActive="on">Hosts</a>
+      <a routerLink="/dhcp" routerLinkActive="on">DHCP</a>
       <a routerLink="/blacklist" routerLinkActive="on">Blacklist</a>
       <a routerLink="/logs" routerLinkActive="on">Query log</a>
       <a routerLink="/geo" routerLinkActive="on">Geolocation</a>
@@ -42,7 +43,7 @@
     } @else {
       <div class="grow"></div>
     }
-    @if (superuser()) { <button class="link" (click)="openAdmin()">Admin Django ↗</button> }
+    @if (superuser()) { <button class="link" (click)="openAdmin()">Django Admin ↗</button> }
     <button class="link" (click)="logout()">Sign out</button>
   </aside>
 

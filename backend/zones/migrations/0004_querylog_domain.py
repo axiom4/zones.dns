@@ -4,7 +4,7 @@ from django.db import migrations, models
 
 
 def fill_domain(apps, schema_editor):
-    from zones.domains import main_domain
+    from zones.dnsd.domains import main_domain
 
     QueryLog = apps.get_model('zones', 'QueryLog')
     for name in QueryLog.objects.values_list('name', flat=True).distinct():

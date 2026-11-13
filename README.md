@@ -4,6 +4,8 @@ DNS daemon (Python/dnslib) + API (Django 6.1.3 / DRF 3.18.3) + GUI (Angular 22).
 Zones and records live in the database; the daemon keeps a copy in memory and reloads it when the data changes, so changes made in the GUI take effect at once (within a second without Redis).
 Internal zones are authoritative (RFC 1034/2308): inside a zone, a name that does not exist gets `NXDOMAIN` and a name without a record of the asked type gets an empty `NOERROR` answer, both with the `aa` flag and a generated SOA in the authority section; a CNAME to a name in another internal zone also returns that name's records. PTR queries for private addresses (10/8, 172.16/12, 192.168/16, 100.64/10, link-local, loopback, `fc00::/7`) that no zone answers get NXDOMAIN at once (RFC 6303, `DNS_LOCAL_REVERSE=false` turns it off). Only names **outside** every internal zone are forwarded to `UPSTREAM_DNS` (with `DNS_AUTHORITATIVE=false` the missing names of an internal zone are forwarded too, for a zone that overrides only some names of a real domain) (default 1.1.1.1; several resolvers, comma separated, are tried in order).
 
+Encrypted DNS (RFC 9462, DDR): `DNS_DDR` announces your DNS over TLS / HTTPS endpoints for `_dns.resolver.arpa`, so clients upgrade from plain DNS by themselves. DoH is served at `/dns-query` (`DNS_DOH=true`); DoT needs the nginx stream block in `deploy/nginx/dns-dot.conf`. `manage.py check_ddr` verifies them; `manage.py dnr_options` prints the same resolvers as DHCP / router-advertisement options (RFC 9463, DNR), and the built-in DHCP server (`manage.py rundhcp`: DHCPv4, DHCPv6 with addresses and prefix delegation, Router Advertisements, relay agents; everything off by default, leases in the *DHCP* page) sends them to the clients itself. No login on either: restrict them to your clients.
+
 ## Quick start (development)
 
 ```sh
@@ -27,14 +29,15 @@ To use the GUI a user needs the **staff** flag; the Django admin is reserved to 
 |---|---|
 | **Zones** | Forward and reverse zones (from a CIDR), records with a guided form for 13 types (A, AAAA, CNAME, MX, TXT, NS, PTR, SRV, NAPTR, HTTPS, CAA, SSHFP, TLSA), wildcards, enable/disable, notes, bulk actions, zone file import/export, automatic PTR records. `DEFAULT_ZONE` picks the zone opened by default. A zone can be switched off (switch next to its name): it is kept but not served, and its names are answered as if it did not exist. Record list sortable by type, host, IP / value or TTL (default: by IP; in a reverse zone "IP" is the full address and "host" the PTR name). Names in a value (CNAME, MX, NS, SRV, PTR) outside the zone need the final dot: `axiom4.net.`, otherwise they are relative to the zone. |
 | **Hosts** | Static host names, like `/etc/hosts`: a name is answered with the IPv4/IPv6 address you set, whatever the real DNS says. Several addresses per name, TTL, note, enable/disable. |
-| **Blacklist** | *Personal blocks* (domains you block by hand or allow as exceptions that win over the public lists, editable, with an on/off switch each and a master switch for all of them; a hint list of names that look like trackers) and *Public lists* (imported, read-only, searchable; a master on/off switch next to the title; each list shows its count; the query log names the list that blocked a name). Blocked domains and their subdomains answer NXDOMAIN. |
+| **DHCP** | Active (and, with *include ended*, expired) DHCPv4 and DHCPv6 leases — IPv4/IPv6 addresses (`IA_NA`, `IA_TA`) and delegated prefixes (`IA_PD`) — searchable by address, MAC/DUID or client host name, with a button to end any lease at once, plus a **DHCP settings** panel to configure DHCPv4, DHCPv6 and Router Advertisements from the GUI. |
+| **Blacklist** | *Personal blocks* (domains you block by hand or allow as exceptions that win over the public lists, editable, with an on/off switch each and a master switch for all of them; a hint list of names that look like trackers) and *Public lists* (imported, read-only, searchable; a master on/off switch next to the title; each list shows its count and can be clicked to filter its domains; the query log names the list that blocked a name). Blocked domains and their subdomains answer NXDOMAIN. |
 | **Query log** | Search and filters, grouping by domain (with subdomains), the full answer of every query, one-click blocking, a button to purge old entries. |
 | **Geolocation** | Where DNS answers point: countries, networks, cities and a map (see below). |
 | **Domain audit** | Public information about a domain: DNS, DNSSEC, mail (SPF/DMARC/DKIM/MTA-STS), RDAP, TLS, web headers, subdomains; every test has its own "Output". |
 | **Statistics** | Queries over time (one bar per minute, hour or day, following the chosen period: 7 and 30 days are whole calendar days, today included), most requested domains and most active clients, query types, timings. |
 | **Security** | The user's second factors: authenticator app and passkeys. |
 
-The menu also has **Django admin ↗** (superusers only), which opens the admin: zones, records, blacklist (*Personal blocks* and *Public lists* sections), log, GeoIP cache and MFA factors.
+The menu also has **Django admin ↗** (superusers only), which opens the admin: zones, records, static hosts, DHCP/DHCPv6 leases, blacklist (*Personal blocks* and *Public lists* sections), log, GeoIP cache and MFA factors.
 
 The interface adapts to phones (portrait and landscape) and tablets: below 1100 px the sidebar becomes a top bar.
 The Angular sources in `frontend/src/app/` have one folder per component (`zone-page/zone-page.ts` + `zone-page.html`), `services/` for injectable classes and `lib/` for plain helpers.
@@ -57,6 +60,7 @@ Every variable, with example values and comments, is in `backend/.env.example`. 
 | `GUI_URL` | Where `/admin/login/` sends people (the GUI). |
 | `SUSPICIOUS_MODE`, `SUSPICIOUS_ALLOW` (+ thresholds) | Suspicious queries. |
 | `DNS_AUTHORITATIVE` | `true` (default): a name or record type missing from an internal zone gets NXDOMAIN/NODATA. `false`: it is forwarded to the upstream (a zone that overrides only some names of a real domain). |
+| `DNS_DNSSEC`, `DNS_RATE_LIMIT`, `DNS_UPDATE_ALLOW` | DNSSEC validation on upstream answers (`AD=1` / `SERVFAIL` on bogus), per-client query rate limiting (`REFUSED`), and allowed client IPs/CIDRs for RFC 2136 dynamic DNS updates (`OPCODE=UPDATE`). |
 | `TIME_ZONE` | Zone the Django admin shows times in (the GUI uses the browser's). MySQL/MariaDB then needs the time zone tables, see below. |
 | `REDIS_URL`, `DNS_CACHE` (+ TTLs) | Cache. |
 | `GEOIP_CITY_DB`, `GEOIP_ASN_DB`, `GEOIP_ONLINE_FALLBACK` | Geolocation. |
@@ -173,6 +177,33 @@ As a safety net a copy older than `DNS_DATA_TTL` seconds (300) is reloaded anywa
 **Partitioned log (MySQL/MariaDB, PostgreSQL).** `manage.py partition_querylog` (once) splits the query log into daily partitions by `time`: `rundns` creates the next 7 days every hour and drops the days older than `QUERY_LOG_DAYS` with `DROP PARTITION`, which is instant, instead of a huge `DELETE`; queries on a time window read only the partitions of those days. The primary key becomes `(id, time)` (MySQL needs the partition column in every unique key); Django still uses `id` alone. The command rebuilds the table and writes wait meanwhile: back up first and run it at a quiet time. Safe to run again. On PostgreSQL the table is replaced by a partitioned one in a single transaction (the old rows are copied, the id sequence continues, the indexes keep their names); its partitions are the tables `zones_querylog_pYYYYMMDD`, and there is no default partition, so if `rundns` is stopped for more than 7 days the log rows of the later days cannot be saved until it runs again. SQLite is not partitioned. After a Django migration that changes `QueryLog`, check that the key is still `(id, time)`.
 
 **Upstream failover.** `UPSTREAM_DNS=192.168.1.254,1.1.1.1` tries the resolvers in order: after `DNS_UPSTREAM_TIMEOUT` seconds (2) without an answer, or a SERVFAIL, it asks the next. A resolver that did not answer at all is skipped for `DNS_UPSTREAM_DOWN` seconds (30), so a dead one does not slow every query. If **all** are down, an answer that expired up to `DNS_STALE_TTL` seconds ago (86400; 0 = never) is served from the cache with a TTL of at most 30 s; the Query log shows it as `stale cache (upstream down)`. A name never asked before gets SERVFAIL. With `REDIS_URL` set, the sign-in replay protection also uses Redis.
+
+## Encrypted DNS (DDR / DNR, DoH, DoT) and DHCP
+
+### Discovery of Designated Resolvers (RFC 9462, DDR) and DNR (RFC 9463)
+
+`DNS_DDR` lists the encrypted endpoints of this resolver (space separated), for example:
+
+```
+DNS_DDR=dot:dns.example.lan@192.168.1.23,2001:db8::53 doh:dns.example.lan/dns-query{?dns}@192.168.1.23
+```
+
+- **DDR (`_dns.resolver.arpa` and `_dns.<adn>`):** when `DNS_DDR` is set, the DNS daemon answers `SVCB` queries for `_dns.resolver.arpa` (and for `_dns.<host>` when clients learn the resolver name via ADN-only DNR) with the ALPN (`dot` / `h2`), port, DoH path template and IPv4/IPv6 hints. Clients that support DDR (iOS/macOS, Windows 11, Android) upgrade from plain DNS automatically after verifying the TLS certificate for `<host>`.
+- **DoH (`/dns-query`):** set `DNS_DOH=true` to serve RFC 8484 DNS over HTTPS (`GET ?dns=` and `POST application/dns-message`), forwarded over TCP to `DNS_DOH_BACKEND` (default `127.0.0.1:5353`).
+- **DoT (port 853):** use the nginx stream proxy in `deploy/nginx/dns-dot.conf` in front of `127.0.0.1:5353`.
+- **Verification (`check_ddr`):** `python manage.py check_ddr` sends a real DNS query to every endpoint in `DNS_DDR` over a verified TLS connection (checking certificate validity and SAN) and exits non-zero if any endpoint fails.
+- **DNR options (`dnr_options`):** `python manage.py dnr_options` (or `--format dnsmasq` / `--format kea`) encodes `DNS_DDR` into DHCPv4 option 162, DHCPv6 option 144 and IPv6 Router Advertisement option 144 (RFC 9463) for external routers/DHCP servers; `manage.py rundhcp` sends them natively when `DHCP_DNR=true`.
+
+### Built-in DHCPv4, DHCPv6 and Router Advertisements (`rundhcp`)
+
+```sh
+python manage.py rundhcp    # off by default: set DHCP=true (and optional DHCP6=true, DHCP_RA=true) in .env
+```
+
+- **DHCPv4 (RFC 2131/2132/3046/3118/3203/3396/3397/3442/4388/4702/6842):** address pool (`DHCP_RANGE`), reservations by MAC (`DHCP_RESERVATIONS`), relay agent scopes (`DHCP_SUBNETS`, option 82 echoed), Leasequery (RFC 4388), authenticated `FORCERENEW` (RFC 3203 / RFC 3118 HMAC-MD5 per-client Reconfigure Key, option 90), standby failover delay (`DHCP_FAILOVER_SECS`), NTP (42), domain search list (119), classless static routes (121), MTU (26), PXE boot (66/67), DNR (162), direct hardware unicast (`DHCP_UNICAST`), and address conflict probing (`DHCP_PROBE`: ARP Who-Has on `DHCP_INTERFACE` when `CAP_NET_RAW` is available, falling back to ICMP echo).
+- **DHCPv6 (RFC 8415/3633/3736/5007) & IPv6 RA (RFC 4861/8106):** stateful address assignment (`DHCP6_POOL`, `IA_NA` and temporary `IA_TA`), prefix delegation (`DHCP6_PD_POOL`, `IA_PD`, with optional kernel route installation via `DHCP6_PD_ROUTES=true`), Leasequery (RFC 5007), authenticated Reconfigure (RFC 8415 §20.4 HMAC-MD5 Reconfigure Key, option 11/20), server preference (`DHCP6_PREFERENCE`, option 7), or stateless DNS/DNR options, plus Router Advertisements (`DHCP_RA=true`) with RDNSS, DNSSL and DNR.
+- **DNS integration (`DHCP_NAMES=true`):** the DNS daemon answers `<hostname>.<DHCP_DOMAIN>` and reverse `PTR` queries from active leases without allowing a DHCP client to override explicit records in your internal zones.
+- **GUI (*DHCP* page):** open **DHCP** in the sidebar to inspect active leases and delegated prefixes, toggle **include ended** to see expired leases, search by IP, MAC/DUID or hostname, click **✕** to release a lease immediately, or click **DHCP settings** to edit and validate DHCPv4, DHCPv6 and Router Advertisement settings.
 
 ## Production deployment
 

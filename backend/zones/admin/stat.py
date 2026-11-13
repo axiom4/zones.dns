@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from ..models import GeoStat, StatCount
+from ..models import DomainStat, GeoStat, StatCount
 
 
 class ReadOnlyAdmin(admin.ModelAdmin):
@@ -24,4 +24,11 @@ class StatCountAdmin(ReadOnlyAdmin):
 class GeoStatAdmin(ReadOnlyAdmin):
     list_display = ['hour', 'domain', 'ip', 'n']
     search_fields = ['domain', 'ip']
+    date_hierarchy = 'hour'
+
+
+@admin.register(DomainStat)
+class DomainStatAdmin(ReadOnlyAdmin):
+    list_display = ['hour', 'domain', 'n', 'local', 'forwarded', 'blocked', 'error', 'ms']
+    search_fields = ['domain']
     date_hierarchy = 'hour'

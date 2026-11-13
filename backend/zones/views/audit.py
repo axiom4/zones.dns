@@ -2,7 +2,7 @@ from drf_spectacular.utils import extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .. import audit
+from ..stats import audit
 from ..serializers import AuditReportSerializer, AuditRequestSerializer
 
 

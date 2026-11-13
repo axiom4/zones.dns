@@ -6,7 +6,7 @@ from django.core.management.base import BaseCommand
 from django.utils import timezone
 
 from zones.models import BlockedDomain, QueryLog, Zone
-from zones.tracker_scan import probe
+from zones.stats.tracker_scan import probe
 
 
 class Command(BaseCommand):

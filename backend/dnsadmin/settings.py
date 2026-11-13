@@ -35,10 +35,10 @@ SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-dev-only')
 DEBUG = os.environ.get('DEBUG', 'true').lower() == 'true'
 if not DEBUG and (len(SECRET_KEY) < 50 or SECRET_KEY.startswith('django-insecure') or len(set(SECRET_KEY)) < 5):
     # The key signs sessions, login tickets and the one-use ticket that opens the Django admin: a known key means a forgeable admin session.
-    raise ImproperlyConfigured('SECRET_KEY debole con DEBUG=false. Generane una: '
+    raise ImproperlyConfigured('Weak SECRET_KEY with DEBUG=false. Generate one: '
                                'python -c "from django.core.management.utils import get_random_secret_key as g; print(g())"')
 
-ALLOWED_HOSTS = os.environ.get('ALLOWED_HOSTS', '').split(',') if os.environ.get('ALLOWED_HOSTS') else []
+ALLOWED_HOSTS = [h.strip() for h in os.environ.get('ALLOWED_HOSTS', '').split(',') if h.strip()]
 
 
 # Application definition
@@ -62,7 +62,7 @@ MIDDLEWARE = [
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
-    'zones.admin_sso.AdminSsoMiddleware',  # /admin/ is entered only from the GUI
+    'zones.security.admin_sso.AdminSsoMiddleware',  # /admin/ is entered only from the GUI
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
@@ -166,7 +166,7 @@ MAILERS = {
 }
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ['zones.authentication.ExpiringTokenAuthentication'],
+    'DEFAULT_AUTHENTICATION_CLASSES': ['zones.security.authentication.ExpiringTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAdminUser'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -224,6 +224,9 @@ DNS_CACHE_NEG_TTL = int(os.environ.get('DNS_CACHE_NEG_TTL', '60'))  # NXDOMAIN /
 # true: names under an internal zone that have no record get NXDOMAIN/NODATA (authoritative, RFC 2308); false: they are forwarded to the upstream
 DNS_AUTHORITATIVE = os.environ.get('DNS_AUTHORITATIVE', 'true').lower() in ('1', 'true', 'yes', 'on')
 # true: reverse lookups of private addresses (10/8, 172.16/12, 192.168/16, fc00::/7 ...) that no zone answers get NXDOMAIN here (RFC 6303) instead of going upstream
+DNS_DDR = os.environ.get('DNS_DDR', '').strip()  # encrypted resolvers announced to clients (RFC 9462), see zones/dnsd/ddr.py
+DNS_DOH = os.environ.get('DNS_DOH', 'false').lower() in ('1', 'true', 'yes', 'on')  # serve DNS over HTTPS at /dns-query (views/doh.py)
+DNS_DOH_BACKEND = os.environ.get('DNS_DOH_BACKEND', '127.0.0.1:5353')  # the DNS daemon (TCP) that DoH queries are passed to
 DNS_LOCAL_REVERSE = os.environ.get('DNS_LOCAL_REVERSE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_PREFETCH = os.environ.get('DNS_PREFETCH', 'true').lower() in ('1', 'true', 'yes', 'on')  # renew cached answers that are about to expire while still asked for
 DNS_PREFETCH_AT = float(os.environ.get('DNS_PREFETCH_AT', '0.2'))  # ...when less than this fraction of their TTL is left
@@ -231,6 +234,10 @@ DNS_PREFETCH_WORKERS = int(os.environ.get('DNS_PREFETCH_WORKERS', '4'))  # threa
 DNS_DATA_CHECK = float(os.environ.get('DNS_DATA_CHECK', '1'))  # seconds between looks at the change counter: a GUI change reaches the DNS daemon within this time
 DNS_DATA_TTL = float(os.environ.get('DNS_DATA_TTL', '300'))  # a copy of zones/records/blacklist older than this is reloaded even if no change was seen
 DNS_STALE_TTL = int(os.environ.get('DNS_STALE_TTL', '86400'))  # seconds an expired answer may still be served when every upstream is down; 0 = never
+DNS_RATE_LIMIT = int(os.environ.get('DNS_RATE_LIMIT', '0'))  # max queries per client IP per DNS_RATE_WINDOW seconds; 0 = off
+DNS_RATE_WINDOW = int(os.environ.get('DNS_RATE_WINDOW', '1'))  # window length in seconds for DNS_RATE_LIMIT
+DNS_DNSSEC = os.environ.get('DNS_DNSSEC', 'false').lower() in ('1', 'true', 'yes', 'on')  # validate RRSIGs on upstream answers (RFC 4035)
+DNS_UPDATE_ALLOW = os.environ.get('DNS_UPDATE_ALLOW', '').strip()  # comma-separated client IPs/CIDRs allowed to send RFC 2136 DNS UPDATEs
 
 # Suspicious queries (tunnelling, DGA, recon). off | log (only flag in the query log) | block (answer NXDOMAIN).
 # Public lists loaded by `manage.py import_blocklist`: comma-separated `name=url` (or just a URL; hosts format or one domain per line). The name labels
@@ -267,3 +274,42 @@ ASN_INDEX = os.environ.get('ASN_INDEX', str(BASE_DIR / 'geoip-data' / 'asn-index
 ASN_IMPORT_URL = os.environ.get('ASN_IMPORT_URL', 'https://github.com/ipverse/as-ip-blocks/releases/latest/download/as-ip-blocks.tar.gz')
 # Ask Team Cymru (a DNS query) for what the local databases do not know. Set to false for a fully offline setup.
 GEOIP_ONLINE_FALLBACK = os.environ.get('GEOIP_ONLINE_FALLBACK', 'true').lower() == 'true'
+
+# DHCPv4 server (manage.py rundhcp), see zones/dhcp/v4.py. Off by default: only one DHCP server may run on a network, turn off the router's first.
+_bool = lambda v: v.lower() in ('1', 'true', 'yes', 'on')
+DHCP = _bool(os.environ.get('DHCP', 'false'))
+DHCP_SERVER = os.environ.get('DHCP_SERVER', '')  # this server's own address on the network
+DHCP_NETMASK = os.environ.get('DHCP_NETMASK', '255.255.255.0')
+DHCP_RANGE = os.environ.get('DHCP_RANGE', '')  # first-last
+DHCP_ROUTER = os.environ.get('DHCP_ROUTER', '')
+DHCP_DNS = os.environ.get('DHCP_DNS', '')  # empty = DHCP_SERVER
+DHCP_DOMAIN = os.environ.get('DHCP_DOMAIN', '')
+DHCP_LEASE = int(os.environ.get('DHCP_LEASE', '86400'))
+DHCP_RESERVATIONS = os.environ.get('DHCP_RESERVATIONS', '')  # aa:bb:cc:dd:ee:ff=192.168.1.10 ... (space separated)
+DHCP_INTERFACE = os.environ.get('DHCP_INTERFACE', '')  # Linux: answer on this interface only
+DHCP_NTP = os.environ.get('DHCP_NTP', '')  # NTP servers (option 42), space separated
+DHCP_SEARCH = os.environ.get('DHCP_SEARCH', '')  # search domains (option 119, RFC 3397); empty = DHCP_DOMAIN
+DHCP_ROUTES = os.environ.get('DHCP_ROUTES', '')  # static routes (option 121, RFC 3442): 10.0.0.0/8=192.168.1.5 ... (net=gateway, space separated)
+DHCP_MTU = int(os.environ.get('DHCP_MTU', '0'))  # option 26, 0 = not sent
+DHCP_BOOT_SERVER = os.environ.get('DHCP_BOOT_SERVER', '')  # PXE / TFTP server (option 66)
+DHCP_BOOT_FILE = os.environ.get('DHCP_BOOT_FILE', '')  # boot file name (option 67 and the BOOTP file field)
+DHCP_PROBE = _bool(os.environ.get('DHCP_PROBE', 'true'))  # ping an address before offering it (RFC 2131 3.1.2)
+DHCP_NAMES = _bool(os.environ.get('DHCP_NAMES', 'true'))  # the DNS server answers <client host name>.<DHCP_DOMAIN> from the leases
+DHCP6 = _bool(os.environ.get('DHCP6', 'false'))  # stateless DHCPv6 (zones/dhcp/v6.py): DNS servers, search list, DNR; needs DHCP_INTERFACE
+DHCP6_PREFIX = os.environ.get('DHCP6_PREFIX', '')  # the on-link prefix, e.g. 2001:db8:1::/64 (Confirm, Router Advertisements)
+DHCP6_POOL = os.environ.get('DHCP6_POOL', '')  # first-last: addresses given to clients (IA_NA); empty = no addresses
+DHCP6_PD_POOL = os.environ.get('DHCP6_PD_POOL', '')  # prefixes delegated to routers (IA_PD, RFC 3633), e.g. 2001:db8:ff00::/40; empty = none
+DHCP6_PD_LEN = int(os.environ.get('DHCP6_PD_LEN', '56'))  # the length of each delegated prefix
+DHCP6_PD_ROUTES = _bool(os.environ.get('DHCP6_PD_ROUTES', 'false'))  # install kernel routes (`ip -6 route`) for delegated IA_PD prefixes
+DHCP6_LEASE = int(os.environ.get('DHCP6_LEASE', '86400'))  # valid lifetime in seconds
+DHCP6_RAPID = _bool(os.environ.get('DHCP6_RAPID', 'false'))  # rapid commit (two messages instead of four)
+DHCP_RA = _bool(os.environ.get('DHCP_RA', 'false'))  # send IPv6 Router Advertisements with DNS servers, search list and DNR (zones/dhcp/ra.py); needs DHCP_INTERFACE
+DHCP_RA_INTERVAL = int(os.environ.get('DHCP_RA_INTERVAL', '600'))  # seconds between advertisements
+DHCP_RA_ROUTER_LIFETIME = int(os.environ.get('DHCP_RA_ROUTER_LIFETIME', '0'))  # 0: this host is NOT a default router; >0 makes it one
+DHCP_RA_SLAAC = _bool(os.environ.get('DHCP_RA_SLAAC', 'true'))  # the prefix DHCP6_PREFIX is announced for stateless address autoconfiguration
+DHCP6_DNS = os.environ.get('DHCP6_DNS', '')  # IPv6 addresses of the DNS servers given to clients
+DHCP_SUBNETS = os.environ.get('DHCP_SUBNETS', '')  # more networks, reached through relay agents: a JSON list, see zones/dhcp/v4.py scopes()
+DHCP_UNICAST = _bool(os.environ.get('DHCP_UNICAST', 'false'))  # Linux, root or CAP_NET_RAW, needs DHCP_INTERFACE: reply to a client that has no address yet straight to its hardware address instead of broadcasting
+DHCP_DNR = _bool(os.environ.get('DHCP_DNR', 'true'))  # announce the DNS_DDR resolvers (RFC 9463, option 162) to clients that ask
+DHCP_FAILOVER_SECS = int(os.environ.get('DHCP_FAILOVER_SECS', '0'))  # standby failover delay: answer DISCOVER only when client secs >= this value (0 = primary)
+DHCP6_PREFERENCE = int(os.environ.get('DHCP6_PREFERENCE', '0'))  # RFC 8415 §21.8 server preference option (0 = not sent; 255 = immediate selection, lower = backup)

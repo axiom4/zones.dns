@@ -6,7 +6,7 @@ import urllib.request
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 
-from zones import asnindex
+from zones.stats import asnindex
 
 MIN_PREFIXES = 100000  # a real archive has about 500,000; less means a broken download
 MAX_BYTES = 300 * 1024 * 1024

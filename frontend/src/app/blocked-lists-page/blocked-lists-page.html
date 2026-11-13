@@ -6,7 +6,15 @@
               [title]="active() ? 'Public lists are on: click to turn them all off' : 'Public lists are off: click to turn them on'"><i></i></button>
       <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
     </div>
-    <p class="soft">{{ count() }} domains {{ q ? 'found' : 'imported' }}. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
+    <p class="soft">{{ count() }} domains {{ q || list() ? 'found' : 'imported' }}@if (list()) { in <b>{{ list() }}</b> }@else if (lists().length) { across {{ lists().length }} lists }. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
+    @if (lists().length) {
+      <p class="soft">
+        @for (l of lists(); track l.name; let last = $last) {
+          <button type="button" class="link" [class.on]="list() === l.name" (click)="pickList(l.name)" [title]="'Filter by ' + l.name">{{ l.name }} ({{ l.count }})</button>@if (!last) { · }
+        }
+        @if (list()) { · <button type="button" class="link" (click)="pickList('')">show all</button> }
+      </p>
+    }
   </div>
 </header>
 <form class="composer" (ngSubmit)="search()">

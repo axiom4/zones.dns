@@ -5,7 +5,8 @@ from rest_framework import serializers, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
-from .. import mfa, reverse, zonefile
+from ..security import mfa
+from ..dnsd import reverse, zonefile
 from ..models import Zone
 from ..serializers import (ReverseZoneRequestSerializer, SyncPtrResultSerializer, ZoneImportResultSerializer,
                            ZoneImportSerializer, ZoneSerializer)
