@@ -20,4 +20,5 @@ class QueryLog(models.Model):
         indexes = [
             models.Index(fields=['domain', 'time'], name='qlog_domain_time'),
             models.Index(fields=['outcome', 'time'], name='qlog_outcome_time'),
+            models.Index(fields=['client', 'time'], name='qlog_client_time'),  # the log page filtered by client: without it every refresh scanned the whole period
         ]
