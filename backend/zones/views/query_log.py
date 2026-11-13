@@ -1,6 +1,8 @@
+import hashlib
 from datetime import timedelta
 
 from django.conf import settings
+from django.core.cache import cache
 from django.db.models import Avg, Count, Max, Q, Sum, TextField
 from django.db.models.functions import Cast
 from django.utils import timezone
@@ -21,16 +23,23 @@ class LogPagination(LimitOffsetPagination):
     max_limit = 500
 
     def get_count(self, queryset):
-        # shortcut: counts up to COUNT_CAP rows. An exact COUNT(*) over millions of log rows ran on every page and every live refresh;
-        # beyond the cap the total shows as COUNT_CAP (the pages themselves still go on to the end)
+        # exact, but remembered COUNT_TTL seconds per filter: the live refresh asks every few seconds and a COUNT(*) over millions of rows is slow
         if queryset.query.group_by is None:
-            return queryset.order_by().values('pk')[:COUNT_CAP].count()
-        q = queryset.order_by()
-        q.query.annotations.clear()
-        return q[:COUNT_CAP].count()
+            q = queryset.order_by().values('pk')
+        else:
+            q = queryset.order_by()
+            q.query.annotations.clear()
+        # the key is the request, not the SQL: 'hours' puts the current time in the SQL, so it would differ at every refresh
+        params = sorted((k, v) for k, v in self.request.query_params.items() if k not in ('limit', 'offset'))
+        key = 'qlog-count:' + hashlib.md5(repr((self.request.path, params)).encode()).hexdigest()
+        n = cache.get(key)
+        if n is None:
+            n = q.count()
+            cache.set(key, n, COUNT_TTL)
+        return n
 
 
-COUNT_CAP = 100_000
+COUNT_TTL = 30
 
 
 FILTERS = [
