@@ -5,7 +5,7 @@ from datetime import timedelta
 
 from django.core.cache import cache
 from django.db import connection
-from django.db.models import Sum
+from django.db.models import Case, F, Min, Sum, When
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.response import Response
@@ -84,7 +84,11 @@ def _compute(key, hours):
     # The hourly counters of answered addresses per domain; the window starts at the hour.
     # Streams all (domain, ip) pairs in one unsorted GROUP BY query so both address totals and domain names are exact.
     qs = GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours)))
-    rows = [(r['domain'], r['ip'], r['c'], r['f']) for r in qs.values('domain', 'ip').annotate(c=Sum('n'), f=Sum('first')).order_by().iterator(chunk_size=10000)]
+    # hours counted before GeoStat.first existed (migration 0030, no rebuild_stats since) have first = 0 and all come before the first hour that has it:
+    # there every address counts, so they are not lost. A range, not hour IN (...): SQLite stores the upserted hours with '+00:00'
+    cut = qs.filter(first__gt=0).aggregate(h=Min('hour'))['h']
+    weight = Case(When(hour__lt=cut, then=F('n')), default=F('first')) if cut else F('n')
+    rows = [(r['domain'], r['ip'], r['c'], r['f']) for r in qs.values('domain', 'ip').annotate(c=Sum('n'), f=Sum(weight)).order_by().iterator(chunk_size=10000)]
     out = geo.destinations(rows)
     try:
         cache.set(key, (time.time(), out), 86400)

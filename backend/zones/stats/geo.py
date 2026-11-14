@@ -98,13 +98,10 @@ COUNTRY_TTL = 60
 def destinations(rows):
     """Aggregate answered A/AAAA addresses by country and network. rows: (domain, ip, queries that had ip, queries that had it first).
     A query is counted once, at its first address, so the countries and networks add up to the total. Counters written before GeoStat.first
-    existed have first = 0: then every address of an answer counts (manage.py rebuild_stats fills first)."""
-    rows = list(rows)
-    by_first = any(f for *_, f in rows)
+    existed have first = 0: the caller passes n there instead (every address of an answer counts; manage.py rebuild_stats fills first)."""
     per_ip = {}
-    for domain, ip, n, f in rows:
+    for domain, ip, n, w in rows:
         d = per_ip.setdefault(ip, {'q': 0, 'domains': Counter()})
-        w = f if by_first else n
         d['q'] += w
         if domain:
             d['domains'][domain] += w  # a domain with no query first here still counts as one of the country's domains (weight 0)

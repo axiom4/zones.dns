@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Geolocation: when the period held hours saved both before and after the update to `GeoStat.first` (migration 0030 without `rebuild_stats`), the older hours counted 0, so the countries and the total were much smaller than the query log. Those hours now count every address, as the note on 0030 says; `rebuild_stats` still makes them exact.
 - DNS daemon: a UDP answer is packed once (it was packed to measure it, then again to send it), and dnslib no longer prints two lines per query to stdout (request and reply; only truncated answers and errors are printed now, the query log keeps every query).
 - Query log: *Load more* pages by the last row shown (`before=<id>`, keyset) instead of an offset: deep pages read only their own rows, and rows logged meanwhile no longer bring back rows already shown. `count` stays the total of the filters; `offset` still works.
 - PostgreSQL: a trigram index on the log names (`qlog_name_trgm`, migration 0031, extension `pg_trgm`) makes the log search fast. Skipped, with a message, when the database user cannot create the extension. On a partitioned log the index build locks writes: migrate at a quiet time.

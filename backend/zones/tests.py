@@ -1700,7 +1700,9 @@ class HotPathTests(TestCase):
         self.assertEqual([(g['name'], g['count']) for g in res.json()['results']], [('a.example.com', 2), ('b.example.com', 1)])
 
     def test_geolocation_counts_queries_not_addresses(self):
+        from datetime import timedelta
         from django.contrib.auth import get_user_model
+        from django.utils import timezone
         from django.core.cache import cache
         from rest_framework.test import APIClient
         from .models import QueryLog
@@ -1719,6 +1721,13 @@ class HotPathTests(TestCase):
         self.assertEqual(d['ips_total'], 4)
         from .models import GeoStat
         self.assertEqual(sorted(GeoStat.objects.values_list('ip', 'n', 'first')), [(f'93.184.216.{i}', 1, int(i == 0)) for i in range(4)])
+        # an hour counted before GeoStat.first existed (first = 0) still counts, next to the new hours
+        from .stats.rollup import floor_hour
+        GeoStat.objects.create(hour=floor_hour(timezone.now()) - timedelta(hours=2), domain='old.example', ip='93.184.216.9', n=5, first=0)
+        cache.delete('geo-dest-24')
+        with override_settings(GEOIP_ONLINE_FALLBACK=False):
+            d = api.get('/api/geo/destinations/?hours=24').json()
+        self.assertEqual(d['scanned'], 6)
 
     def test_log_list_keyset_pages_do_not_repeat_rows(self):
         from datetime import timedelta
