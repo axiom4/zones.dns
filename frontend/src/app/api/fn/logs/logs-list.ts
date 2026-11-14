@@ -17,6 +17,11 @@ export interface LogsList$Params {
   answer?: string;
 
 /**
+ * Only domains whose answers point to this network (AS number as shown in the geolocation page) in the period (24 hours if hours is not given)
+ */
+  asn?: string;
+
+/**
  * Id of the last row already shown: the next rows after it (instead of offset)
  */
   before?: number;
@@ -77,6 +82,7 @@ export function logsList(http: HttpClient, rootUrl: string, params?: LogsList$Pa
   const rb = new RequestBuilder(rootUrl, logsList.PATH, 'get');
   if (params) {
     rb.query('answer', params.answer, {});
+    rb.query('asn', params.asn, {});
     rb.query('before', params.before, {});
     rb.query('client', params.client, {});
     rb.query('country', params.country, {});

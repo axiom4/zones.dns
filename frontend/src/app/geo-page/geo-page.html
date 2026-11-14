@@ -80,10 +80,10 @@
     <section class="panel">
       <h3>Most contacted networks <small class="soft">top {{ d.networks.length }}</small></h3>
       <table class="anstable">
-        <thead><tr><th>Network</th><th>Name</th><th>Country</th><th>Queries</th><th>Addresses</th></tr></thead>
+        <thead><tr><th>Network</th><th>Name</th><th>Country</th><th>Queries</th><th>Addresses</th><th></th></tr></thead>
         <tbody>
           @for (n of d.networks; track n.asn) {
-            <tr><td class="mono">{{ n.asn }}</td><td>{{ n.as_name }}</td><td>{{ flag(n.country) }} {{ name(n.country) }}</td><td>{{ n.queries }} <span class="soft">· {{ share(n.queries) }}%</span></td><td>{{ n.ips }}</td></tr>
+            <tr><td class="mono">{{ n.asn }}</td><td>{{ n.as_name }}</td><td>{{ flag(n.country) }} {{ name(n.country) }}</td><td>{{ n.queries }} <span class="soft">· {{ share(n.queries) }}%</span></td><td>{{ n.ips }}</td><td><a class="mini" routerLink="/logs" [queryParams]="{ asn: n.asn, hours }" title="Show the queries answered with an address of this network">Log</a></td></tr>
           }
         </tbody>
       </table>

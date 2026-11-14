@@ -1748,6 +1748,27 @@ class HotPathTests(TestCase):
             self.assertEqual({c['name']: c['count'] for c in d['by_answer']}, want, hours)
             self.assertEqual(sum(c['count'] for c in d['by_answer']), d['total'])
 
+    def test_log_filters_by_network(self):
+        from unittest import mock
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        from .stats import rollup
+        mk = lambda name, domain, ip: QueryLog.objects.create(name=name, domain=domain, type='A', outcome='forwarded', client='10.0.0.1', ms=1, rcode='NOERROR',
+                                                              answers=[{'name': name, 'type': 'A', 'value': ip, 'ttl': 60}])
+        rollup.add([mk('a.one.example', 'one.example', '93.184.216.1'), mk('b.two.example', 'two.example', '93.184.217.1')])
+        info = lambda asn: {**__import__('zones.stats.geo', fromlist=['BLANK']).BLANK, 'country': 'US', 'asn': asn}
+        found = {'93.184.216.1': info('AS64500'), '93.184.217.1': info('AS64501')}
+        cache.clear()
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('net', is_staff=True))
+        with mock.patch('zones.stats.geo.locate', return_value=(found, 0)):
+            d = api.get('/api/logs/?asn=as64500&hours=24').json()
+            self.assertEqual([r['name'] for r in d['results']], ['a.one.example'])
+            g = api.get('/api/logs/grouped/?by=domain&asn=AS64501&hours=24').json()
+            self.assertEqual([r['name'] for r in g['results']], ['two.example'])
+
     def test_log_list_keyset_pages_do_not_repeat_rows(self):
         from datetime import timedelta
         from django.contrib.auth import get_user_model

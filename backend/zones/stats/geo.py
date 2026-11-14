@@ -62,15 +62,15 @@ def locate(ips, budget=150):
     return out, len(todo) - len(batch)
 
 
-def country_domains(code, hours):
-    """Registrable domains that had an answer pointing to country `code` (PRIV = private addresses, ?? = unknown) in the last `hours`.
-    Same data as the geolocation page. shortcut: a domain also answered from other countries is listed whole; at most 5000 domains (the most
-    asked), and the list is remembered COUNTRY_TTL seconds: the live log asks for it at every refresh."""
+def _domains(key, want, hours):
+    """Registrable domains with an answer address for which want(info) is true, in the last `hours`. Same data as the geolocation page.
+    shortcut: a domain also answered from other countries / networks is listed whole; at most 5000 domains (the most asked), and the list is
+    remembered COUNTRY_TTL seconds: the live log asks for it at every refresh."""
     from django.core.cache import cache
     from django.db.models import Sum
     from ..models import GeoStat
     from .rollup import floor_hour
-    key = f'geo-country-domains:{code}:{hours}'
+    key = f'{key}:{hours}'
     try:
         if (hit := cache.get(key)) is not None:
             return hit
@@ -79,7 +79,6 @@ def country_domains(code, hours):
     rows = GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values_list('domain', 'ip').annotate(n=Sum('n'))
     pairs = {(d, ip): n for d, ip, n in rows}
     found, _ = locate({ip for _, ip in pairs}, budget=0)  # only what is already known: no network lookups while listing the log
-    want = lambda g: (g['private'] if code == 'PRIV' else not g['private'] and (g['country'] or '??') == code)
     asked = Counter()
     for (d, ip), n in pairs.items():
         if d and ip in found and want(found[ip]):
@@ -90,6 +89,16 @@ def country_domains(code, hours):
     except Exception:
         pass
     return out
+
+
+def country_domains(code, hours):
+    """Domains that had an answer pointing to country `code` (PRIV = private addresses, ?? = unknown)."""
+    return _domains(f'geo-country-domains:{code}', lambda g: g['private'] if code == 'PRIV' else not g['private'] and (g['country'] or '??') == code, hours)
+
+
+def network_domains(asn, hours):
+    """Domains that had an answer pointing to the network `asn` (as shown in the geolocation page)."""
+    return _domains(f'geo-network-domains:{asn}', lambda g: not g['private'] and g['asn'] == asn, hours)
 
 
 COUNTRY_TTL = 60

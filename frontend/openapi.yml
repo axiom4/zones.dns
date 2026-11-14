@@ -620,6 +620,12 @@ paths:
           type: string
         description: Text contained in the answer records, e.g. an IP address
       - in: query
+        name: asn
+        schema:
+          type: string
+        description: Only domains whose answers point to this network (AS number as
+          shown in the geolocation page) in the period (24 hours if hours is not given)
+      - in: query
         name: before
         schema:
           type: integer
@@ -778,6 +784,12 @@ paths:
         schema:
           type: string
         description: Text contained in the answer records, e.g. an IP address
+      - in: query
+        name: asn
+        schema:
+          type: string
+        description: Only domains whose answers point to this network (AS number as
+          shown in the geolocation page) in the period (24 hours if hours is not given)
       - in: query
         name: by
         schema:

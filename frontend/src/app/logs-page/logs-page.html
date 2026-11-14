@@ -9,6 +9,10 @@
     <button class="ghost" (click)="openPurge()">Purge log…</button>
   </div>
 </header>
+@if (asn) {
+  <p class="notice" role="status">Only domains whose answers point to the network <b>{{ asn }}</b> ({{ hours > 24 ? 'last ' + hours / 24 + ' days' : hours === 1 ? 'last hour' : 'last 24 hours' }}).
+    <button class="mini" (click)="clearCountry()">Remove filter</button></p>
+}
 @if (country) {
   <p class="notice" role="status">Only domains whose answers point to <b>{{ countryName(country) }}</b> ({{ hours > 24 ? 'last ' + hours / 24 + ' days' : hours === 1 ? 'last hour' : 'last 24 hours' }}).
     <button class="mini" (click)="clearCountry()">Remove filter</button></p>

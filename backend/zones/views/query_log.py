@@ -67,7 +67,7 @@ def stat_count(p):
     """The number of rows read from the hourly counters (a few thousand rows at most, never the log) when the filters allow it:
     none, or one of outcome / type / client, plus the period. The hours at the two ends of the period are not whole, so the first one is
     counted in the log (one hour of rows through the time index). None = this filter needs the log itself."""
-    other = [f for f in ('q', 'name', 'domain', 'rcode', 'answer', 'country') if p.get(f)]
+    other = [f for f in ('q', 'name', 'domain', 'rcode', 'answer', 'country', 'asn') if p.get(f)]
     one = [f for f in ('outcome', 'type', 'client') if p.get(f)]
     if other or len(one) > 1:
         return None
@@ -100,6 +100,7 @@ FILTERS = [
     OpenApiParameter('rcode', str, description='Response code, e.g. NXDOMAIN'),
     OpenApiParameter('answer', str, description='Text contained in the answer records, e.g. an IP address'),
     OpenApiParameter('hours', int, description='Only the last N hours'),
+    OpenApiParameter('asn', str, description='Only domains whose answers point to this network (AS number as shown in the geolocation page) in the period (24 hours if hours is not given)'),
     OpenApiParameter('country', str, description='Only domains whose answers point to this country (ISO code, PRIV or ??) in the period (24 hours if hours is not given)'),
 ]
 
@@ -131,6 +132,9 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         if p.get('country'):
             hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24  # the counters have no 'all time': 24 h is the page default
             qs = qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
+        if p.get('asn'):
+            hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
+            qs = qs.filter(domain__in=geo.network_domains(p['asn'].strip().upper(), min(hours, 720)))
         return qs
 
     @extend_schema(
@@ -157,6 +161,9 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             if p.get('country'):
                 hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
                 d_qs = d_qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
+            if p.get('asn'):
+                hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
+                d_qs = d_qs.filter(domain__in=geo.network_domains(p['asn'].strip().upper(), min(hours, 720)))
             outcome = p.get('outcome', '').strip().lower()
             if outcome in ('local', 'forwarded', 'blocked', 'error'):
                 d_qs = d_qs.filter(**{f'{outcome}__gt': 0})

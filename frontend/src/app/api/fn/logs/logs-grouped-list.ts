@@ -17,6 +17,11 @@ export interface LogsGroupedList$Params {
   answer?: string;
 
 /**
+ * Only domains whose answers point to this network (AS number as shown in the geolocation page) in the period (24 hours if hours is not given)
+ */
+  asn?: string;
+
+/**
  * Group by registrable domain (default) or by full host name
  */
   by?: 'domain' | 'name';
@@ -82,6 +87,7 @@ export function logsGroupedList(http: HttpClient, rootUrl: string, params?: Logs
   const rb = new RequestBuilder(rootUrl, logsGroupedList.PATH, 'get');
   if (params) {
     rb.query('answer', params.answer, {});
+    rb.query('asn', params.asn, {});
     rb.query('by', params.by, {});
     rb.query('client', params.client, {});
     rb.query('country', params.country, {});

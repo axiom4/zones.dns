@@ -47,6 +47,7 @@ export class LogsPage implements OnDestroy {
   names = signal<{ [name: string]: Sub }>({});
   q = ''; outcome = ''; type = ''; client = ''; rcode = ''; answer = ''; hours = 24; live = true;
   country = ''; // set by the link from the geolocation page
+  asn = ''; // same, from the networks table
 
   grouped = false; ordering: 'last' | 'count' = 'last';
   purgeHours = 168;
@@ -72,13 +73,14 @@ export class LogsPage implements OnDestroy {
   constructor() {
     const p = this.route.snapshot.queryParamMap;  // /logs?country=IT&hours=168, from the geolocation page
     this.country = (p.get('country') ?? '').toUpperCase();
+    this.asn = (p.get('asn') ?? '').toUpperCase();
     if ([1, 24, 168, 720].includes(Number(p.get('hours')))) this.hours = Number(p.get('hours'));
     this.reset(); this.loadClients(); this.toggleLive();
   }
   countryName = countryName;
   clearCountry() {
-    this.country = '';
-    this.router.navigate([], { queryParams: { country: null, hours: null }, queryParamsHandling: 'merge', replaceUrl: true });  // a reload or a shared link no longer brings the filter back
+    this.country = ''; this.asn = '';
+    this.router.navigate([], { queryParams: { country: null, asn: null, hours: null }, queryParamsHandling: 'merge', replaceUrl: true });  // a reload or a shared link no longer brings the filter back
     this.reset();
   }
 
@@ -148,7 +150,7 @@ export class LogsPage implements OnDestroy {
   search() { clearTimeout(this.timer); this.timer = setTimeout(() => this.reset(), 250); }
 
   private filters() {
-    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined, country: this.country || undefined };
+    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined, country: this.country || undefined, asn: this.asn || undefined };
   }
 
   /** Reload from the start. While live, keep as many rows as were already loaded so the list doesn't jump. */
