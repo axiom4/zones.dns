@@ -364,10 +364,14 @@ def finish(request, reply, handler):
     reply.ar = [rr for rr in reply.ar if rr.rtype != QTYPE.OPT]
     if opt:
         reply.add_ar(EDNS0(udp_len=1232, flags='do' if do_bit else ''))
-    if getattr(handler, 'protocol', 'tcp') == 'udp' and len(reply.pack()) > (max(512, min(opt.rclass, 1232)) if opt else 512):
-        reply = reply.truncate()
-        if opt:
-            reply.add_ar(EDNS0(udp_len=1232, flags='do' if do_bit else ''))
+    if getattr(handler, 'protocol', 'tcp') == 'udp':
+        wire = reply.pack()
+        if len(wire) > (max(512, min(opt.rclass, 1232)) if opt else 512):
+            reply = reply.truncate()
+            if opt:
+                reply.add_ar(EDNS0(udp_len=1232, flags='do' if do_bit else ''))
+            wire = reply.pack()
+        reply.wire = wire  # dnsserver.Handler sends these bytes instead of packing the reply a second time
     return reply
 
 

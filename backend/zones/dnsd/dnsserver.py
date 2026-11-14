@@ -6,7 +6,25 @@ at most DNS_WORKERS connections per protocol, opened once and reused. A thread p
 import threading
 from concurrent.futures import ThreadPoolExecutor
 
-from dnslib.server import TCPServer, UDPServer
+from dnslib import DNSRecord
+from dnslib.server import DNSHandler, DNSLogger, TCPServer, UDPServer
+
+
+class Handler(DNSHandler):
+    """dnslib's handler, minus a second pack(): resolver.finish() already packed (and cut) the UDP answer to measure it."""
+
+    def get_reply(self, data):
+        request = DNSRecord.parse(data)
+        self.server.logger.log_request(self, request)
+        reply = self.server.resolver.resolve(request, self)
+        self.server.logger.log_reply(self, reply)
+        wire = getattr(reply, 'wire', None)
+        return wire if wire is not None else reply.pack()
+
+
+def logger():
+    """Only truncated answers and errors on stdout: dnslib's default printed two lines per query (the query log already has them)."""
+    return DNSLogger('truncated,error')
 
 
 class _Pooled:

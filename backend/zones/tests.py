@@ -1719,3 +1719,39 @@ class HotPathTests(TestCase):
         self.assertEqual(d['ips_total'], 4)
         from .models import GeoStat
         self.assertEqual(sorted(GeoStat.objects.values_list('ip', 'n', 'first')), [(f'93.184.216.{i}', 1, int(i == 0)) for i in range(4)])
+
+    def test_log_list_keyset_pages_do_not_repeat_rows(self):
+        from datetime import timedelta
+        from django.contrib.auth import get_user_model
+        from django.utils import timezone
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        now = timezone.now()
+        mk = lambda m: QueryLog.objects.create(time=now - timedelta(minutes=m), name='k.example', domain='example', type='A', outcome='forwarded', client='10.0.0.1', ms=1)
+        for m in (1, 2, 2, 3, 4):  # two rows with the same time: the id breaks the tie
+            mk(m)
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('k', is_staff=True))
+        first = api.get('/api/logs/?q=k.example&limit=2').json()
+        mk(0)  # a new row arrives between the pages: with offsets the last row of page 1 came back on page 2
+        second = api.get(f'/api/logs/?q=k.example&limit=2&before={first["results"][-1]["id"]}').json()
+        third = api.get(f'/api/logs/?q=k.example&limit=2&before={second["results"][-1]["id"]}').json()
+        ids = [r['id'] for p in (first, second, third) for r in p['results']]
+        self.assertEqual(len(ids), 5)
+        self.assertEqual(len(set(ids)), 5)
+        self.assertEqual(second['count'], first['count'])  # the total of the filters, not what is left
+
+    def test_udp_answer_is_packed_once(self):
+        from unittest import mock
+        from .dnsd.dnsserver import Handler
+        Zone.objects.create(name='lan')
+        Record.objects.create(zone=Zone.objects.get(name='lan'), name='h', type='A', value='10.0.0.1')
+        h = Handler.__new__(Handler)
+        h.protocol, h.client_address = 'udp', ('127.0.0.1', 0)
+        h.server = SimpleNamespace(resolver=Resolver('127.0.0.1:9', log=SimpleNamespace(add=lambda e: None)), logger=SimpleNamespace(log_request=lambda *a: None, log_reply=lambda *a: None))
+        real = DNSRecord.pack
+        with mock.patch.object(DNSRecord, 'pack', autospec=True, side_effect=real) as pack:
+            wire = h.get_reply(DNSRecord.question('h.lan', 'A').pack())
+        replies = [c for c in pack.call_args_list if c.args[0].header.qr]
+        self.assertEqual(len(replies), 1)
+        self.assertEqual(str(DNSRecord.parse(wire).rr[0].rdata), '10.0.0.1')

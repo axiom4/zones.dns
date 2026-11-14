@@ -620,6 +620,12 @@ paths:
           type: string
         description: Text contained in the answer records, e.g. an IP address
       - in: query
+        name: before
+        schema:
+          type: integer
+        description: 'Id of the last row already shown: the next rows after it (instead
+          of offset)'
+      - in: query
         name: client
         schema:
           type: string

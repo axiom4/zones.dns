@@ -176,14 +176,15 @@ export class LogsPage implements OnDestroy {
         const r = await this.api.invoke(logsGroupedList, { ...this.filters(), by: 'domain', ordering: this.ordering, limit: PAGE, offset: this.groups().length });
         this.groups.update(x => [...x, ...r.results]); this.gCount.set(r.count);
       } else {
-        const r = await this.api.invoke(logsList, { ...this.filters(), limit: PAGE, offset: this.rows().length });
+        const r = await this.api.invoke(logsList, { ...this.filters(), limit: PAGE, before: this.rows().at(-1)?.id });
         this.rows.update(x => [...x, ...r.results]); this.count.set(r.count);
       }
     });
   }
 
-  private async fetchSub(name: string, offset: number, limit: number) {
-    const r = await this.api.invoke(logsList, { ...this.filters(), q: undefined, name, limit, offset });
+  /** before: id of the last row already shown (keyset: rows logged meanwhile do not shift the next page). */
+  private async fetchSub(name: string, before: number | undefined, limit: number) {
+    const r = await this.api.invoke(logsList, { ...this.filters(), q: undefined, name, limit, before });
     return { rows: r.results, count: r.count };
   }
 
@@ -210,7 +211,7 @@ export class LogsPage implements OnDestroy {
       this.names.update(o => { const { [g.name]: _, ...rest } = o; return rest; });
       return;
     }
-    return this.ui.run(async () => { const s = await this.fetchSub(g.name, 0, SUB); this.names.update(o => ({ ...o, [g.name]: s })); });
+    return this.ui.run(async () => { const s = await this.fetchSub(g.name, undefined, SUB); this.names.update(o => ({ ...o, [g.name]: s })); });
   }
 
   moreSubs(g: QueryLogGroup) {
@@ -224,7 +225,7 @@ export class LogsPage implements OnDestroy {
   moreDirect(g: QueryLogGroup) {
     return this.ui.run(async () => {
       const cur = this.domains()[g.name];
-      const r = await this.api.invoke(logsList, { ...this.filters(), q: undefined, domain: g.name, limit: SUB, offset: cur.rows.length });
+      const r = await this.api.invoke(logsList, { ...this.filters(), q: undefined, domain: g.name, limit: SUB, before: cur.rows.at(-1)?.id });
       this.domains.update(o => ({ ...o, [g.name]: { ...cur, rows: [...cur.rows, ...r.results], count: r.count } }));
     });
   }
@@ -232,7 +233,7 @@ export class LogsPage implements OnDestroy {
   moreOf(name: string) {
     return this.ui.run(async () => {
       const cur = this.names()[name];
-      const s = await this.fetchSub(name, cur.rows.length, SUB);
+      const s = await this.fetchSub(name, cur.rows.at(-1)?.id, SUB);
       this.names.update(o => ({ ...o, [name]: { rows: [...cur.rows, ...s.rows], count: s.count } }));
     });
   }

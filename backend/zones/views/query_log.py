@@ -22,6 +22,16 @@ class LogPagination(LimitOffsetPagination):
     default_limit = 50
     max_limit = 500
 
+    def paginate_queryset(self, queryset, request, view=None):
+        """The list with before=<id>: the rows after that one (keyset). A deep page reads only its rows, not every row before it, and rows that
+        arrive meanwhile do not shift the next page (with offsets they came back twice). count stays the total of the filters."""
+        before = request.query_params.get('before', '')
+        if not (before.isdigit() and getattr(view, 'action', None) == 'list'):
+            return super().paginate_queryset(queryset, request, view)
+        self.request, self.limit, self.offset = request, self.get_limit(request), 0
+        self.count = self.get_count(queryset)
+        return list(after_row(queryset, int(before))[:self.limit])
+
     def get_count(self, queryset):
         fast = stat_count(self.request.query_params)
         if fast is not None:
@@ -33,7 +43,7 @@ class LogPagination(LimitOffsetPagination):
             q = queryset.order_by()
             q.query.annotations.clear()
         # the key is the request, not the SQL: 'hours' puts the current time in the SQL, so it would differ at every refresh
-        params = sorted((k, v) for k, v in self.request.query_params.items() if k not in ('limit', 'offset'))
+        params = sorted((k, v) for k, v in self.request.query_params.items() if k not in ('limit', 'offset', 'before'))
         key = 'qlog-count:' + hashlib.md5(repr((self.request.path, params)).encode()).hexdigest()
         n = cache.get(key)
         if n is None:
@@ -43,6 +53,14 @@ class LogPagination(LimitOffsetPagination):
 
 
 COUNT_TTL = 30
+
+
+def after_row(qs, before):
+    """The rows of qs (ordered -time, -id) that come after row `before`. The time range keeps the time indexes usable."""
+    t = QueryLog.objects.filter(pk=before).values_list('time', flat=True).first()
+    if t is None:  # that row was purged: everything left that is older by id
+        return qs.filter(id__lt=before)
+    return qs.filter(time__lte=t).exclude(time=t, id__gte=before)
 
 
 def stat_count(p):
@@ -86,7 +104,7 @@ FILTERS = [
 ]
 
 
-@extend_schema_view(list=extend_schema(parameters=FILTERS))
+@extend_schema_view(list=extend_schema(parameters=FILTERS + [OpenApiParameter('before', int, description='Id of the last row already shown: the next rows after it (instead of offset)')]))
 class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
     serializer_class = QueryLogSerializer
     pagination_class = LogPagination

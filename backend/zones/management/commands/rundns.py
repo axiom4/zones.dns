@@ -12,7 +12,7 @@ from zones.dnsd.resolver import Resolver
 from dnslib.server import DNSServer
 
 from zones.stats.logwriter import LogWriter
-from zones.dnsd.dnsserver import PooledTCPServer, PooledUDPServer
+from zones.dnsd.dnsserver import Handler, PooledTCPServer, PooledUDPServer, logger
 
 
 class Command(BaseCommand):
@@ -38,7 +38,7 @@ class Command(BaseCommand):
         r = Resolver(upstream, log=writer)
         for cls in (PooledUDPServer, PooledTCPServer):
             cls.workers = settings.DNS_WORKERS
-        servers = [DNSServer(r, port=port, address=address, tcp=t, server=PooledTCPServer if t else PooledUDPServer) for t in (False, True)]
+        servers = [DNSServer(r, port=port, address=address, tcp=t, logger=logger(), handler=Handler, server=PooledTCPServer if t else PooledUDPServer) for t in (False, True)]
         try:
             for s in servers:
                 s.server.warm(min(settings.DNS_WORKERS, 4))  # a few database connections ready from the first query
