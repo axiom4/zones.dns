@@ -43,7 +43,9 @@ export class GeoMap {
   wheel(e: WheelEvent) {
     e.preventDefault();
     const r = (e.currentTarget as SVGElement).getBoundingClientRect();
-    this.zoom(e.deltaY < 0 ? 1.25 : 1 / 1.25, (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
+    // in proportion to the scroll: a trackpad sends many small events, each was a whole 1.25x step. About 1.1x per mouse wheel notch (deltaY ~100)
+    const px = e.deltaY * (e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1);
+    this.zoom(Math.exp(-Math.max(-100, Math.min(100, px)) * 0.001), (e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height);
   }
   down(e: PointerEvent) { this.drag = { px: e.clientX, py: e.clientY, moved: false }; }
   move(e: PointerEvent) {
