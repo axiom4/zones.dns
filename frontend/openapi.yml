@@ -3428,6 +3428,12 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Count'
+        by_answer:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+          description: 'What the queries got back: address (an A/AAAA record: the
+            geolocation total), no_address, nxdomain, blocked, error'
         top_domains:
           type: array
           items:
@@ -3449,6 +3455,7 @@ components:
             $ref: '#/components/schemas/Bucket'
       required:
       - avg_ms
+      - by_answer
       - by_outcome
       - by_type
       - series

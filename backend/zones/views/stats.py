@@ -1,3 +1,4 @@
+from collections import Counter
 from datetime import timedelta, timezone as dt_timezone
 
 from django.core.cache import cache
@@ -11,13 +12,19 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..models import QueryLog, StatCount
-from ..stats.rollup import floor_hour
+from ..stats.rollup import answer_kind, floor_hour
 from ..serializers import StatsSerializer
 
 
 def _counts(qs, field, limit=None):
     rows = qs.values(field).annotate(count=Count('id')).order_by('-count')[:limit]
     return [{'name': r[field], 'count': r['count']} for r in rows]
+
+
+def _answers(qs):
+    # shortcut: reads the answers of every row, fine for the 2 hours the log is read for; a longer window reads the 'answer' counters
+    kinds = Counter(answer_kind(o, r, [a for a in ans if a['type'] in ('A', 'AAAA')]) for o, r, ans in qs.values_list('outcome', 'rcode', 'answers').iterator(chunk_size=5000))
+    return [{'name': k, 'count': n} for k, n in kinds.most_common()]
 
 
 def _from_log(start):
@@ -30,6 +37,7 @@ def _from_log(start):
         'avg_ms': (sum(r['ms'] or 0 for r in outcomes) / total) if total else 0,
         'by_outcome': [{'name': r['outcome'], 'count': r['count']} for r in outcomes],
         'by_type': _counts(qs, 'type'),
+        'by_answer': _answers(qs),
         'top_domains': _counts(qs, 'name', 10),
         'top_blocked': _counts(qs.filter(outcome='blocked'), 'name', 10),
         'top_clients': _counts(qs, 'client', 10),
@@ -51,6 +59,7 @@ def _from_counters(start):
         'avg_ms': (agg['ms'] / total) if total else 0,
         'by_outcome': top('outcome'),
         'by_type': top('type'),
+        'by_answer': top('answer'),
         'top_domains': top('name', 10),
         'top_blocked': top('blocked', 10),
         'top_clients': top('client', 10),

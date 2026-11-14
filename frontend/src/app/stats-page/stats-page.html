@@ -20,6 +20,7 @@
     <div class="tile"><b>{{ outcome('local') }}</b><span>From internal zones</span></div>
     <div class="tile"><b>{{ outcome('forwarded') }}</b><span>Forwarded</span></div>
     <div class="tile warn"><b>{{ outcome('blocked') }}</b><span>Blocked</span></div>
+    <div class="tile"><b>{{ outcome('error') }}</b><span>Errors</span></div>
     <div class="tile"><b>{{ st.avg_ms | number: '1.0-0' }} ms</b><span>Average time</span></div>
   </div>
 
@@ -39,6 +40,16 @@
         }
       </div>
     } @else { <p class="soft">No queries in this period.</p> }
+  </section>
+
+  <section class="panel">
+    <h3>Answers</h3>
+    @for (a of answers(); track a.name) {
+      <div class="row" [title]="a.hint">
+        <span class="bar" [class.warn]="a.name === 'blocked' || a.name === 'error'" [style.width.%]="share(a.count)"></span>
+        <span class="n">{{ a.label }}</span><span class="c">{{ a.count }} · {{ share(a.count) }}%</span>
+      </div>
+    } @empty { <p class="soft">No data.</p> }
   </section>
 
   <div class="grid2">

@@ -15,6 +15,20 @@ TOTAL_DIMS = ('outcome', 'type', 'client')  # what LogTotal counts
 _OUTCOME_IDX = {'local': 1, 'forwarded': 2, 'blocked': 3, 'error': 4}
 
 
+def answer_kind(outcome, rcode, ips):
+    """What a query got back, for the Answers panel of the statistics: address (an A/AAAA in the answer, what the geolocation page counts),
+    blocked, nxdomain, error (SERVFAIL, REFUSED, upstream failures), or no_address (NOERROR without A/AAAA: HTTPS, PTR, TXT, an AAAA with no IPv6...)."""
+    if ips:
+        return 'address'
+    if outcome == 'blocked':
+        return 'blocked'
+    if rcode == 'NXDOMAIN':
+        return 'nxdomain'
+    if outcome == 'error' or rcode not in ('', 'NOERROR'):
+        return 'error'
+    return 'no_address'
+
+
 def floor_hour(t):
     return t.astimezone(dt_timezone.utc).replace(minute=0, second=0, microsecond=0)
 
@@ -48,14 +62,14 @@ def add(entries):
     stats, geo, doms = {}, {}, {}
     for e in entries:
         hour = floor_hour(e.time)
-        dims = [('outcome', e.outcome), ('type', e.type), ('name', e.name), ('client', e.client)]
+        ips = list(dict.fromkeys(a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')))  # answer order: the first is the one used
+        dims = [('outcome', e.outcome), ('type', e.type), ('name', e.name), ('client', e.client), ('answer', answer_kind(e.outcome, e.rcode, ips))]
         if e.outcome == 'blocked':
             dims.append(('blocked', e.name))
         for dim, key in dims:
             s = stats.setdefault((dim, hour, key), [0, 0])
             s[0] += 1
             s[1] += e.ms
-        ips = list(dict.fromkeys(a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')))  # answer order: the first is the one used
         for i, ip in enumerate(ips):
             g = geo.setdefault((hour, e.domain, ip), [0, 0])
             g[0] += 1

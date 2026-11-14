@@ -5,6 +5,11 @@ import { Bucket } from '../models/bucket';
 import { Count } from '../models/count';
 export interface Stats {
   avg_ms: number;
+
+  /**
+   * What the queries got back: address (an A/AAAA record: the geolocation total), no_address, nxdomain, blocked, error
+   */
+  by_answer: Array<Count>;
   by_outcome: Array<Count>;
   by_type: Array<Count>;
   series: Array<Bucket>;

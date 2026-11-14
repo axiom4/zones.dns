@@ -1,6 +1,7 @@
 # Changelog
 
 ## Unreleased
+- Statistics: an *Answers* panel splits the queries of the period into *with an address* (the total of the geolocation page), *without an address* (HTTPS, PTR, TXT, an AAAA for a name without IPv6...), *name does not exist*, *blocked* and *failed*, with the share of each; an *Errors* tile next to *Blocked*. New hourly counter `answer` (API: `by_answer`). Hours saved before the update show as *not split yet* until `manage.py rebuild_stats` is run once.
 - Geolocation: when the period held hours saved both before and after the update to `GeoStat.first` (migration 0030 without `rebuild_stats`), the older hours counted 0, so the countries and the total were much smaller than the query log. Those hours now count every address, as the note on 0030 says; `rebuild_stats` still makes them exact.
 - DNS daemon: a UDP answer is packed once (it was packed to measure it, then again to send it), and dnslib no longer prints two lines per query to stdout (request and reply; only truncated answers and errors are printed now, the query log keeps every query).
 - Query log: *Load more* pages by the last row shown (`before=<id>`, keyset) instead of an offset: deep pages read only their own rows, and rows logged meanwhile no longer bring back rows already shown. `count` stays the total of the filters; `offset` still works.

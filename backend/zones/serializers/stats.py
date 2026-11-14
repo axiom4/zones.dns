@@ -17,6 +17,7 @@ class StatsSerializer(serializers.Serializer):
     avg_ms = serializers.FloatField()
     by_outcome = CountSerializer(many=True)
     by_type = CountSerializer(many=True)
+    by_answer = CountSerializer(many=True, help_text='What the queries got back: address (an A/AAAA record: the geolocation total), no_address, nxdomain, blocked, error')
     top_domains = CountSerializer(many=True)
     top_blocked = CountSerializer(many=True)
     top_clients = CountSerializer(many=True)

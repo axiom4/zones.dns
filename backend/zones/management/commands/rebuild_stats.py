@@ -10,7 +10,7 @@ class Command(BaseCommand):
     def handle(self, *a, **o):
         rollup.purge()
         batch, total = [], 0
-        for e in QueryLog.objects.only('time', 'name', 'domain', 'type', 'outcome', 'client', 'ms', 'answers').iterator(chunk_size=5000):
+        for e in QueryLog.objects.only('time', 'name', 'domain', 'type', 'outcome', 'client', 'ms', 'rcode', 'answers').iterator(chunk_size=5000):
             batch.append(e)
             if len(batch) >= 5000:
                 rollup.add(batch)

@@ -15,6 +15,16 @@ const GRAINS = {
   day: { name: 'day', floor: (d: Date) => { d.setHours(0, 0, 0, 0); return d; }, next: (d: Date) => { const n = new Date(d); n.setDate(n.getDate() + 1); return n; }, label: dm, tick: (_: Date, i: number, n: number) => n <= 10 || i % 3 === 0 },
 };
 
+/** The answer kinds of the statistics (rollup.answer_kind), in display order. */
+const ANSWERS: Record<string, { label: string; hint: string }> = {
+  address: { label: 'With an address', hint: 'An A/AAAA record in the answer: the total of the geolocation page' },
+  no_address: { label: 'Without an address', hint: 'NOERROR with no A/AAAA: HTTPS, PTR, TXT, SRV, an AAAA for a name without IPv6...' },
+  nxdomain: { label: 'Name does not exist', hint: 'NXDOMAIN from a zone or upstream (blocked names are counted apart)' },
+  blocked: { label: 'Blocked', hint: 'Blacklist, suspicious name or rate limit' },
+  error: { label: 'Failed', hint: 'SERVFAIL, REFUSED, upstream not answering' },
+  uncounted: { label: 'Not split yet', hint: 'Hours saved before this counter existed: manage.py rebuild_stats splits them' },
+};
+
 @Component({
   selector: 'app-stats-page',
   imports: [FormsModule, DecimalPipe],
@@ -69,6 +79,14 @@ export class StatsPage {
       this.done.update(s => new Set(s).add(name));
     });
   }
+  answers = computed(() => {
+    const st = this.stats();
+    if (!st?.total) return [];
+    const n = (k: string) => st.by_answer.find(c => c.name === k)?.count ?? 0;
+    const rest = st.total - st.by_answer.reduce((a, c) => a + c.count, 0);
+    return Object.entries(ANSWERS).map(([name, v]) => ({ name, ...v, count: name === 'uncounted' ? Math.max(rest, 0) : n(name) })).filter(a => a.count);
+  });
+  share(c: number) { const t = this.stats()?.total; return t ? Math.round((c / t) * 100) : 0; }
   outcome(name: string) { return this.stats()?.by_outcome.find(c => c.name === name)?.count ?? 0; }
   pct(c: number, list: { count: number }[]) { return Math.round((c / Math.max(...list.map(x => x.count), 1)) * 100); }
 }

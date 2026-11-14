@@ -1729,6 +1729,25 @@ class HotPathTests(TestCase):
             d = api.get('/api/geo/destinations/?hours=24').json()
         self.assertEqual(d['scanned'], 6)
 
+    def test_statistics_split_the_answers(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        from .stats import rollup
+        a = [{'name': 'a.example', 'type': 'A', 'value': '93.184.216.1', 'ttl': 60}]
+        mk = lambda name, outcome, rcode, answers=(), type='A': QueryLog.objects.create(name=name, domain='example', type=type, outcome=outcome, client='10.0.0.1', ms=1, rcode=rcode, answers=list(answers))
+        rollup.add([mk('a.example', 'forwarded', 'NOERROR', a), mk('a.example', 'forwarded', 'NOERROR', type='HTTPS'), mk('nx.example', 'forwarded', 'NXDOMAIN'),
+                    mk('ads.example', 'blocked', 'NXDOMAIN'), mk('down.example', 'error', 'SERVFAIL')])
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('st', is_staff=True))
+        want = {'address': 1, 'no_address': 1, 'nxdomain': 1, 'blocked': 1, 'error': 1}
+        for hours in (1, 24):  # from the log, then from the hourly counters: the same split
+            cache.delete(f'stats:{hours}:')
+            d = api.get(f'/api/stats/?hours={hours}').json()
+            self.assertEqual({c['name']: c['count'] for c in d['by_answer']}, want, hours)
+            self.assertEqual(sum(c['count'] for c in d['by_answer']), d['total'])
+
     def test_log_list_keyset_pages_do_not_repeat_rows(self):
         from datetime import timedelta
         from django.contrib.auth import get_user_model
