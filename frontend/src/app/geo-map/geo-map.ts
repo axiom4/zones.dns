@@ -68,14 +68,14 @@ export class GeoMap {
     const w = this.world();
     if (!w) return [];
     const q = new Map(this.countries().map(c => [c.country, c.queries]));
-    const max = Math.max(1, ...q.values());
+    const top = Math.log1p(Math.max(1, ...q.values()));  // logarithmic: a country with most of the traffic no longer leaves all the others pale
     return (feature(w, w.objects.countries) as any).features.map((f: any, i: number) => {
       const code = NUMERIC_TO_ALPHA2[String(f.id ?? '').padStart(3, '0')] ?? '';
       const queries = q.get(code) ?? 0;
       return {
         id: f.id ?? `x${i}`, code, queries, d: this.path(f) ?? '',
-        // darker the more queries point there; countries without traffic stay pale
-        fill: queries ? `color-mix(in srgb, var(--brand) ${25 + Math.round((queries / max) * 70)}%, #ece8ff)` : null,
+        // darker the more queries point there (logarithmic scale); countries without traffic stay pale
+        fill: queries ? `color-mix(in srgb, var(--brand) ${25 + Math.round((Math.log1p(queries) / top) * 70)}%, #ece8ff)` : null,
         title: `${f.properties?.name ?? countryName(code)}${queries ? ' · ' + queries + ' queries' : ''}`,
       };
     });
