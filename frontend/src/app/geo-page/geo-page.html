@@ -27,7 +27,7 @@
   }
 
   <div class="tiles">
-    <div class="tile"><b>{{ d.scanned }}</b><span>Answered queries</span></div>
+    <div class="tile"><b>{{ d.scanned }}</b><span title="Queries whose answer had at least one A/AAAA address: blocked, NXDOMAIN and answers without an address are not counted, so it is smaller than the total in Statistics">Queries answered with an address</span></div>
     <div class="tile"><b>{{ d.ips_total }}</b><span>Destination addresses</span></div>
     <div class="tile"><b>{{ abroad() }}</b><span>External countries</span></div>
     <div class="tile"><b>{{ externalShare() }}%</b><span>Queries to the outside</span></div>

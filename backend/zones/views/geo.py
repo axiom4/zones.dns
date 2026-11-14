@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import APIException, ValidationError
 
 from ..stats import geo, whois
-from ..models import GeoStat
+from ..models import GeoStat, StatCount
 from ..stats.rollup import floor_hour
 from ..serializers import DestinationsSerializer, GeoIpsResultSerializer, WhoisSerializer
 
@@ -89,6 +89,10 @@ def _compute(key, hours):
         for r in qs.values('domain', 'ip').annotate(c=Sum('n')).order_by().iterator(chunk_size=10000)
     ]
     out = geo.destinations(rows)
+    # the address pairs count a query once per address: the number of queries comes from its own counter (None before rebuild_stats: keep the pairs)
+    answered = StatCount.objects.filter(dim='answered', hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).aggregate(n=Sum('n'))['n']
+    if answered is not None:
+        out['scanned'] = answered
     try:
         cache.set(key, (time.time(), out), 86400)
     except Exception:

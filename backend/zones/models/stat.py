@@ -4,7 +4,8 @@ from django.db import models
 class StatCount(models.Model):
     """Hourly counters kept next to the query log, so the statistics read a few rows instead of scanning the log (see rollup.py).
 
-    dim says what key is: outcome, type, name, client, or blocked (names that were blocked). Times are UTC, whole hours.
+    dim says what key is: outcome, type, name, client, blocked (names that were blocked), or answered (key '': queries whose answer had an
+    A/AAAA address; GeoStat counts one per address). Times are UTC, whole hours.
     """
     dim = models.CharField(max_length=10)
     hour = models.DateTimeField()

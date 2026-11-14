@@ -56,8 +56,13 @@ def add(entries):
             s = stats.setdefault((dim, hour, key), [0, 0])
             s[0] += 1
             s[1] += e.ms
-        for ip in {a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')}:
+        ips = {a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')}
+        for ip in ips:
             geo[(hour, e.domain, ip)] += 1
+        if ips:  # queries answered with at least one address: GeoStat counts one per address, so its sum is larger
+            s = stats.setdefault(('answered', hour, ''), [0, 0])
+            s[0] += 1
+            s[1] += e.ms
         d = doms.setdefault((hour, e.domain), [0, 0, 0, 0, 0, 0])
         d[0] += 1
         if idx := _OUTCOME_IDX.get(e.outcome):

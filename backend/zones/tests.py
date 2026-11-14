@@ -1698,3 +1698,19 @@ class HotPathTests(TestCase):
         res = api.get('/api/logs/grouped/?by=name&ordering=count&hours=24')
         self.assertEqual(res.status_code, 200)
         self.assertEqual([(g['name'], g['count']) for g in res.json()['results']], [('a.example.com', 2), ('b.example.com', 1)])
+
+    def test_geolocation_counts_queries_not_addresses(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        from .stats import rollup
+        four = [{'name': 'cdn.example.com', 'type': 'A', 'value': f'93.184.216.{i}', 'ttl': 60} for i in range(4)]
+        rows = [QueryLog.objects.create(name='cdn.example.com', domain='example.com', type='A', outcome='forwarded', client='10.0.0.1', ms=1, answers=four),
+                QueryLog.objects.create(name='nx.example.com', domain='example.com', type='A', outcome='forwarded', client='10.0.0.1', ms=1, answers=[])]
+        rollup.add(rows)
+        cache.delete('geo-dest-24')
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('geo', is_staff=True))
+        with override_settings(GEOIP_ONLINE_FALLBACK=False):
+            self.assertEqual(api.get('/api/geo/destinations/?hours=24').json()['scanned'], 1)  # one query with an address, not four
