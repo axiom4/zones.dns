@@ -78,7 +78,7 @@ export class LogsPage implements OnDestroy {
   countryName = countryName;
   clearCountry() {
     this.country = '';
-    this.router.navigate([], { queryParams: { country: null }, queryParamsHandling: 'merge', replaceUrl: true });  // a reload or a shared link no longer brings the filter back
+    this.router.navigate([], { queryParams: { country: null, hours: null }, queryParamsHandling: 'merge', replaceUrl: true });  // a reload or a shared link no longer brings the filter back
     this.reset();
   }
 
