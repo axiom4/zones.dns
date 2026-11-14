@@ -31,7 +31,7 @@ def locate(ips, budget=150):
     local = {ip: geoip.lookup(ip) for ip in public}
     # the DNS fallback is needed when the local data lacks the country or the network
     need = [ip for ip in public if settings.GEOIP_ONLINE_FALLBACK and not (local[ip].get('country') and local[ip].get('asn'))]
-    cached = {g.ip: g for g in IpGeo.objects.filter(ip__in=need)}
+    cached = {g.ip: g for i in range(0, len(need), 5000) for g in IpGeo.objects.filter(ip__in=need[i:i + 5000])}  # chunks: SQLite caps the parameters of one query
     now, todo = timezone.now(), []
     for ip in need:
         g = cached.get(ip)
@@ -64,13 +64,35 @@ def locate(ips, budget=150):
 
 def country_domains(code, hours):
     """Registrable domains that had an answer pointing to country `code` (PRIV = private addresses, ?? = unknown) in the last `hours`.
-    Same data as the geolocation page. shortcut: a domain also answered from other countries is listed whole; at most 5000 domains."""
+    Same data as the geolocation page. shortcut: a domain also answered from other countries is listed whole; at most 5000 domains (the most
+    asked), and the list is remembered COUNTRY_TTL seconds: the live log asks for it at every refresh."""
+    from django.core.cache import cache
+    from django.db.models import Sum
     from ..models import GeoStat
     from .rollup import floor_hour
-    pairs = set(GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values_list('domain', 'ip').distinct())
+    key = f'geo-country-domains:{code}:{hours}'
+    try:
+        if (hit := cache.get(key)) is not None:
+            return hit
+    except Exception:
+        pass
+    rows = GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).values_list('domain', 'ip').annotate(n=Sum('n'))
+    pairs = {(d, ip): n for d, ip, n in rows}
     found, _ = locate({ip for _, ip in pairs}, budget=0)  # only what is already known: no network lookups while listing the log
     want = lambda g: (g['private'] if code == 'PRIV' else not g['private'] and (g['country'] or '??') == code)
-    return sorted({d for d, ip in pairs if d and ip in found and want(found[ip])})
+    asked = Counter()
+    for (d, ip), n in pairs.items():
+        if d and ip in found and want(found[ip]):
+            asked[d] += n
+    out = sorted(d for d, _ in asked.most_common(5000))
+    try:
+        cache.set(key, out, COUNTRY_TTL)
+    except Exception:
+        pass
+    return out
+
+
+COUNTRY_TTL = 60
 
 
 def destinations(rows):

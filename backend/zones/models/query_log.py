@@ -7,7 +7,7 @@ class QueryLog(models.Model):
 
     time = models.DateTimeField(default=timezone.now, editable=False, db_index=True)  # set when the query arrives (the row may be saved a moment later)
     name = models.CharField(max_length=253, db_index=True)
-    domain = models.CharField(max_length=253, db_index=True, default='')  # registrable domain of name
+    domain = models.CharField(max_length=253, default='')  # registrable domain of name; filtered through qlog_domain_time (its first column)
     type = models.CharField(max_length=10)
     outcome = models.CharField(max_length=10, choices=OUTCOMES)
     client = models.CharField(max_length=45)

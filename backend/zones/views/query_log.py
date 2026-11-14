@@ -165,7 +165,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             if p.get('hours', '').isdigit():
                 s_qs = s_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(p['hours']))))
             if s_qs.exists():
-                ranked = s_qs.values(name=models_F('key') if False else 'key').annotate(sort_val=Sum('n')).order_by('-sort_val', 'key')
+                ranked = s_qs.values('key').annotate(sort_val=Sum('n')).order_by('-sort_val', 'key')
                 page_keys = [r['key'] for r in self.paginate_queryset(ranked)]
                 if not page_keys:
                     return self.get_paginated_response([])

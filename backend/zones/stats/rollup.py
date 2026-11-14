@@ -7,7 +7,7 @@ from collections import Counter
 from datetime import timezone as dt_timezone
 
 from django.db import connection, transaction
-from django.db.models import F, Sum, Value
+from django.db.models import Exists, F, OuterRef, Subquery, Sum, Value
 from django.db.models.functions import Greatest
 
 from ..models import DomainStat, GeoStat, LogTotal, StatCount
@@ -74,9 +74,10 @@ def purge(cutoff=None):
     if not cutoff:
         LogTotal.objects.all().delete()
     else:
-        old = StatCount.objects.filter(dim__in=TOTAL_DIMS, hour__lt=floor_hour(cutoff))
-        for r in old.values('dim', 'key').annotate(n=Sum('n')):
-            LogTotal.objects.filter(dim=r['dim'], key=r['key']).update(n=Greatest(F('n') - Value(r['n']), Value(0)))
+        # one UPDATE for every total (thousands of clients were one UPDATE each); a decrement, not a rebuild, so batches counted meanwhile are kept
+        old = StatCount.objects.filter(dim=OuterRef('dim'), key=OuterRef('key'), hour__lt=floor_hour(cutoff))
+        gone = old.values('dim', 'key').annotate(s=Sum('n')).values('s')
+        LogTotal.objects.filter(dim__in=TOTAL_DIMS).filter(Exists(old)).update(n=Greatest(F('n') - Subquery(gone), Value(0)))
     for model in (StatCount, GeoStat, DomainStat):
         qs = model.objects.filter(hour__lt=floor_hour(cutoff)) if cutoff else model.objects.all()
         qs.delete()

@@ -89,7 +89,8 @@ class StatsView(APIView):
         data = (_from_log if step == 60 else _from_counters)(start)
         data['step'] = step
         try:
-            cache.set(key, data, 30)  # shortcut: numbers up to 30 s old, to spare the repeated full scans of the log; lower it if that matters
+            # shortcut: numbers up to 30 s old (5 min for periods over a day, which read the hourly counters of every name), to spare the repeated scans
+            cache.set(key, data, 30 if now - start <= timedelta(hours=24) else 300)
         except Exception:
             pass
         return Response(data)

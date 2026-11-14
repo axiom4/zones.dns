@@ -1631,3 +1631,70 @@ class SecurityAndProtocolHardeningTests(TestCase):
 
 
 
+
+
+class HotPathTests(TestCase):
+    """What the DNS daemon does per query once warm, and the API paths that used to be slow."""
+
+    def setUp(self):
+        resolver._data = None
+        resolver._blocked.clear()
+
+    @override_settings(DHCP=False, DNS_CACHE=False, DNS_DNSSEC=False, SUSPICIOUS_MODE='off', DNS_RATE_LIMIT=0)
+    def test_warm_forwarded_query_reads_no_database(self):
+        from unittest import mock
+        Zone.objects.create(name='lan')
+        r = Resolver('127.0.0.1:9', log=SimpleNamespace(add=lambda e: None))
+        h = SimpleNamespace(client_address=('127.0.0.1', 0))
+        send = lambda pkt, *a, **k: pkt.reply().pack()
+        with mock.patch.object(DNSRecord, 'send', new=send):
+            r.resolve(DNSRecord.question('www.example.com', 'A'), h)  # loads the data, asks the blacklist once
+            with self.assertNumQueries(0):  # no Setting read for the DHCP names, no ping, no blacklist query
+                r.resolve(DNSRecord.question('www.example.com', 'A'), h)
+
+    def test_longest_zone_wins(self):
+        Zone.objects.create(name='lan')
+        z = Zone.objects.create(name='b.lan')
+        Record.objects.create(zone=z, name='a', type='A', value='10.0.0.9')
+        self.assertEqual(resolver._zone_of('a.b.lan', resolver._snapshot()[0]), ('b.lan', 'a'))
+        self.assertEqual(resolver._zone_of('b.lan', resolver._snapshot()[0]), ('b.lan', '@'))
+        self.assertEqual(resolver._zone_of('x.lan', resolver._snapshot()[0]), ('lan', 'x'))
+        self.assertIsNone(resolver._zone_of('example.com', resolver._snapshot()[0]))
+        self.assertEqual(resolver.lookup('a.b.lan', 'A')[0][0].value, '10.0.0.9')
+
+    def test_blacklist_memory_drops_the_least_recently_used(self):
+        from unittest import mock
+        with mock.patch.object(resolver, '_BLOCKED_MAX', 2):
+            resolver._remember_blocked('a', None)
+            resolver._remember_blocked('b', None)
+            resolver._blocked.move_to_end('a')  # 'a' asked again
+            resolver._remember_blocked('c', None)
+        self.assertEqual(list(resolver._blocked), ['a', 'c'])
+
+    def test_dnskeys_are_fetched_once_per_ttl(self):
+        from unittest import mock
+        from dnslib import DNSKEY, RR
+        r = Resolver('127.0.0.1:9', log=None)
+        key = RR('example.com.', QTYPE.DNSKEY, rdata=DNSKEY(257, 3, 13, b'\x01' * 64), ttl=300)
+
+        def ask(q, validate_dnssec=True):
+            rep = q.reply()
+            rep.add_answer(key)
+            return rep, 'x'
+        with mock.patch.object(r, 'ask_upstream', side_effect=ask) as up:
+            self.assertEqual(len(r._fetch_dnskeys('example.com')), 1)
+            self.assertEqual(len(r._fetch_dnskeys('example.com')), 1)
+        self.assertEqual(up.call_count, 1)
+
+    def test_grouped_by_name_from_counters(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        from .models import QueryLog
+        from .stats import rollup
+        rows = [QueryLog.objects.create(name=n, domain='example.com', type='A', outcome='forwarded', client='10.0.0.1', ms=1) for n in ('a.example.com', 'a.example.com', 'b.example.com')]
+        rollup.add(rows)
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('g', is_staff=True))
+        res = api.get('/api/logs/grouped/?by=name&ordering=count&hours=24')
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual([(g['name'], g['count']) for g in res.json()['results']], [('a.example.com', 2), ('b.example.com', 1)])

@@ -2,7 +2,7 @@ import re
 import secrets
 import threading
 import time
-from collections import defaultdict
+from collections import OrderedDict, defaultdict
 from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
@@ -26,7 +26,7 @@ from ..models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, DataVersion, 
 # counter in the database at most once per DNS_DATA_CHECK seconds.
 # DNS_DATA_TTL is the upper bound for a copy, in case a change slipped through without raising the counter (raw SQL, a restored backup).
 _data_lock = threading.Lock()
-_data = None  # (zone names longest first, {(zone name, record name): [Record]}, {host name: [(address, ttl)]})
+_data = None  # (frozenset of zone names, {(zone name, record name): [Record]}, {host name: [(address, ttl)]})
 _data_at = 0.0  # when the copy was made
 _data_checked = 0.0  # when the counter was last read
 _data_version = None
@@ -34,7 +34,12 @@ _ents = frozenset()  # (zone name, relative empty-non-terminal name) precomputed
 _off_sources = frozenset()  # sources whose master switch is off (Setting): 'manual' = Personal blocks, 'list' = Public lists; read at every reload
 _regexes = ()  # enabled personal pattern entries: (compiled pattern, pattern text, allow)
 _blocked_lock = threading.Lock()
-_blocked = {}  # name -> (blacklist entry, where it came from) or None; emptied when the data changes
+_blocked = OrderedDict()  # name -> (blacklist entry, where it came from) or None; least recently used first; emptied when the data changes
+_BLOCKED_MAX = 20000
+_dhcp_names = (False, '')  # dhcp._name_cfg() read at every reload: Setting rows raise DataVersion too, so no query per DNS query
+_SHARED_CHECK = 0.2  # with Redis: seconds between looks at the counter (one query asks _snapshot() several times)
+_db_tls = threading.local()
+_DB_IDLE_CHECK = 30  # seconds a worker's connection may sit idle before it is pinged again
 _NONE = ''  # a name that is not blocked, as stored in Redis (a missing key means "not asked yet")
 
 
@@ -55,7 +60,7 @@ def _build():
 
 
 def _load():
-    global _data, _data_at, _data_version, _ents, _off_sources, _regexes
+    global _data, _data_at, _data_version, _ents, _off_sources, _regexes, _dhcp_names
     version = DataVersion.version()  # read before the data: a change during the load makes the next check reload again
     plain = None
     if _shared():
@@ -73,10 +78,11 @@ def _load():
     names, plain_recs, hosts = plain
     by_name = {key: [Record(name=key[1], type=t, value=v, ttl=ttl, zone=Zone(name=key[0])) for t, v, ttl in rows] for key, rows in plain_recs.items()}
     _ents = frozenset((z, '.'.join(pts[i:])) for z, n in by_name if '.' in n for pts in (n.split('.'),) for i in range(1, len(pts)))
-    _data, _data_at, _data_version = (sorted(names, key=len, reverse=True), by_name, hosts), time.monotonic(), version
+    _data, _data_at, _data_version = (frozenset(names), by_name, hosts), time.monotonic(), version
     st = dict(Setting.objects.filter(key__in=[PERSONAL_BLOCKS, PUBLIC_LISTS]).values_list('key', 'value'))  # one query for the switches
     _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if st.get(key) == 'false')
     _regexes = () if 'manual' in _off_sources else _load_regexes()
+    _dhcp_names = dhcp._name_cfg()
     with _blocked_lock:
         _blocked.clear()
 
@@ -99,7 +105,7 @@ def _load_regexes():
 def _snapshot():
     global _data_checked
     now = time.monotonic()
-    if _data is not None and now - _data_checked < (0 if _shared() else settings.DNS_DATA_CHECK):  # with Redis: look at every query
+    if _data is not None and now - _data_checked < (min(_SHARED_CHECK, settings.DNS_DATA_CHECK) if _shared() else settings.DNS_DATA_CHECK):
         return _data
     if _data_lock.acquire(blocking=_data is None):  # while one thread checks or reloads, the others keep using the current copy
         try:
@@ -149,15 +155,24 @@ def _closest_wildcard(zname, rel, by_name):
     return by_name.get((zname, '*'), [])
 
 
+def _zone_of(q, zones):
+    """(longest internal zone that contains q, name relative to it ('@' = apex)) or None: one set lookup per label, not one per zone."""
+    labels = q.split('.')
+    for i in range(len(labels)):
+        zname = '.'.join(labels[i:])
+        if zname in zones:
+            return zname, ('.'.join(labels[:i]) or '@')
+    return None
+
+
 def has_zone_node(qname):
     """True when qname is an explicit record node or empty non-terminal inside the longest matching internal zone."""
     q = qname.rstrip('.').lower()
     zones, by_name, _ = _snapshot()
-    for zname in zones:
-        if q == zname or q.endswith('.' + zname):
-            rel = '@' if q == zname else q[: -len(zname) - 1]
-            return rel == '@' or (zname, rel) in by_name or (zname, rel) in _ents
-    return False
+    if not (hit := _zone_of(q, zones)):
+        return False
+    zname, rel = hit
+    return rel == '@' or (zname, rel) in by_name or (zname, rel) in _ents
 
 
 def lookup(qname, qtype):
@@ -167,18 +182,17 @@ def lookup(qname, qtype):
     """
     q = qname.rstrip('.').lower()
     zones, by_name, _ = _snapshot()
-    for zname in zones:
-        if q == zname or q.endswith('.' + zname):
-            rel = '@' if q == zname else q[: -len(zname) - 1]
-            recs, wild = by_name.get((zname, rel), []), False
-            if not recs and rel != '@':
-                recs = _closest_wildcard(zname, rel, by_name)
-                wild = bool(recs)
-            if not recs:
-                return None  # zone is ours but name unknown: ask upstream
-            hit = recs if qtype == 'ANY' else ([r for r in recs if r.type == qtype] or [r for r in recs if r.type == 'CNAME'])
-            return (hit, wild) if hit else None  # no record of this type: ask upstream too
-    return None
+    if not (found := _zone_of(q, zones)):
+        return None
+    zname, rel = found
+    recs, wild = by_name.get((zname, rel), []), False
+    if not recs and rel != '@':
+        recs = _closest_wildcard(zname, rel, by_name)
+        wild = bool(recs)
+    if not recs:
+        return None  # zone is ours but name unknown: ask upstream
+    hit = recs if qtype == 'ANY' else ([r for r in recs if r.type == qtype] or [r for r in recs if r.type == 'CNAME'])
+    return (hit, wild) if hit else None  # no record of this type: ask upstream too
 
 
 def authority(qname):
@@ -186,14 +200,13 @@ def authority(qname):
     negative answer (RFC 2308), not an upstream lookup. exists is False only for a name with no records, no wildcard and nothing below it."""
     q = qname.rstrip('.').lower()
     zones, by_name, _ = _snapshot()
-    for zname in zones:
-        if q == zname or q.endswith('.' + zname):
-            rel = '@' if q == zname else q[: -len(zname) - 1]
-            if rel == '@' or (zname, rel) in by_name or _closest_wildcard(zname, rel, by_name):
-                return zname, True
-            # empty non-terminal: a.b.zone exists, so b.zone exists (without data)
-            return zname, (zname, rel) in _ents
-    return None
+    if not (found := _zone_of(q, zones)):
+        return None
+    zname, rel = found
+    if rel == '@' or (zname, rel) in by_name or _closest_wildcard(zname, rel, by_name):
+        return zname, True
+    # empty non-terminal: a.b.zone exists, so b.zone exists (without data)
+    return zname, (zname, rel) in _ents
 
 
 # RFC 6303: reverse zones of addresses that mean nothing outside the local network. Nobody else can answer for them, so they are never sent upstream.
@@ -239,6 +252,7 @@ def blocked_entry(qname):
     _snapshot()  # notices a change and empties _blocked
     with _blocked_lock:
         if qname in _blocked:
+            _blocked.move_to_end(qname)
             return _blocked[qname]
     if _shared():
         try:
@@ -246,8 +260,7 @@ def blocked_entry(qname):
             parts = stored.split('\t', 1) if stored else []
             if stored is not None and (not stored or len(parts) == 2):  # an entry without the tab is the old name-only format: ask the database
                 hit = tuple(parts) or None
-                with _blocked_lock:
-                    _blocked[qname] = hit
+                _remember_blocked(qname, hit)
                 return hit
         except Exception:
             pass
@@ -266,16 +279,29 @@ def blocked_entry(qname):
         hit = (qname, f'pattern {pats[0][0]}')  # the name asked for, not the pattern: it becomes the owner of the SOA of the answer
     else:
         hit = None
-    with _blocked_lock:
-        if len(_blocked) > 20000:  # bounded: names that were asked once are the bulk
-            _blocked.clear()
-        _blocked[qname] = hit
+    _remember_blocked(qname, hit)
     if _shared():
         try:
             cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit) if hit else _NONE, settings.DNS_DATA_TTL)
         except Exception:
             pass
     return hit
+
+
+def _remember_blocked(qname, hit):
+    with _blocked_lock:
+        _blocked[qname] = hit
+        if len(_blocked) > _BLOCKED_MAX:  # bounded LRU: names asked once are the bulk and go first, the frequent ones stay
+            _blocked.popitem(last=False)
+
+
+def _db_check():
+    """Ping the database only when this worker's connection has been idle a while: a ping per query doubled the round trips.
+    A connection that breaks between pings fails one query, then close_if_unusable_or_obsolete() replaces it."""
+    now = time.monotonic()
+    if now - getattr(_db_tls, 'used', 0.0) > _DB_IDLE_CHECK:
+        connection.close_if_health_check_failed()
+    _db_tls.used = now
 
 
 def blocked_match(qname):
@@ -365,11 +391,12 @@ class Resolver(BaseResolver):
         self.down = {}  # upstream -> monotonic time until which it is skipped
         self._prefetch_pool = ThreadPoolExecutor(max_workers=settings.DNS_PREFETCH_WORKERS, thread_name_prefix='dns-prefetch')
         self._prefetch_room = threading.BoundedSemaphore(settings.DNS_PREFETCH_WORKERS * 8)
+        self._dnskeys = {}  # signer zone -> (monotonic expiry, [DNSKEY rr])
 
     def resolve(self, request, handler):
         if (bad := early_error(request)) is not None:
             return bad
-        connection.close_if_health_check_failed()  # a connection the database dropped while idle is replaced before use
+        _db_check()  # a connection the database dropped while idle is replaced before use
         if request.header.opcode == OPCODE.UPDATE:
             try:
                 return ddns.handle_update(request, handler.client_address[0])
@@ -384,7 +411,7 @@ class Resolver(BaseResolver):
             else:
                 hosts = static_hosts(qname)
                 found = None if hosts else lookup(qname, qtype)
-                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and dhcp.lease_hosts(qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
+                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and dhcp.lease_hosts(qname, _dhcp_names)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
                 if leased:
                     hosts, found = leased, None
                 if hosts:
@@ -433,7 +460,7 @@ class Resolver(BaseResolver):
                             reply.add_answer(rr)
                     else:
                         reply = negative(request, 'resolver.arpa' if qname.endswith('.resolver.arpa') else qname, False)
-                elif qtype == 'PTR' and (ptr := dhcp.lease_ptr(qname)):  # the reverse name of a DHCP client that has a name
+                elif qtype == 'PTR' and (ptr := dhcp.lease_ptr(qname, _dhcp_names)):  # the reverse name of a DHCP client that has a name
                     outcome, via, reply = 'local', 'DHCP lease', request.reply()
                     reply.header.aa = 1
                     reply.add_answer(RR(request.q.qname, QTYPE.PTR, rdata=PTR(ptr + '.'), ttl=60))
@@ -561,10 +588,20 @@ class Resolver(BaseResolver):
         return host, 53, ':' in host
 
     def _fetch_dnskeys(self, zone_name):
+        """DNSKEYs of a signer zone, kept for their TTL (at most an hour): without this every validated answer cost a second upstream query."""
+        now = time.monotonic()
+        hit = self._dnskeys.get(zone_name)
+        if hit and hit[0] > now:
+            return hit[1]
         q = DNSRecord.question(zone_name, 'DNSKEY')
         q.add_ar(EDNS0(flags='do', udp_len=1232))
         rep, _ = self.ask_upstream(q, validate_dnssec=False)
-        return [rr for rr in rep.rr if rr.rtype == QTYPE.DNSKEY]
+        keys = [rr for rr in rep.rr if rr.rtype == QTYPE.DNSKEY]
+        if keys:  # no keys (upstream failed): not remembered, asked again next time
+            if len(self._dnskeys) > 1000:
+                self._dnskeys.clear()
+            self._dnskeys[zone_name] = (now + min(3600, max(30, min(rr.ttl for rr in keys))), keys)
+        return keys
 
     def ask_upstream(self, request, validate_dnssec=True):
         """(reply, upstream that answered) or (SERVFAIL reply, None). Tries the upstreams in order; one that failed is skipped for

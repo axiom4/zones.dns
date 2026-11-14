@@ -564,9 +564,10 @@ def _name_cfg():
     return bool(s.DHCP and s.DHCP_NAMES and s.DHCP_DOMAIN.strip('.')), s.DHCP_DOMAIN.strip('.').lower()
 
 
-def lease_hosts(qname):
-    """[(address, ttl)] of the client that called itself <label>.<DHCP_DOMAIN> and has a live lease, or None (the DNS server answers these names)."""
-    on, domain = _name_cfg()
+def lease_hosts(qname, cfg=None):
+    """[(address, ttl)] of the client that called itself <label>.<DHCP_DOMAIN> and has a live lease, or None (the DNS server answers these names).
+    cfg: _name_cfg() already read (the DNS daemon keeps it with its data copy), else read now."""
+    on, domain = cfg or _name_cfg()
     if not (on and qname.endswith('.' + domain)):
         return None
     label = qname[:-len(domain) - 1]
@@ -576,9 +577,9 @@ def lease_hosts(qname):
     return [(row.ip, 60)] if row else None
 
 
-def lease_ptr(qname):
+def lease_ptr(qname, cfg=None):
     """The name of the client that holds the address in a reverse name (d.c.b.a.in-addr.arpa), or None."""
-    on, domain = _name_cfg()
+    on, domain = cfg or _name_cfg()
     if not (on and qname.endswith('.in-addr.arpa')):
         return None
     parts = qname[:-len('.in-addr.arpa')].split('.')
