@@ -69,7 +69,7 @@ class GeoIpStatusSerializer(serializers.Serializer):
 
 
 class DestinationsSerializer(serializers.Serializer):
-    scanned = serializers.IntegerField(help_text='Answered queries examined')
+    scanned = serializers.IntegerField(help_text='Queries whose answer had at least one A/AAAA address (each query once, however many addresses)')
     ips_total = serializers.IntegerField()
     ips_located = serializers.IntegerField()
     pending = serializers.IntegerField(help_text='Addresses still to locate: ask again in a moment')

@@ -4,7 +4,7 @@
 export interface EncryptedPacket {
 
   /**
-   * Base64 encrypted packet (see zones/login_crypto.py)
+   * Base64 encrypted packet (see zones/security/login_crypto.py)
    */
   p: string;
 }

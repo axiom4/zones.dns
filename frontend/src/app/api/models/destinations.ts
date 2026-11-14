@@ -23,7 +23,7 @@ export interface Destinations {
   points: Array<DestinationPoint>;
 
   /**
-   * Answered queries examined
+   * Queries whose answer had at least one A/AAAA address (each query once, however many addresses)
    */
   scanned: number;
 }

@@ -54,6 +54,7 @@ export type { PaginatedQueryLogGroupList } from './models/paginated-query-log-gr
 export type { PaginatedQueryLogList } from './models/paginated-query-log-list';
 export type { PasskeyInfo } from './models/passkey-info';
 export type { PatchedBlockedDomainRequest } from './models/patched-blocked-domain-request';
+export type { PatchedDhcpSettingsRequest } from './models/patched-dhcp-settings-request';
 export type { PatchedPersonalSwitchRequest } from './models/patched-personal-switch-request';
 export type { PatchedRecordRequest } from './models/patched-record-request';
 export type { PatchedStaticHostRequest } from './models/patched-static-host-request';
