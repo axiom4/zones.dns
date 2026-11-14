@@ -96,15 +96,18 @@ COUNTRY_TTL = 60
 
 
 def destinations(rows):
-    """Aggregate answered A/AAAA addresses by country and network. rows: dicts with domain + answers + optional n (how many queries had them)."""
+    """Aggregate answered A/AAAA addresses by country and network. rows: (domain, ip, queries that had ip, queries that had it first).
+    A query is counted once, at its first address, so the countries and networks add up to the total. Counters written before GeoStat.first
+    existed have first = 0: then every address of an answer counts (manage.py rebuild_stats fills first)."""
+    rows = list(rows)
+    by_first = any(f for *_, f in rows)
     per_ip = {}
-    for r in rows:
-        for ip in {a['value'] for a in r['answers'] if a['type'] in ('A', 'AAAA')}:
-            d = per_ip.setdefault(ip, {'q': 0, 'domains': Counter()})
-            n = r.get('n', 1)
-            d['q'] += n
-            if r['domain']:
-                d['domains'][r['domain']] += n
+    for domain, ip, n, f in rows:
+        d = per_ip.setdefault(ip, {'q': 0, 'domains': Counter()})
+        w = f if by_first else n
+        d['q'] += w
+        if domain:
+            d['domains'][domain] += w  # a domain with no query first here still counts as one of the country's domains (weight 0)
     ranked = sorted(per_ip.items(), key=lambda kv: -kv[1]['q'])  # no cap: a cap hid the rare countries, so a longer period showed fewer
     geo, pending = locate([ip for ip, _ in ranked])
     countries, networks, points = {}, {}, {}
@@ -126,7 +129,7 @@ def destinations(rows):
             n['queries'] += d['q']; n['ips'] += 1
     by_country = sorted(({**c, 'domains': len(c['domains']), 'top_domains': [n for n, _ in c['domains'].most_common(6)], 'asns': sorted(c['asns'])[:6], 'cities': [n for n, _ in c['cities'].most_common(6)]} for c in countries.values()), key=lambda c: -c['queries'])
     return {
-        'scanned': sum(r.get('n', 1) for r in rows), 'ips_total': len(per_ip), 'ips_located': sum(c['ips'] for c in countries.values()), 'pending': pending,
+        'scanned': sum(d['q'] for d in per_ip.values()), 'ips_total': len(per_ip), 'ips_located': sum(c['ips'] for c in countries.values()), 'pending': pending,
         'countries': by_country, 'networks': sorted(networks.values(), key=lambda n: -n['queries'])[:15],
         'points': sorted(({**p, 'domains': [n for n, _ in p['domains'].most_common(4)]} for p in points.values()), key=lambda p: -p['queries'])[:1000],
         'geoip': geoip.status(),

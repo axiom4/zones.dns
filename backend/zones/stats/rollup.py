@@ -3,7 +3,6 @@
 The statistics and geolocation pages read these instead of grouping millions of log rows. Rows are added when the log rows are saved,
 so a crash between the two can lose a few counts; `manage.py rebuild_stats` recomputes everything from the log.
 """
-from collections import Counter
 from datetime import timezone as dt_timezone
 
 from django.db import connection, transaction
@@ -46,7 +45,7 @@ def _totals(stats):
 
 def add(entries):
     """Count a batch of saved QueryLog rows."""
-    stats, geo, doms = {}, Counter(), {}
+    stats, geo, doms = {}, {}, {}
     for e in entries:
         hour = floor_hour(e.time)
         dims = [('outcome', e.outcome), ('type', e.type), ('name', e.name), ('client', e.client)]
@@ -56,13 +55,11 @@ def add(entries):
             s = stats.setdefault((dim, hour, key), [0, 0])
             s[0] += 1
             s[1] += e.ms
-        ips = {a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')}
-        for ip in ips:
-            geo[(hour, e.domain, ip)] += 1
-        if ips:  # queries answered with at least one address: GeoStat counts one per address, so its sum is larger
-            s = stats.setdefault(('answered', hour, ''), [0, 0])
-            s[0] += 1
-            s[1] += e.ms
+        ips = list(dict.fromkeys(a['value'] for a in e.answers if a['type'] in ('A', 'AAAA')))  # answer order: the first is the one used
+        for i, ip in enumerate(ips):
+            g = geo.setdefault((hour, e.domain, ip), [0, 0])
+            g[0] += 1
+            g[1] += i == 0
         d = doms.setdefault((hour, e.domain), [0, 0, 0, 0, 0, 0])
         d[0] += 1
         if idx := _OUTCOME_IDX.get(e.outcome):
@@ -70,7 +67,7 @@ def add(entries):
         d[5] += e.ms
     _upsert(StatCount, ['dim', 'hour', 'key'], ['n', 'ms'], [(*k, *v) for k, v in stats.items()])
     _upsert(LogTotal, ['dim', 'key'], ['n'], [(d, k, v[0]) for (d, h, k), v in _totals(stats).items()])
-    _upsert(GeoStat, ['hour', 'domain', 'ip'], ['n'], [(*k, n) for k, n in geo.items()])
+    _upsert(GeoStat, ['hour', 'domain', 'ip'], ['n', 'first'], [(*k, *v) for k, v in geo.items()])
     _upsert(DomainStat, ['hour', 'domain'], ['n', 'local', 'forwarded', 'blocked', 'error', 'ms'], [(*k, *v) for k, v in doms.items()])
 
 

@@ -14,7 +14,7 @@ from rest_framework.views import APIView
 from rest_framework.exceptions import APIException, ValidationError
 
 from ..stats import geo, whois
-from ..models import GeoStat, StatCount
+from ..models import GeoStat
 from ..stats.rollup import floor_hour
 from ..serializers import DestinationsSerializer, GeoIpsResultSerializer, WhoisSerializer
 
@@ -84,15 +84,8 @@ def _compute(key, hours):
     # The hourly counters of answered addresses per domain; the window starts at the hour.
     # Streams all (domain, ip) pairs in one unsorted GROUP BY query so both address totals and domain names are exact.
     qs = GeoStat.objects.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours)))
-    rows = [
-        {'domain': r['domain'], 'answers': [{'type': 'A', 'value': r['ip']}], 'n': r['c']}
-        for r in qs.values('domain', 'ip').annotate(c=Sum('n')).order_by().iterator(chunk_size=10000)
-    ]
+    rows = [(r['domain'], r['ip'], r['c'], r['f']) for r in qs.values('domain', 'ip').annotate(c=Sum('n'), f=Sum('first')).order_by().iterator(chunk_size=10000)]
     out = geo.destinations(rows)
-    # the address pairs count a query once per address: the number of queries comes from its own counter (None before rebuild_stats: keep the pairs)
-    answered = StatCount.objects.filter(dim='answered', hour__gte=floor_hour(timezone.now() - timedelta(hours=hours))).aggregate(n=Sum('n'))['n']
-    if answered is not None:
-        out['scanned'] = answered
     try:
         cache.set(key, (time.time(), out), 86400)
     except Exception:

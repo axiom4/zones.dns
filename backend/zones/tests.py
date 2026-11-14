@@ -1713,4 +1713,9 @@ class HotPathTests(TestCase):
         api = APIClient()
         api.force_authenticate(get_user_model().objects.create_user('geo', is_staff=True))
         with override_settings(GEOIP_ONLINE_FALLBACK=False):
-            self.assertEqual(api.get('/api/geo/destinations/?hours=24').json()['scanned'], 1)  # one query with an address, not four
+            d = api.get('/api/geo/destinations/?hours=24').json()
+        self.assertEqual(d['scanned'], 1)  # one query with an address, not four
+        self.assertEqual(sum(c['queries'] for c in d['countries']), 1)  # the countries add up to the total
+        self.assertEqual(d['ips_total'], 4)
+        from .models import GeoStat
+        self.assertEqual(sorted(GeoStat.objects.values_list('ip', 'n', 'first')), [(f'93.184.216.{i}', 1, int(i == 0)) for i in range(4)])

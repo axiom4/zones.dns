@@ -4,8 +4,7 @@ from django.db import models
 class StatCount(models.Model):
     """Hourly counters kept next to the query log, so the statistics read a few rows instead of scanning the log (see rollup.py).
 
-    dim says what key is: outcome, type, name, client, blocked (names that were blocked), or answered (key '': queries whose answer had an
-    A/AAAA address; GeoStat counts one per address). Times are UTC, whole hours.
+    dim says what key is: outcome, type, name, client, or blocked (names that were blocked). Times are UTC, whole hours.
     """
     dim = models.CharField(max_length=10)
     hour = models.DateTimeField()
@@ -18,11 +17,14 @@ class StatCount(models.Model):
 
 
 class GeoStat(models.Model):
-    """Hourly count of the A/AAAA addresses answered for a registrable domain: what the geolocation page aggregates."""
+    """Hourly count of the A/AAAA addresses answered for a registrable domain: what the geolocation page aggregates.
+    n: queries whose answer had this address. first: queries whose answer had it first (the one the client connects to), so each query is counted
+    in exactly one row and the sums per country / network add up to the number of queries."""
     hour = models.DateTimeField()
     domain = models.CharField(max_length=253, blank=True)
     ip = models.CharField(max_length=45)
     n = models.PositiveBigIntegerField(default=0)
+    first = models.PositiveBigIntegerField(default=0)
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['hour', 'domain', 'ip'], name='unique_geo_stat')]

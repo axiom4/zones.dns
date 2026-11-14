@@ -124,7 +124,7 @@ python manage.py scan_trackers [--apply]       # heuristic: redirect + cookie (s
 
 ## Geolocation and map
 
-The **Geolocation** page counts the queries of the chosen period whose answer had an IPv4/IPv6 address (blocked names, NXDOMAIN and answers without an address are left out, so the number is smaller than the total in **Statistics**) and shows country, network and, with a local database, cities on the map. The numbers per country, network and city count the addresses: a query answered with four addresses counts four times there. After updating, `manage.py rebuild_stats` once fills the query counter for the hours already logged.
+The **Geolocation** page counts the queries of the chosen period whose answer had an IPv4/IPv6 address (blocked names, NXDOMAIN and answers without an address are left out, so the number is smaller than the total in **Statistics**) and shows country, network and, with a local database, cities on the map. Each query is counted once, in the country and network of the first address of its answer (the one the client connects to), so the countries add up to the total; *addresses* counts every address seen. After updating, `manage.py rebuild_stats` once recounts the hours already logged.
 By default country and network come from DNS (Team Cymru) and are cached; for **cities** and to work **fully offline** use a local GeoIP database in MaxMind format (`.mmdb`):
 
 - **DB-IP Lite** (CC BY 4.0, credit "IP Geolocation by DB-IP"; no account), published on GitHub by `sapics/ip-location-db`:
