@@ -1,7 +1,7 @@
 import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve, geoWhoisRetrieve } from '../api/functions';
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
@@ -31,6 +31,7 @@ export class LogsPage implements OnDestroy {
   private api = inject(Api);
   ui = inject(Ui);
   private route = inject(ActivatedRoute);
+  private router = inject(Router);
   private pg = viewChild.required<ElementRef<HTMLDialogElement>>('pg');
   PAGE = PAGE;
   types = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR', 'SOA', 'SRV', 'TXT', 'HTTPS'];
@@ -75,7 +76,11 @@ export class LogsPage implements OnDestroy {
     this.reset(); this.loadClients(); this.toggleLive();
   }
   countryName = countryName;
-  clearCountry() { this.country = ''; this.reset(); }
+  clearCountry() {
+    this.country = '';
+    this.router.navigate([], { queryParams: { country: null }, queryParamsHandling: 'merge', replaceUrl: true });  // a reload or a shared link no longer brings the filter back
+    this.reset();
+  }
 
   // ---- popup with the details of a query / group, fetched only when it is opened ----
   detail = signal<Detail | null>(null);
