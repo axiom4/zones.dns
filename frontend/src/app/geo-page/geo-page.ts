@@ -1,4 +1,4 @@
-import { Component, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
@@ -19,6 +19,12 @@ export class GeoPage implements OnDestroy {
   flag = flag; name = countryName;
   hours = 24;
   data = signal<Destinations | null>(null);
+  filter = signal('');
+  /** The countries matching the search: name, code, or one of their most requested domains. */
+  shown = computed(() => {
+    const cs = this.data()?.countries ?? [], f = this.filter().trim().toLowerCase();
+    return f ? cs.filter(c => c.country.toLowerCase() === f || countryName(c.country).toLowerCase().includes(f) || c.top_domains.some(n => n.includes(f))) : cs;
+  });
   private opened = signal(new Set<string>());
   private timer?: ReturnType<typeof setTimeout>;
   private retries = 0;
@@ -51,5 +57,7 @@ export class GeoPage implements OnDestroy {
     const total = cs.reduce((a, c) => a + c.queries, 0);
     return total ? Math.round((cs.filter(c => c.country !== 'PRIV').reduce((a, c) => a + c.queries, 0) / total) * 100) : 0;
   }
+  /** Share of the queries answered with an address, one decimal under 10%. */
+  share(q: number) { const t = this.data()?.scanned; if (!t) return 0; const p = (q / t) * 100; return p < 10 ? Math.round(p * 10) / 10 : Math.round(p); }
   pct(q: number, d: Destinations) { return Math.round((q / Math.max(...d.countries.map(c => c.queries), 1)) * 100); }
 }

@@ -28,7 +28,7 @@
 
   <div class="tiles">
     <div class="tile"><b>{{ d.scanned }}</b><span title="Queries whose answer had at least one A/AAAA address: blocked, NXDOMAIN and answers without an address are not counted, so it is smaller than the total in Statistics">Queries answered with an address</span></div>
-    <div class="tile"><b>{{ d.ips_total }}</b><span>Destination addresses</span></div>
+    <div class="tile"><b>{{ d.ips_total }}</b><span>Destination addresses@if (d.ips_located < d.ips_total) {<small class="soft"> · {{ d.ips_located }} located</small>}</span></div>
     <div class="tile"><b>{{ abroad() }}</b><span>External countries</span></div>
     <div class="tile"><b>{{ externalShare() }}%</b><span>Queries to the outside</span></div>
   </div>
@@ -40,14 +40,17 @@
   </section>
 
   <section class="panel">
-    <h3>By country</h3>
-    @for (c of d.countries; track c.country) {
+    <h3>By country <small class="soft">{{ d.countries.length }}</small></h3>
+    @if (d.countries.length > 8) {
+      <input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="cf" placeholder="Search country, code or domain" aria-label="Search countries" autocomplete="off">
+    }
+    @for (c of shown(); track c.country) {
       <div class="country" [id]="'c-' + c.country" [class.open]="isOpen(c.country)">
         <button class="crow" (click)="toggle(c.country)" [attr.aria-expanded]="isOpen(c.country)">
           <span class="flag" aria-hidden="true">{{ flag(c.country) }}</span>
           <span class="cname">{{ name(c.country) }}@if (c.country.length === 2 && c.country !== '??') {<span class="soft"> {{ c.country }}</span>}</span>
           <span class="cbar"><i [style.width.%]="pct(c.queries, d)"></i></span>
-          <span class="cnum"><b>{{ c.queries }}</b> queries</span>
+          <span class="cnum"><b>{{ c.queries }}</b> queries <span class="soft">· {{ share(c.queries) }}%</span></span>
           <span class="cnum soft">{{ c.ips }} addresses · {{ c.domains }} domains</span>
           <span class="chev2" aria-hidden="true">▸</span>
         </button>
@@ -68,19 +71,19 @@
         }
       </div>
     } @empty {
-      <p class="soft">No answers with addresses in the chosen period. Answers appear as clients make queries.</p>
+      <p class="soft">{{ d.countries.length ? 'No country matches the search.' : 'No answers with addresses in the chosen period. Answers appear as clients make queries.' }}</p>
     }
     <p class="soft note">The country is where the network is registered: for services with several sites (CDN, anycast) it may differ from the server's physical location.</p>
   </section>
 
   @if (d.networks.length) {
     <section class="panel">
-      <h3>Most contacted networks</h3>
+      <h3>Most contacted networks <small class="soft">top {{ d.networks.length }}</small></h3>
       <table class="anstable">
         <thead><tr><th>Network</th><th>Name</th><th>Country</th><th>Queries</th><th>Addresses</th></tr></thead>
         <tbody>
           @for (n of d.networks; track n.asn) {
-            <tr><td class="mono">{{ n.asn }}</td><td>{{ n.as_name }}</td><td>{{ flag(n.country) }} {{ name(n.country) }}</td><td>{{ n.queries }}</td><td>{{ n.ips }}</td></tr>
+            <tr><td class="mono">{{ n.asn }}</td><td>{{ n.as_name }}</td><td>{{ flag(n.country) }} {{ name(n.country) }}</td><td>{{ n.queries }} <span class="soft">· {{ share(n.queries) }}%</span></td><td>{{ n.ips }}</td></tr>
           }
         </tbody>
       </table>
