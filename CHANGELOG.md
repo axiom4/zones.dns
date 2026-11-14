@@ -1,6 +1,7 @@
 # Changelog
 
-## Unreleased
+## 1.1.0 — 2026-11-14
+- **Upgrading from 1.0.1:** run `manage.py migrate` (0018 to 0031; on SQLite 0029 rebuilds the log table, on PostgreSQL 0031 needs the `pg_trgm` extension and, on a partitioned log, locks writes while the index is built: pick a quiet time), then `manage.py rebuild_stats` once, then restart `rundns` and gunicorn.
 - Geolocation: each row of *Most contacted networks* has a *Log* link that opens the query log filtered by that network (new `asn` filter of `/api/logs/` and `/api/logs/grouped/`, like `country`: the domains with an answer address of the network in the period).
 - Geolocation: the map shades the countries on a logarithmic scale, so when one country has most of the traffic the others are still told apart.
 - Geolocation: every country and network shows its share of the queries answered with an address; the country list has a search (name, code or one of its domains) when there are more than 8; the *Destination addresses* tile says how many are located while some are still pending; the headings show how many countries and networks are listed.
