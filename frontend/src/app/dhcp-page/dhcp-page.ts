@@ -1,22 +1,24 @@
-import { Component, inject, signal } from '@angular/core';
+import { Component, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
 import { dhcpLeasesDestroy, dhcpReservationsList, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
 import { DhcpLease, DhcpSettings } from '../api/models';
 import { byIp } from '../lib/ip';
 import { DhcpReservations } from '../dhcp-reservations/dhcp-reservations';
+import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-dhcp-page',
-  imports: [FormsModule, DhcpReservations],
+  imports: [FormsModule, DhcpReservations, PingLive],
   templateUrl: './dhcp-page.html',
 })
 export class DhcpPage {
   private api = inject(Api);
   private ui = inject(Ui);
   ping = inject(Ping);
+  live = viewChild(PingLive);
   leases = signal<DhcpLease[]>([]);
   cfg = signal<DhcpSettings>({});
   saved = signal(false);
@@ -53,7 +55,8 @@ export class DhcpPage {
     this.reserve.set({ mac: l.client, ip: l.address, hostname: l.hostname });
     this.tab.set('reservations');
   }
-  pingOne(l: DhcpLease) { return this.ui.run(() => this.ping.run([l.address])); }
+  watch(l: DhcpLease) { this.live()?.open(l.address); }
+  pingOne(l: DhcpLease) { return this.ui.run(() => this.ping.once(l.address)); }
   pingAll() { return this.ui.run(() => this.ping.run(this.leases().filter(l => l.active && l.kind === 'address').map(l => l.address))); }
   isReserved(l: DhcpLease) { return this.reserved().has(l.client) || this.reserved().has(l.address); }
   when(iso: string) { return new Date(iso).toLocaleString(); }

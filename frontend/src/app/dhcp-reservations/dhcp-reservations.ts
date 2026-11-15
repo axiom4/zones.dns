@@ -4,6 +4,7 @@ import { Api } from '../api/api';
 import { dhcpVendorRetrieve, dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservationsExportRetrieve, dhcpReservationsImportCreate, dhcpReservationsList, dhcpReservationsPartialUpdate } from '../api/functions';
 import { DhcpReservation, DhcpReservationImportResult } from '../api/models';
 import { byIp } from '../lib/ip';
+import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
@@ -13,7 +14,7 @@ const empty = (): Draft => ({ mac: '', ip: '', hostname: '', note: '' });
 
 @Component({
   selector: 'app-dhcp-reservations',
-  imports: [FormsModule],
+  imports: [FormsModule, PingLive],
   templateUrl: './dhcp-reservations.html',
 })
 export class DhcpReservations {
@@ -21,6 +22,7 @@ export class DhcpReservations {
   private ui = inject(Ui);
   private stepUp = inject(StepUp);
   ping = inject(Ping);
+  live = viewChild.required(PingLive);
   vendorHint = signal('');
   /** A lease the user chose to make fixed: fills the form. */
   prefill = input<Partial<Draft> | null>(null);
@@ -50,7 +52,8 @@ export class DhcpReservations {
       await this.load();
     });
   }
-  pingOne(r: DhcpReservation) { return this.ui.run(() => this.ping.run([r.ip])); }
+  watch(r: DhcpReservation) { this.live().open(r.ip); }
+  pingOne(r: DhcpReservation) { return this.ui.run(() => this.ping.once(r.ip)); }
   pingAll() { return this.ui.run(() => this.ping.run(this.items().filter(r => r.enabled !== false).map(r => r.ip))); }
   /** Who made the card, shown under the MAC field while the user fills in the form. */
   async lookupVendor() {

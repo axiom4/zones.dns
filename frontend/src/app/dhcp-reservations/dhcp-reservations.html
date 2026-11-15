@@ -39,7 +39,7 @@
         <span class="rname">{{ r.ip }}@if (r.hostname) {<small class="note-t">{{ r.hostname }}</small>}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
         <span class="rvalue">{{ r.mac }}@if (r.vendor) {<small class="note-t">{{ r.vendor }}</small>}</span>
         @if (ping.label(r.ip); as p) { <span class="pingr" [class.up]="ping.results()[r.ip]?.up">{{ p }}</span> }
-        <button class="mini" type="button" (click)="pingOne(r)" [disabled]="ping.busy()" [attr.aria-label]="'Ping ' + r.ip">Ping</button>
+        <button class="mini" type="button" (click)="pingOne(r)" (dblclick)="watch(r)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + r.ip">Ping</button>
         <button class="switch" role="switch" [attr.aria-checked]="r.enabled !== false" (click)="toggle(r)"
                 [title]="r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
         <button class="icon edit" (click)="startEdit(r)" [attr.aria-label]="'Edit ' + r.mac">✎</button>
@@ -69,3 +69,4 @@
     <button class="primary" (click)="confirmImport()" [disabled]="!importText.trim()">Import</button>
   </div>
 </dialog>
+<app-ping-live />

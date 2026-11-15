@@ -20,6 +20,12 @@ export class Ping {
       }
     } finally { this.busy.set(false); }
   }
+  /** One ping of one address, for the live window: does not touch `busy` (the buttons stay usable). */
+  async once(address: string): Promise<DhcpPingResult> {
+    const [r] = await this.api.invoke(dhcpPingCreate, { body: { addresses: [address] } });
+    this.results.update(all => ({ ...all, [r.address]: r }));
+    return r;
+  }
   label(address: string) {
     const r = this.results()[address];
     return !r ? '' : r.error ? r.error : r.up ? `up${r.ms != null ? ' ' + r.ms + ' ms' : ''}` : 'no answer';
