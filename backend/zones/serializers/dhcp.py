@@ -14,6 +14,16 @@ class DhcpLeaseSerializer(serializers.Serializer):
     active = serializers.BooleanField()
 
 
+class DhcpNeighborSerializer(serializers.Serializer):
+    address = serializers.CharField()
+    mac = serializers.CharField()
+    vendor = serializers.CharField(allow_blank=True, help_text='Maker of the network card, empty if unknown')
+    hostname = serializers.CharField(allow_blank=True, help_text='The name this MAC has in DHCPv4 (lease or reservation)')
+    interface = serializers.CharField()
+    state = serializers.CharField(help_text='REACHABLE, STALE, DELAY, PROBE, PERMANENT ...')
+    kind = serializers.ChoiceField(choices=['link-local', 'dhcpv6', 'slaac', 'other'], help_text='dhcpv6: a lease of this server; slaac: built by the client from its MAC; other: privacy or fixed address')
+
+
 class DhcpSettingsSerializer(serializers.Serializer):
     DHCP = serializers.BooleanField(required=False)
     DHCP_SERVER = serializers.CharField(required=False, allow_blank=True, max_length=45)

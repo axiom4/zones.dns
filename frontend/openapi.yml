@@ -373,6 +373,25 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/dhcp/neighbors/:
+    get:
+      operationId: dhcp_neighbors_list
+      description: 'The IPv6 hosts on the network that this machine knows (kernel
+        neighbour table, Linux): also the ones that configured themselves with SLAAC
+        and so have no lease. Empty where `ip` is missing.'
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DhcpNeighbor'
+          description: ''
   /api/dhcp/ping/:
     post:
       operationId: dhcp_ping_create
@@ -2598,7 +2617,7 @@ components:
           type: integer
           description: 4 or 6
         kind:
-          $ref: '#/components/schemas/KindEnum'
+          $ref: '#/components/schemas/DhcpLeaseKindEnum'
         address:
           type: string
           description: The address, or the delegated prefix
@@ -2631,6 +2650,62 @@ components:
       - kind
       - mac
       - vendor
+    DhcpLeaseKindEnum:
+      enum:
+      - address
+      - prefix
+      type: string
+      description: |-
+        * `address` - address
+        * `prefix` - prefix
+    DhcpNeighbor:
+      type: object
+      properties:
+        address:
+          type: string
+        mac:
+          type: string
+        vendor:
+          type: string
+          description: Maker of the network card, empty if unknown
+        hostname:
+          type: string
+          description: The name this MAC has in DHCPv4 (lease or reservation)
+        interface:
+          type: string
+        state:
+          type: string
+          description: REACHABLE, STALE, DELAY, PROBE, PERMANENT ...
+        kind:
+          allOf:
+          - $ref: '#/components/schemas/DhcpNeighborKindEnum'
+          description: |-
+            dhcpv6: a lease of this server; slaac: built by the client from its MAC; other: privacy or fixed address
+
+            * `link-local` - link-local
+            * `dhcpv6` - dhcpv6
+            * `slaac` - slaac
+            * `other` - other
+      required:
+      - address
+      - hostname
+      - interface
+      - kind
+      - mac
+      - state
+      - vendor
+    DhcpNeighborKindEnum:
+      enum:
+      - link-local
+      - dhcpv6
+      - slaac
+      - other
+      type: string
+      description: |-
+        * `link-local` - link-local
+        * `dhcpv6` - dhcpv6
+        * `slaac` - slaac
+        * `other` - other
     DhcpPingRequestRequest:
       type: object
       properties:
@@ -3155,14 +3230,6 @@ components:
       required:
       - count
       - names
-    KindEnum:
-      enum:
-      - address
-      - prefix
-      type: string
-      description: |-
-        * `address` - address
-        * `prefix` - prefix
     LoginKey:
       type: object
       properties:

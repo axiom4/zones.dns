@@ -35,6 +35,8 @@ export type { DhcpLeasesList$Params as DhcpLeasesList$Params } from './fn/dhcp/d
 export { dhcpLeasesList as dhcpLeasesList } from './fn/dhcp/dhcp-leases-list';
 export type { DhcpLeasesDestroy$Params as DhcpLeasesDestroy$Params } from './fn/dhcp/dhcp-leases-destroy';
 export { dhcpLeasesDestroy as dhcpLeasesDestroy } from './fn/dhcp/dhcp-leases-destroy';
+export type { DhcpNeighborsList$Params as DhcpNeighborsList$Params } from './fn/dhcp/dhcp-neighbors-list';
+export { dhcpNeighborsList as dhcpNeighborsList } from './fn/dhcp/dhcp-neighbors-list';
 export type { DhcpPingCreate$Params as DhcpPingCreate$Params } from './fn/dhcp/dhcp-ping-create';
 export { dhcpPingCreate as dhcpPingCreate } from './fn/dhcp/dhcp-ping-create';
 export type { DhcpReservationsList$Params as DhcpReservationsList$Params } from './fn/dhcp/dhcp-reservations-list';

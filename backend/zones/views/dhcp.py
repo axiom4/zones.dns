@@ -1,3 +1,5 @@
+import ipaddress
+
 from django.http import Http404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -7,11 +9,34 @@ from rest_framework.views import APIView
 
 from .. import netcheck, oui
 from ..dhcp import v4 as dhcp, v6 as dhcp6, ra
+from ..dhcp.neighbors import neighbors
 from ..dhcp.v6 import duid_mac
 from ..models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, Setting
-from ..serializers import DhcpLeaseSerializer, DhcpPingRequestSerializer, DhcpPingResultSerializer, DhcpSettingsSerializer, MacVendorSerializer
+from ..serializers import DhcpLeaseSerializer, DhcpNeighborSerializer, DhcpPingRequestSerializer, DhcpPingResultSerializer, DhcpSettingsSerializer, MacVendorSerializer
 
 LIMIT = 1000
+
+
+def names_by_mac():
+    """{mac: host name} from the DHCPv4 reservations and, over them, the newest DHCPv4 leases."""
+    names = {}
+    for r in DhcpReservation.objects.exclude(hostname='').values('mac', 'hostname'):
+        names[r['mac']] = r['hostname']
+    for r in DhcpLease.objects.exclude(hostname='').exclude(mac='').order_by('updated').values('mac', 'hostname'):
+        names[r['mac']] = r['hostname']
+    return names
+
+
+class DhcpNeighborsView(APIView):
+    @extend_schema(responses=DhcpNeighborSerializer(many=True))
+    def get(self, request):
+        """The IPv6 hosts on the network that this machine knows (kernel neighbour table, Linux): also the ones that configured themselves with SLAAC and so have no lease. Empty where `ip` is missing."""
+        rows = neighbors(dhcp.dhcp_settings().DHCP_INTERFACE)
+        found, names = oui.lookup_many({r['mac'] for r in rows}), names_by_mac()
+        for r in rows:
+            r['vendor'], r['hostname'] = oui.label(found[r['mac']]), names.get(r['mac'], '')
+        rows.sort(key=lambda r: (r['kind'] == 'link-local', ipaddress.IPv6Address(r['address'])))
+        return Response(DhcpNeighborSerializer(rows, many=True).data)
 
 
 class DhcpLeasesView(APIView):
@@ -30,11 +55,7 @@ class DhcpLeasesView(APIView):
         rows += [{'id': r.id, 'family': 6, 'kind': 'address' if r.kind in ('na', 'ta') else 'prefix', 'address': r.value, 'client': r.duid, 'mac': r.mac or duid_mac(r.duid), 'hostname': r.hostname, 'vendor': '', 'expires': r.expires, 'active': r.expires > now}
                  for r in qs6]
         found = oui.lookup_many({r['mac'] for r in rows if r['mac']})
-        names = {}  # a DHCPv6 client has no host name of its own here: the one its MAC gave to DHCPv4 (the newest lease) or to a reservation
-        for r in DhcpReservation.objects.exclude(hostname='').values('mac', 'hostname'):
-            names[r['mac']] = r['hostname']
-        for r in DhcpLease.objects.exclude(hostname='').exclude(mac='').order_by('updated').values('mac', 'hostname'):
-            names[r['mac']] = r['hostname']
+        names = names_by_mac()  # a DHCPv6 client has no host name of its own here: the one its MAC gave to DHCPv4
         for r in rows:
             r['vendor'] = oui.label(found[r['mac']]) if r['mac'] else ''
             if r['family'] == 6 and not r['hostname']:

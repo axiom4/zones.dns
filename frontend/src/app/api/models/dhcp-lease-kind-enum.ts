@@ -6,5 +6,5 @@
  * * `address` - address
  * * `prefix` - prefix
  */
-export type KindEnum = 'address' | 'prefix';
+export type DhcpLeaseKindEnum = 'address' | 'prefix';
 

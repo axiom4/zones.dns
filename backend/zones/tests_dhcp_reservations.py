@@ -276,6 +276,41 @@ class ZoneAndLeaseMergeTests(TestCase):
         self.assertEqual(self.ask('router.lan', 'A'), ['192.168.1.1'])  # a client cannot take over the A of a zone record
 
 
+class NeighborTests(TestCase):
+    OUT = (
+        'fd4c:61da:7888:bc1a::100 dev eth0 lladdr 78:6c:84:a9:e4:28 router REACHABLE\n'
+        'fd4c:61da:7888:bc1a:9209:d0ff:fe6b:5eb dev eth0 lladdr 90:09:d0:6b:05:eb STALE\n'  # EUI-64 of that MAC
+        'fd4c:61da:7888:bc1a:aaaa:bbbb:cccc:dddd dev eth0 lladdr 90:09:d0:6b:05:eb STALE\n'  # a privacy address of the same host
+        'fe80::1 dev eth0 lladdr 78:6c:84:a9:e4:28 router STALE\n'
+        'fd4c:61da:7888:bc1a::dead dev eth0  FAILED\n'
+    )
+
+    def test_parse_and_kind(self):
+        from .dhcp.neighbors import parse
+        rows = parse(self.OUT)
+        self.assertEqual(len(rows), 4)  # the FAILED one has no MAC
+        self.assertEqual(rows[0], {'address': 'fd4c:61da:7888:bc1a::100', 'mac': '78:6c:84:a9:e4:28', 'interface': 'eth0', 'state': 'REACHABLE'})
+
+    def test_api(self):
+        from django.utils import timezone
+        from .models import Dhcp6Lease
+        later = timezone.now() + timezone.timedelta(hours=1)
+        Dhcp6Lease.objects.create(duid='0004aa', iaid=1, kind='na', value='fd4c:61da:7888:bc1a::100', expires=later)
+        DhcpLease.objects.create(client='k', ip='192.168.1.50', mac='90:09:d0:6b:05:eb', hostname='nas', expires=later)
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('staffn', password='x', is_staff=True))
+        with mock.patch('zones.dhcp.neighbors.subprocess.run', return_value=mock.Mock(stdout=self.OUT)):
+            rows = api.get('/api/dhcp/neighbors/').json()
+        kinds = {r['address']: (r['kind'], r['hostname']) for r in rows}
+        self.assertEqual(kinds['fd4c:61da:7888:bc1a::100'], ('dhcpv6', ''))
+        self.assertEqual(kinds['fd4c:61da:7888:bc1a:9209:d0ff:fe6b:5eb'], ('slaac', 'nas'))  # the name comes from its DHCPv4 lease
+        self.assertEqual(kinds['fd4c:61da:7888:bc1a:aaaa:bbbb:cccc:dddd'], ('other', 'nas'))
+        self.assertEqual(kinds['fe80::1'][0], 'link-local')
+        self.assertEqual(rows[-1]['kind'], 'link-local')  # link-local last
+        with mock.patch('zones.dhcp.neighbors.subprocess.run', side_effect=FileNotFoundError):
+            self.assertEqual(api.get('/api/dhcp/neighbors/').json(), [])
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone
