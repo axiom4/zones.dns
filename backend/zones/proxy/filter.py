@@ -1,8 +1,12 @@
 """Content, URL, and domain filtering for the HTTP/HTTPS proxy: ad blocking, cosmetic CSS, and popup/popunder blocking."""
+from functools import lru_cache
 import re
+import threading
 from urllib.parse import urlparse
 
 from ..dnsd import resolver
+
+_db_sem = threading.BoundedSemaphore(2)
 
 # Common ad-serving URL paths and query patterns
 AD_URL_RX = re.compile(
@@ -92,6 +96,7 @@ _HEAD_OPEN_RX = re.compile(r'(<head\b[^>]*>)', re.IGNORECASE)
 _CHARSET_RX = re.compile(r'charset\s*=\s*([a-zA-Z0-9._-]+)', re.IGNORECASE)
 
 
+@lru_cache(maxsize=32)
 def parse_custom_rules(raw_rules):
     """Parse PROXY_CUSTOM_RULES into (allow_domains, url_patterns, global_css, domain_css)."""
     allow_domains = set()
@@ -152,7 +157,8 @@ def check_request(host, url='', s=None):
     if is_domain_allowed(h, allow_domains):
         return None
     if block_ads and h:
-        hit = resolver.blocked_entry(h)
+        with _db_sem:
+            hit = resolver.blocked_entry(h)
         if hit:
             return ('blacklist', f'{hit[0]} ({hit[1]})')
     full_url = url or h

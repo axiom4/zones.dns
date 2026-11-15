@@ -74,7 +74,10 @@ def ensure_ca(regenerate=False):
     with _lock:
         if not regenerate and _cached_ca is not None:
             return _cached_ca
-        rows = dict(Setting.objects.filter(key__in=(CA_CERT_KEY, CA_PRIV_KEY)).values_list('key', 'value'))
+        try:
+            rows = dict(Setting.objects.filter(key__in=(CA_CERT_KEY, CA_PRIV_KEY)).values_list('key', 'value'))
+        except DatabaseError:
+            rows = {}
         cert_pem, key_pem = rows.get(CA_CERT_KEY, ''), rows.get(CA_PRIV_KEY, '')
         if not regenerate and cert_pem and key_pem:
             try:

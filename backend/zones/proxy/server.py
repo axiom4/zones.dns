@@ -7,14 +7,53 @@ import select
 import socket
 from socketserver import ThreadingMixIn
 import ssl
+import threading
+import time
 from urllib.parse import urlsplit
 import zlib
 
-from django.db import close_old_connections
+from django.conf import settings
+from django.db import DatabaseError, connections
 
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit
+from ..models import DataVersion
 from . import ca, filter as pfilter, pac
+
+_cfg_lock = threading.Lock()
+_cfg_data = None
+_cfg_checked = 0.0
+_cfg_version = None
+_CFG_CHECK_INTERVAL = 1.0
+
+
+def cached_proxy_settings(base=None, force=False):
+    """Return cached `dhcp_settings` in memory, checking `DataVersion` at most once per second so proxy worker threads do not query the DB per request."""
+    global _cfg_data, _cfg_checked, _cfg_version
+    now = time.monotonic()
+    if not force and _cfg_data is not None and (now - _cfg_checked) < _CFG_CHECK_INTERVAL:
+        return _cfg_data
+    if _cfg_lock.acquire(blocking=(_cfg_data is None or force)):
+        try:
+            now = time.monotonic()
+            if not force and _cfg_data is not None and (now - _cfg_checked) < _CFG_CHECK_INTERVAL:
+                return _cfg_data
+            _cfg_checked = now
+            try:
+                ver = DataVersion.version()
+                if force or _cfg_data is None or ver != _cfg_version:
+                    _cfg_data = dhcp.dhcp_settings(base or settings)
+                    _cfg_version = ver
+            except DatabaseError:
+                if _cfg_data is None:
+                    b = base or settings
+                    ns = type('DhcpSettings', (), {'DNS_DDR': getattr(b, 'DNS_DDR', '')})()
+                    for name, _ in dhcp.DHCP_SETTING_SPEC:
+                        setattr(ns, name, getattr(b, name))
+                    _cfg_data = ns
+        finally:
+            _cfg_lock.release()
+    return _cfg_data
 
 HOP_BY_HOP = frozenset({
     'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -66,14 +105,33 @@ def _decompress(data, encoding):
 class ProxyServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    max_threads = 256
 
     def __init__(self, server_address, RequestHandlerClass=None, settings_getter=None, allow_loopback=False, upstream_ssl_context=None):
         if ':' in server_address[0]:
             self.address_family = socket.AF_INET6
-        self.settings_getter = settings_getter or dhcp.dhcp_settings
+        self.settings_getter = settings_getter or cached_proxy_settings
         self.allow_loopback = allow_loopback
         self.upstream_ssl_context = upstream_ssl_context
+        self._thread_sem = threading.BoundedSemaphore(self.max_threads)
         super().__init__(server_address, RequestHandlerClass or ProxyHandler)
+
+    def process_request(self, request, client_address):
+        if not self._thread_sem.acquire(blocking=False):
+            self.shutdown_request(request)
+            return
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._thread_sem.release()
+            raise
+
+    def process_request_thread(self, request, client_address):
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            connections.close_all()
+            self._thread_sem.release()
 
 
 class ProxyHandler(BaseHTTPRequestHandler):
@@ -84,7 +142,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
         pass  # keep stdout quiet per request unless debugging
 
     def _cfg(self):
-        close_old_connections()
         return self.server.settings_getter()
 
     def _client_allowed(self):
@@ -176,7 +233,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_bytes(400, 'text/plain; charset=utf-8', b'Missing target host')
             return
 
-        if hit := pfilter.check_request(host, full_url, s=s):
+        try:
+            hit = pfilter.check_request(host, full_url, s=s)
+        finally:
+            connections.close_all()
+        if hit:
             self._send_blocked(hit[0], hit[1], path=parts.path)
             return
 
@@ -241,6 +302,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 cenc = ''
             except Exception:
                 pass
+            finally:
+                connections.close_all()
 
         self.send_response(status_code, reason)
         for k, v in out_headers:
@@ -292,7 +355,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             else:
                 host, port = host_port.lower(), 443
 
-        if hit := pfilter.check_request(host, f'https://{host}:{port}/', s=s):
+        try:
+            hit = pfilter.check_request(host, f'https://{host}:{port}/', s=s)
+        finally:
+            connections.close_all()
+        if hit:
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Blocked by Zones.dns', {'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
             return
 

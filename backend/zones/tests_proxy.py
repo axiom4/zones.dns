@@ -13,9 +13,9 @@ from rest_framework.test import APIClient
 from .dhcp import names, v4 as dhcp
 from .dnsd import resolver
 from .dnsd.resolver import Resolver
-from .models import BlockedDomain
+from .models import BlockedDomain, DataVersion, Setting
 from .proxy import ca, filter as pfilter
-from .proxy.server import ProxyHandler
+from .proxy.server import ProxyHandler, cached_proxy_settings
 
 
 def _fake_fetcher(scheme, host, port, method, path, body, headers):
@@ -300,3 +300,12 @@ class ProxyAndWpadTests(TestCase):
 
         t2 = api.post('/api/dhcp/proxy/test/', {'url': 'https://example.org/index.html'}, format='json').json()
         self.assertFalse(t2['blocked'])
+
+    def test_cached_proxy_settings_avoids_per_request_db_queries(self):
+        Setting.objects.update_or_create(key='dhcp:PROXY_PORT', defaults={'value': '8999'})
+        DataVersion.bump()
+        s1 = cached_proxy_settings(force=True)
+        self.assertEqual(s1.PROXY_PORT, 8999)
+        with self.assertNumQueries(0):
+            s2 = cached_proxy_settings()
+            self.assertIs(s1, s2)
