@@ -651,3 +651,13 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
   .confirm:has(.ping-out) h3 { font-size: 1rem; overflow-wrap: anywhere; }
   .confirm:has(.ping-out) .actions { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: .75rem; }  /* three equal buttons, easy to hit with a thumb */
 }
+@media (max-width: 600px) {
+  /* a lease on a phone: type and address on top, MAC under it, the end date, then the buttons in one row */
+  .records.leases li { flex-wrap: wrap; align-items: center; row-gap: .45rem; }
+  .records.leases li > .rname { width: auto; flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+  .records.leases li > .rvalue { order: 1; flex: 1 1 100%; width: auto; text-align: left; overflow-wrap: anywhere; }
+  .records.leases li > .ttlv { order: 2; flex: 1 1 100%; width: auto; text-align: left; }
+  .records.leases li > .pingr { order: 3; }
+  .records.leases li > .mini { order: 3; flex: 1 1 0; min-width: 4.5rem; text-align: center; }
+  .records.leases li > .icon { order: 3; flex: none; margin-left: auto; }
+}
