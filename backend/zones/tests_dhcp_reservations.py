@@ -6,8 +6,8 @@ from django.contrib.auth import get_user_model
 from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
-from .dhcp.v4 import Config, Server
-from .models import DhcpLease, DhcpReservation
+from .dhcp.v4 import Config, Server, dhcp_settings
+from .models import DataVersion, DhcpLease, DhcpReservation, Setting
 
 NET = dict(DHCP=True, DHCP_SERVER='192.168.1.2', DHCP_NETMASK='255.255.255.0', DHCP_RANGE='192.168.1.100-192.168.1.110')
 A = ipaddress.IPv4Address
@@ -99,3 +99,39 @@ class ReservationServerTests(TestCase):
         self.assertNotEqual(offer('aa:aa:aa:aa:aa:03'), '192.168.1.50')
         DhcpReservation.objects.all().delete()
         self.assertEqual(server.cfg.reservations, {})
+
+
+class SettingsReloadTests(TestCase):
+    def cmd(self):
+        from .management.commands.rundhcp import Command
+        c = Command()
+        c.stdout, c.stderr = mock.Mock(), mock.Mock()
+        c.snap, c.seen = c.snapshot(dhcp_settings()), DataVersion.version()
+        return c
+
+    @override_settings(**NET)
+    def test_saved_settings_restart_the_server_once(self):
+        c = self.cmd()
+        with mock.patch('zones.management.commands.rundhcp.os.execv') as ex:
+            c.reload_if_changed()  # nothing changed
+            DataVersion.bump()
+            c.reload_if_changed()  # counter moved, settings did not
+            self.assertFalse(ex.called)
+            Setting.objects.create(key='dhcp:DHCP_DNS', value='192.168.1.2 1.1.1.1')
+            DataVersion.bump()
+            c.reload_if_changed()
+            self.assertEqual(ex.call_count, 1)
+
+    @override_settings(**NET)
+    def test_invalid_or_off_settings(self):
+        c = self.cmd()
+        with mock.patch('zones.management.commands.rundhcp.os.execv') as ex:
+            Setting.objects.create(key='dhcp:DHCP_RANGE', value='10.9.9.1-10.9.9.9')  # outside the network
+            DataVersion.bump()
+            c.reload_if_changed()
+            self.assertFalse(ex.called)
+            self.assertIn('not applied', c.stderr.write.call_args.args[0])
+            Setting.objects.create(key='dhcp:DHCP', value='false')
+            DataVersion.bump()
+            with self.assertRaises(SystemExit):
+                c.reload_if_changed()

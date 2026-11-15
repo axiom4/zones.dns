@@ -20,7 +20,7 @@
   <form class="settings" (ngSubmit)="saveSettings()">
     <fieldset class="group">
       <legend>DHCPv4 · network</legend>
-      <p class="soft">Turn it on only after the router's own DHCP server is off. Restart <code>rundhcp</code> after saving.</p>
+      <p class="soft">Turn it on only after the router's own DHCP server is off. Saved settings apply at once: <code>rundhcp</code> restarts itself with them.</p>
       <div class="grid">
       <label class="check"><input type="checkbox" name="DHCP" [(ngModel)]="cfg().DHCP"> DHCPv4 enabled</label>
       <label class="f"><span>Server IP</span><input name="DHCP_SERVER" [(ngModel)]="cfg().DHCP_SERVER" placeholder="192.168.1.2" autocomplete="off"></label>

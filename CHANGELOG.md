@@ -4,6 +4,7 @@
 - **Upgrading:** run `manage.py migrate` (new table `DhcpReservation`). Restart `rundns` and gunicorn, publish the new GUI build. `INSTALL.md` changed how port 53 is given to Python (see Security).
 - **Added**
   - DHCP reservations in the GUI (*DHCP > Reservations*): a fixed IPv4 address for a MAC (host name and note optional, on/off switch), a *Reserve* button on every DHCPv4 lease, CSV import (`hostname,mac,ip` with optional note and enabled; a header line allows any column order; `,` `;` or tab; preview; *Replace* needs the second factor, step-up scope `dhcp-replace`; any error in the file changes nothing) and export. `rundhcp` reads the table live, no restart; `DHCP_RESERVATIONS` in `.env` still works. The address must be inside a served network. API: `/api/dhcp/reservations/` (+ `export/`, `import/`).
+  - DHCP settings saved in the GUI apply at once: `rundhcp` notices the change (within 2 s) and starts again with the new values after checking them; invalid ones are reported on stderr and the old ones keep running; switching `DHCP` off stops it. No more manual restart.
 - **Fixed**
   - DNS over HTTPS answered `406` to clients that send `Accept: application/dns-message` (Firefox, Chrome): `/dns-query` is now a plain Django view.
   - `rundns`: a database error during the hourly log purge ended the whole daemon; it is now reported and retried an hour later. `SIGTERM` (supervisor stop) saves the log rows still waiting, like Ctrl-C.

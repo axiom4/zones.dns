@@ -1,16 +1,19 @@
 import ipaddress
+import os
 import select
 import socket
 import struct
+import sys
 import threading
 import time
 
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
-from django.db import close_old_connections
+from django.db import DatabaseError, close_old_connections, connections
 
 from zones.dhcp import ra
-from zones.dhcp.v4 import Server, dhcp_settings, l2_frame, scopes
+from zones.dhcp.v4 import DHCP_SETTING_SPEC, Server, dhcp_settings, l2_frame, scopes
+from zones.models import DataVersion
 from zones.dhcp.v6 import Config6, Server6
 
 
@@ -35,6 +38,7 @@ class Command(BaseCommand):
         s = dhcp_settings(settings)
         if not s.DHCP:
             raise CommandError('DHCP is off: set DHCP=true in .env (and turn off the DHCP server of your router first).')
+        self.snap, self.seen = self.snapshot(s), DataVersion.version()
         self.opt = dict(address=address, address6=address6, port=port, client_port=client_port, port6=port6, client_port6=client_port6)
         try:
             cfgs = scopes(s)
@@ -67,7 +71,7 @@ class Command(BaseCommand):
         self.stdout.write(f'DHCP on {", ".join(str(c.network) for c in cfgs)}: {cfg.first}-{cfg.last}, server {cfg.server}, lease {cfg.lease}s, {len(cfg.reservations)} reservation(s)'
                           + (', DNR announced' if cfg.dnr else '') + (', ping probe' if server.probe else '') + (', unicast to the client' if l2 else '')
                           + (f', DHCPv6 ({"stateful" if cfg6.stateful else "stateless"})' if cfg6 else '') + (', Router Advertisements' if racfg else ''))
-        sock.settimeout(3600)
+        sock.settimeout(2)
         cleaned = time.monotonic()
         while True:
             try:
@@ -75,7 +79,11 @@ class Command(BaseCommand):
             except socket.timeout:
                 data = None
             close_old_connections()
-            if data is None or time.monotonic() - cleaned >= 3600:  # every hour, busy or not (it waited for an hour without a packet, which a network in use never has)
+            try:
+                self.reload_if_changed()
+            except DatabaseError as e:
+                self.stderr.write(f'DHCP: cannot check the settings: {e!r}')
+            if time.monotonic() - cleaned >= 3600:  # every hour, busy or not
                 cleaned = time.monotonic()
                 try:
                     server.cleanup()  # forget the leases that ended long ago
@@ -83,8 +91,8 @@ class Command(BaseCommand):
                         Server6.cleanup()
                 except Exception as e:
                     self.stderr.write(f'DHCP: lease clean-up failed: {e!r}')
-                if data is None:
-                    continue
+            if data is None:
+                continue
             try:
                 out = server.handle(data)
             except Exception as e:  # one bad packet or a database hiccup must not stop the server
@@ -92,6 +100,38 @@ class Command(BaseCommand):
                 continue
             if out:
                 self.send(sock, l2, cfg.server, out)
+
+    @staticmethod
+    def snapshot(s):
+        return {name: getattr(s, name) for name, _ in DHCP_SETTING_SPEC}
+
+    def reload_if_changed(self):
+        """Settings saved in the GUI apply at once: when they differ from the running ones and are valid, the process starts again with them
+        (sockets, interface, DHCPv6 and RA threads all depend on them; clients retry the packets of that second). Reservations do not need this: Server reloads them itself."""
+        ver = DataVersion.version()
+        if ver == self.seen:
+            return
+        self.seen = ver
+        new = dhcp_settings(settings)
+        if self.snapshot(new) == self.snap:
+            return
+        if not new.DHCP:
+            self.stdout.write('DHCP switched off in the settings: stopping.')
+            raise SystemExit(0)
+        try:
+            cfg = scopes(new)[0]
+            cfg6 = Config6.from_settings(new, cfg.search) if new.DHCP6 else None
+            if new.DHCP_RA:
+                ra.RaConfig.from_settings(new, cfg.search, bool(cfg6 and cfg6.stateful))
+            if (new.DHCP6 or new.DHCP_RA or new.DHCP_UNICAST) and not new.DHCP_INTERFACE:
+                raise ValueError('DHCP6, DHCP_RA and DHCP_UNICAST need DHCP_INTERFACE')
+        except ValueError as e:
+            self.stderr.write(f'DHCP: new settings not applied, still running the old ones: {e}')
+            return
+        self.stdout.write('DHCP settings changed: restarting with them.')
+        self.stdout.flush()
+        connections.close_all()
+        os.execv(sys.executable, [sys.executable] + sys.argv)  # sockets are not inherited: the new process binds them again
 
     def send(self, sock, l2, server_ip, out):
         data, ip, port, hw = out
