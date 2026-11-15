@@ -17,7 +17,7 @@ from dnslib.server import BaseResolver
 
 from .domains import main_domain
 from . import ddr, ddns, dnssec, ratelimit, suspicious
-from ..dhcp import v4 as dhcp
+from ..dhcp import names as dhcp_leases
 from ..stats import rollup
 from ..models import PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, DataVersion, QueryLog, Record, Setting, StaticHost, Zone
 
@@ -38,7 +38,7 @@ _regexes = ()  # enabled personal pattern entries: (compiled pattern, pattern te
 _blocked_lock = threading.Lock()
 _blocked = OrderedDict()  # name -> (blacklist entry, where it came from) or None; least recently used first; emptied when the data changes
 _BLOCKED_MAX = 20000
-_dhcp_names = (False, '')  # dhcp._name_cfg() read at every reload: Setting rows raise DataVersion too, so no query per DNS query
+_dhcp_names = (False, '')  # dhcp_leases._name_cfg() read at every reload: Setting rows raise DataVersion too, so no query per DNS query
 _SHARED_CHECK = 0.2  # with Redis: seconds between looks at the counter (one query asks _snapshot() several times)
 _db_tls = threading.local()
 _DB_IDLE_CHECK = 30  # seconds a worker's connection may sit idle before it is pinged again
@@ -58,7 +58,7 @@ def _db_away(what):
 
 
 def _lease(find, qname):
-    """dhcp.lease_hosts / lease_ptr; None when the database is away: the name is answered as if no client had it."""
+    """dhcp_leases.lease_hosts / lease_ptr; None when the database is away: the name is answered as if no client had it."""
     try:
         return find(qname, _dhcp_names)
     except DatabaseError:
@@ -105,7 +105,7 @@ def _load():
     st = dict(Setting.objects.filter(key__in=[PERSONAL_BLOCKS, PUBLIC_LISTS]).values_list('key', 'value'))  # one query for the switches
     _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if st.get(key) == 'false')
     _regexes = () if 'manual' in _off_sources else _load_regexes()
-    _dhcp_names = dhcp._name_cfg()
+    _dhcp_names = dhcp_leases._name_cfg()
     with _blocked_lock:
         _blocked.clear()
 
@@ -466,7 +466,7 @@ class Resolver(BaseResolver):
             else:
                 hosts = static_hosts(qname)
                 found = None if hosts else lookup(qname, qtype)
-                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and _lease(dhcp.lease_hosts, qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
+                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and _lease(dhcp_leases.lease_hosts, qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
                 if leased:
                     hosts, found = leased, None
                 if hosts:
@@ -515,7 +515,7 @@ class Resolver(BaseResolver):
                             reply.add_answer(rr)
                     else:
                         reply = negative(request, 'resolver.arpa' if qname.endswith('.resolver.arpa') else qname, False)
-                elif qtype == 'PTR' and (ptr := _lease(dhcp.lease_ptr, qname)):  # the reverse name of a DHCP client that has a name
+                elif qtype == 'PTR' and (ptr := _lease(dhcp_leases.lease_ptr, qname)):  # the reverse name of a DHCP client that has a name
                     outcome, via, reply = 'local', 'DHCP lease', request.reply()
                     reply.header.aa = 1
                     reply.add_answer(RR(request.q.qname, QTYPE.PTR, rdata=PTR(ptr + '.'), ttl=60))

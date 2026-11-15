@@ -577,35 +577,3 @@ class Server:
     def cleanup(now=None):
         """Forget leases that ended more than a week ago (until then a returning client gets its old address back)."""
         DhcpLease.objects.filter(expires__lt=(now or timezone.now()) - timedelta(days=7)).delete()
-
-
-def _name_cfg():
-    s = dhcp_settings()
-    return bool(s.DHCP and s.DHCP_NAMES and s.DHCP_DOMAIN.strip('.')), s.DHCP_DOMAIN.strip('.').lower()
-
-
-def lease_hosts(qname, cfg=None):
-    """[(address, ttl)] of the client that called itself <label>.<DHCP_DOMAIN> and has a live lease, or None (the DNS server answers these names).
-    cfg: _name_cfg() already read (the DNS daemon keeps it with its data copy), else read now."""
-    on, domain = cfg or _name_cfg()
-    if not (on and qname.endswith('.' + domain)):
-        return None
-    label = qname[:-len(domain) - 1]
-    if not label or '.' in label:
-        return None
-    if label in RESERVED_NAMES:
-        return None  # also for leases saved before the names were reserved
-    row = DhcpLease.objects.filter(hostname=label, expires__gt=timezone.now()).order_by('updated').first()  # the oldest holder, not the latest claimant
-    return [(row.ip, 60)] if row else None
-
-
-def lease_ptr(qname, cfg=None):
-    """The name of the client that holds the address in a reverse name (d.c.b.a.in-addr.arpa), or None."""
-    on, domain = cfg or _name_cfg()
-    if not (on and qname.endswith('.in-addr.arpa')):
-        return None
-    parts = qname[:-len('.in-addr.arpa')].split('.')
-    if len(parts) != 4 or not all(p.isdigit() for p in parts):
-        return None
-    row = DhcpLease.objects.filter(ip='.'.join(reversed(parts)), expires__gt=timezone.now()).exclude(hostname='').first()
-    return f'{row.hostname}.{domain}' if row else None

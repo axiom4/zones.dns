@@ -716,7 +716,7 @@ class DhcpTests(TestCase):
     def test_leased_host_names_are_answered_by_the_dns_server(self):
         from django.test import override_settings
 
-        from .dhcp.v4 import lease_hosts
+        from .dhcp.names import lease_hosts
         self.reply('aa:aa:aa:aa:aa:80', 3, o50=bytes([192, 168, 1, 101]), o12=b'My_Laptop.local')
         with override_settings(DHCP=True, DHCP_DOMAIN='lan', DHCP_NAMES=True):
             self.assertEqual(lease_hosts('mylaptop.lan'), [('192.168.1.101', 60)])
@@ -783,7 +783,7 @@ class DhcpTests(TestCase):
         from django.test import override_settings
 
         from .dhcp.v4 import parse
-        from .dhcp.v4 import lease_ptr
+        from .dhcp.names import lease_ptr
         fq = bytes([0x04, 0, 0]) + b'\x06phone1\x03lan\x00'  # E flag: wire format
         out = self.server.handle(self.packet('aa:aa:aa:aa:aa:92', 3, o50=bytes([192, 168, 1, 101]), o81=fq, o55=bytes([1])))
         r = parse(b'\x01' + out.data[1:])
@@ -1650,7 +1650,7 @@ class SecurityAndProtocolHardeningTests(TestCase):
         from django.contrib.auth.models import User
         from django.core.cache import cache
         from rest_framework.test import APIClient
-        from .dhcp import v4 as dhcp
+        from .dhcp import names
         from .stats import rollup
         from .models import DhcpLease, DomainStat, QueryLog
 
@@ -1699,8 +1699,8 @@ class SecurityAndProtocolHardeningTests(TestCase):
         from datetime import timedelta
         from django.utils import timezone
         DhcpLease.objects.create(client='c1', ip='192.168.1.150', mac='aa:bb:cc:dd:ee:11', hostname='printer', expires=timezone.now() + timedelta(hours=1))
-        self.assertEqual(dhcp.lease_hosts('printer.home.lan'), [('192.168.1.150', 60)])
-        self.assertEqual(dhcp.lease_ptr('150.1.168.192.in-addr.arpa'), 'printer.home.lan')
+        self.assertEqual(names.lease_hosts('printer.home.lan'), [('192.168.1.150', 60)])
+        self.assertEqual(names.lease_ptr('150.1.168.192.in-addr.arpa'), 'printer.home.lan')
 
 
 
@@ -1909,6 +1909,7 @@ class VulnerabilityFixTests(TestCase):
         from django.conf import settings
         from django.utils import timezone
         from .dhcp import v4 as dhcp
+        from .dhcp import names
         from .models import DhcpLease
         with override_settings(DHCP=True, DHCP_SERVER='192.168.1.2', DHCP_RANGE='192.168.1.100-192.168.1.110', DHCP_DOMAIN='home.lan', DHCP_NAMES=True):
             srv, now = dhcp.Server(dhcp.scopes(settings), probe=lambda ip: False), timezone.now()
@@ -1917,9 +1918,9 @@ class VulnerabilityFixTests(TestCase):
             srv._hold('aa:aa:aa:aa:aa:03', '192.168.1.102', 3600, now, 'wpad', 'aa:aa:aa:aa:aa:03')
             self.assertEqual(dict(DhcpLease.objects.values_list('client', 'hostname')),
                              {'aa:aa:aa:aa:aa:01': 'nas', 'aa:aa:aa:aa:aa:02': '', 'aa:aa:aa:aa:aa:03': ''})
-            self.assertEqual(dhcp.lease_hosts('nas.home.lan', (True, 'home.lan')), [('192.168.1.100', 60)])
+            self.assertEqual(names.lease_hosts('nas.home.lan', (True, 'home.lan')), [('192.168.1.100', 60)])
             DhcpLease.objects.create(client='old', ip='192.168.1.103', mac='', hostname='wpad', expires=now + timedelta(hours=1))  # saved before the fix
-            self.assertIsNone(dhcp.lease_hosts('wpad.home.lan', (True, 'home.lan')))
+            self.assertIsNone(names.lease_hosts('wpad.home.lan', (True, 'home.lan')))
 
     def test_changing_factors_needs_a_step_up_grant(self):
         import time

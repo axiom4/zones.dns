@@ -205,6 +205,25 @@ class Lease6IdentityTests(TestCase):
         self.assertEqual((row.mac, row.hostname), ('78:6c:84:a9:e4:28', 'ha'))
 
 
+class Dns6NamesTests(TestCase):
+    @override_settings(DHCP=True, DHCP_DOMAIN='lan', DHCP_NAMES=True, DHCP_SERVER='192.168.1.2', DHCP_RANGE='192.168.1.100-192.168.1.200')
+    def test_dhcp6_leases_are_answered_by_name_and_by_address(self):
+        from django.utils import timezone
+        from .dhcp.names import lease_hosts, lease_ptr
+        from .models import Dhcp6Lease
+        later = timezone.now() + timezone.timedelta(hours=1)
+        DhcpLease.objects.create(client='k', ip='192.168.1.101', mac='78:6c:84:a9:e4:28', hostname='ha', expires=later)
+        Dhcp6Lease.objects.create(duid='0004aa', iaid=1, kind='na', value='fd00::100', mac='78:6c:84:a9:e4:28', expires=later)  # same MAC: it is "ha"
+        Dhcp6Lease.objects.create(duid='0004bb', iaid=1, kind='na', value='fd00::200', hostname='cam', expires=later)  # named itself
+        Dhcp6Lease.objects.create(duid='0004cc', iaid=1, kind='pd', value='fd00:1::/56', hostname='ha', expires=later)  # a prefix is not a host
+        self.assertEqual(lease_hosts('ha.lan'), [('192.168.1.101', 60), ('fd00::100', 60)])
+        self.assertEqual(lease_hosts('cam.lan'), [('fd00::200', 60)])
+        ptr = lambda a: __import__('ipaddress').IPv6Address(a).reverse_pointer
+        self.assertEqual(lease_ptr(ptr('fd00::100')), 'ha.lan')
+        self.assertEqual(lease_ptr(ptr('fd00::200')), 'cam.lan')
+        self.assertIsNone(lease_ptr(ptr('fd00::300')))
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone
