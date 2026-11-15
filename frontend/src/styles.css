@@ -621,3 +621,8 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 .settings .f input { width: 100%; }
 .settings .check { align-self: center; white-space: normal; }
 @media (max-width: 600px) { .settings .f.wide { grid-column: auto; } }
+
+.settings-dialog { width: min(980px, 96vw); }
+.settings-dialog .settings { margin: 0; gap: .9rem; }
+.settings-dialog .settings .group { box-shadow: none; border: 1px solid var(--line); }
+.settings-dialog .actions { align-items: center; }

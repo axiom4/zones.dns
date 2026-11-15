@@ -8,15 +8,16 @@
 <header>
   <div>
     <h2>DHCP leases</h2>
-    <p class="soft">{{ leases().length }} {{ all ? 'leases' : 'active leases' }} from the DHCP servers (addresses and delegated prefixes). Configure DHCPv4, DHCPv6 and Router Advertisements below or in <code>.env</code>.</p>
+    <p class="soft">{{ leases().length }} {{ all ? 'leases' : 'active leases' }} from the DHCP servers (addresses and delegated prefixes). Configure DHCPv4, DHCPv6 and Router Advertisements with “DHCP settings” or in <code>.env</code>.</p>
   </div>
   <div class="actions">
     <label class="check"><input type="checkbox" name="all" [(ngModel)]="all" (ngModelChange)="load()"> include ended</label>
-    <button class="ghost" type="button" (click)="showSettings.set(!showSettings())">{{ showSettings() ? 'Hide settings' : 'DHCP settings' }}</button>
+    <button class="ghost" type="button" (click)="openSettings(cfgdlg)">DHCP settings</button>
     <button class="ghost" type="button" (click)="load()">Refresh</button>
   </div>
 </header>
-@if (showSettings()) {
+<dialog #cfgdlg class="confirm form-dialog settings-dialog" (click)="$event.target === cfgdlg ? cfgdlg.close() : null">
+  <h3>DHCP settings</h3>
   <form class="settings" (ngSubmit)="saveSettings()">
     <fieldset class="group">
       <legend>DHCPv4 · network</legend>
@@ -82,11 +83,12 @@
       </div>
     </fieldset>
     <div class="actions">
+      @if (saved()) { <span class="soft">Saved and applied.</span> }
+      <button class="ghost" type="button" (click)="cfgdlg.close()">Close</button>
       <button class="primary" type="submit">Save settings</button>
-      @if (saved()) { <span class="soft">Saved.</span> }
     </div>
   </form>
-}
+</dialog>
 <form class="composer" (ngSubmit)="load()">
   <input class="grow" name="q" [(ngModel)]="q" placeholder="search address, MAC / DUID or host name" autocomplete="off" aria-label="Search the leases">
   <button class="primary">Search</button>

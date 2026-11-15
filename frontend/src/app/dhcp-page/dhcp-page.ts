@@ -17,7 +17,6 @@ export class DhcpPage {
   private ui = inject(Ui);
   leases = signal<DhcpLease[]>([]);
   cfg = signal<DhcpSettings>({});
-  showSettings = signal(false);
   saved = signal(false);
   tab = signal<'leases' | 'reservations'>('leases');
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
@@ -39,6 +38,7 @@ export class DhcpPage {
       this.cfg.set(cfg);
     });
   }
+  openSettings(dlg: HTMLDialogElement) { this.saved.set(false); dlg.showModal(); }
   saveSettings() {
     this.saved.set(false);
     return this.ui.run(async () => {
