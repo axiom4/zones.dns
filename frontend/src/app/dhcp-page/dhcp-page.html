@@ -95,7 +95,7 @@
   <input class="grow" name="q" [(ngModel)]="q" placeholder="search address, MAC / DUID or host name" autocomplete="off" aria-label="Search the leases">
   <button class="primary">Search</button>
 </form>
-<ul class="records">
+<ul class="records leases">
   @for (l of shown(); track l.family + '-' + l.id) {
     <li [class.off]="!l.active">
       <span class="type" [attr.data-t]="l.family === 6 ? 'AAAA' : 'A'">{{ l.kind === 'prefix' ? 'PD' : 'v' + l.family }}</span>

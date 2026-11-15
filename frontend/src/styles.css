@@ -627,6 +627,10 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 .settings-dialog .settings .group { box-shadow: none; border: 1px solid var(--line); }
 .settings-dialog .actions { align-items: center; }
 
+/* leases: a whole IPv6 address and the expiry date fit on one line each (the generic .rname cuts at 170px, .ttlv at 60px) */
+.records.leases .rname { width: 21rem; flex: none; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.records.leases .ttlv { width: auto; white-space: nowrap; }
+@media (max-width: 1100px) { .records.leases .rname { width: auto; flex: 1 1 14rem; } }
 .pingr { font-size: .8rem; font-weight: 700; color: #b3261e; white-space: nowrap; } .pingr.up { color: #1b7f3b; }
 .vendor-hint { align-self: center; }
 
