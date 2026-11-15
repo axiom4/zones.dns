@@ -12,12 +12,12 @@
   "private": true,
   "packageManager": "npm@12.2.2",
   "dependencies": {
-    "@angular/common": "^22.2.5",
-    "@angular/compiler": "^22.2.5",
-    "@angular/core": "^22.2.5",
-    "@angular/forms": "^22.2.5",
-    "@angular/platform-browser": "^22.2.5",
-    "@angular/router": "^22.2.5",
+    "@angular/common": "^22.2.6",
+    "@angular/compiler": "^22.2.6",
+    "@angular/core": "^22.2.6",
+    "@angular/forms": "^22.2.6",
+    "@angular/platform-browser": "^22.2.6",
+    "@angular/router": "^22.2.6",
     "d3-geo": "^3.1.2",
     "qrcode-generator": "^2.0.4",
     "rxjs": "~7.8.2",
@@ -27,14 +27,14 @@
     "world-atlas": "^2.0.2"
   },
   "devDependencies": {
-    "@angular/build": "^22.2.6",
-    "@angular/cli": "^22.2.6",
-    "@angular/compiler-cli": "^22.2.5",
+    "@angular/build": "^22.2.7",
+    "@angular/cli": "^22.2.7",
+    "@angular/compiler-cli": "^22.2.6",
     "@types/d3-geo": "^3.1.1",
     "@types/geojson": "^7946.0.16",
     "@types/topojson-client": "^3.1.5",
     "ng-openapi-gen": "^1.1.0",
-    "prettier": "^3.9.10",
+    "prettier": "^3.10.1",
     "typescript": "~6.0.2"
   }
 }
