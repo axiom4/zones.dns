@@ -23,7 +23,7 @@ def mac_of(interface):
 
 
 class Command(BaseCommand):
-    help = ('Run the DHCPv4 server (settings DHCP_*) and, as set in .env, the DHCPv6 server (DHCP6) and the Router Advertisements (DHCP_RA). '
+    help = ('Run the DHCPv4 server (settings DHCP_*) and, as set in the GUI, the DHCPv6 server (DHCP6) and the Router Advertisements (DHCP_RA). '
             'Needs the right to bind UDP ports 67 and 547 (root, or CAP_NET_BIND_SERVICE), CAP_NET_RAW for DHCP_RA and DHCP_UNICAST. Only one DHCP server may run on a network.')
 
     def add_arguments(self, p):  # for tests on the loopback interface: other ports and one address
@@ -37,7 +37,12 @@ class Command(BaseCommand):
     def handle(self, *a, address, address6, port, client_port, port6, client_port6, **o):
         s = dhcp_settings(settings)
         if not s.DHCP:
-            raise CommandError('DHCP is off: set DHCP=true in .env (and turn off the DHCP server of your router first).')
+            self.stdout.write('DHCP is off: waiting until it is turned on in the GUI (DHCP > DHCP settings; turn off the DHCP server of your router first).')
+            self.stdout.flush()
+            while not s.DHCP:
+                time.sleep(2)
+                close_old_connections()
+                s = dhcp_settings(settings)
         self.snap, self.seen = self.snapshot(s), DataVersion.version()
         self.opt = dict(address=address, address6=address6, port=port, client_port=client_port, port6=port6, client_port6=client_port6)
         try:
@@ -149,14 +154,14 @@ class Command(BaseCommand):
     def l2_sender(self):
         if not hasattr(socket, 'AF_PACKET'):
             raise CommandError('DHCP_UNICAST needs Linux.')
-        iface = getattr(self, 'iface', '') or settings.DHCP_INTERFACE
+        iface = self.iface
         raw = socket.socket(socket.AF_PACKET, socket.SOCK_RAW)
         raw.bind((iface, 0x0800))
         return type('L2', (), {'mac': mac_of(iface), 'send': staticmethod(raw.send)})()
 
     def loop6(self, v6):
         try:
-            iface = getattr(self, 'iface', '') or settings.DHCP_INTERFACE
+            iface = self.iface
             sock = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
             sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             if not self.opt['address6']:  # a test on the loopback binds one address and joins no group
@@ -179,7 +184,7 @@ class Command(BaseCommand):
 
     def loop_ra(self, cfg):
         try:
-            iface = getattr(self, 'iface', '') or settings.DHCP_INTERFACE
+            iface = self.iface
             sock = socket.socket(socket.AF_INET6, socket.SOCK_RAW, socket.IPPROTO_ICMPV6)
             index = socket.if_nametoindex(iface)
             for opt in (socket.IPV6_MULTICAST_HOPS, socket.IPV6_UNICAST_HOPS):

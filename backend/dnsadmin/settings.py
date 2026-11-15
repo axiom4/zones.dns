@@ -281,41 +281,41 @@ ASN_IMPORT_URL = os.environ.get('ASN_IMPORT_URL', 'https://github.com/ipverse/as
 # Ask Team Cymru (a DNS query) for what the local databases do not know. Set to false for a fully offline setup.
 GEOIP_ONLINE_FALLBACK = os.environ.get('GEOIP_ONLINE_FALLBACK', 'true').lower() == 'true'
 
-# DHCPv4 server (manage.py rundhcp), see zones/dhcp/v4.py. Off by default: only one DHCP server may run on a network, turn off the router's first.
+# DHCPv4/DHCPv6/RA server (manage.py rundhcp), see zones/dhcp/v4.py. These are only the DEFAULTS: the settings live in the database (GUI: DHCP > DHCP settings), not in .env. Off by default: only one DHCP server may run on a network, turn off the router's first.
 _bool = lambda v: v.lower() in ('1', 'true', 'yes', 'on')
-DHCP = _bool(os.environ.get('DHCP', 'false'))
-DHCP_SERVER = os.environ.get('DHCP_SERVER', '')  # this server's own address on the network
-DHCP_NETMASK = os.environ.get('DHCP_NETMASK', '255.255.255.0')
-DHCP_RANGE = os.environ.get('DHCP_RANGE', '')  # first-last
-DHCP_ROUTER = os.environ.get('DHCP_ROUTER', '')
-DHCP_DNS = os.environ.get('DHCP_DNS', '')  # empty = DHCP_SERVER
-DHCP_DOMAIN = os.environ.get('DHCP_DOMAIN', '')
-DHCP_LEASE = int(os.environ.get('DHCP_LEASE', '86400'))
-DHCP_RESERVATIONS = os.environ.get('DHCP_RESERVATIONS', '')  # aa:bb:cc:dd:ee:ff=192.168.1.10 ... (space separated)
-DHCP_INTERFACE = os.environ.get('DHCP_INTERFACE', '')  # Linux: answer on this interface only
-DHCP_NTP = os.environ.get('DHCP_NTP', '')  # NTP servers (option 42), space separated
-DHCP_SEARCH = os.environ.get('DHCP_SEARCH', '')  # search domains (option 119, RFC 3397); empty = DHCP_DOMAIN
-DHCP_ROUTES = os.environ.get('DHCP_ROUTES', '')  # static routes (option 121, RFC 3442): 10.0.0.0/8=192.168.1.5 ... (net=gateway, space separated)
-DHCP_MTU = int(os.environ.get('DHCP_MTU', '0'))  # option 26, 0 = not sent
-DHCP_BOOT_SERVER = os.environ.get('DHCP_BOOT_SERVER', '')  # PXE / TFTP server (option 66)
-DHCP_BOOT_FILE = os.environ.get('DHCP_BOOT_FILE', '')  # boot file name (option 67 and the BOOTP file field)
-DHCP_PROBE = _bool(os.environ.get('DHCP_PROBE', 'true'))  # ping an address before offering it (RFC 2131 3.1.2)
-DHCP_NAMES = _bool(os.environ.get('DHCP_NAMES', 'true'))  # the DNS server answers <client host name>.<DHCP_DOMAIN> from the leases
-DHCP6 = _bool(os.environ.get('DHCP6', 'false'))  # stateless DHCPv6 (zones/dhcp/v6.py): DNS servers, search list, DNR; needs DHCP_INTERFACE
-DHCP6_PREFIX = os.environ.get('DHCP6_PREFIX', '')  # the on-link prefix, e.g. 2001:db8:1::/64 (Confirm, Router Advertisements)
-DHCP6_POOL = os.environ.get('DHCP6_POOL', '')  # first-last: addresses given to clients (IA_NA); empty = no addresses
-DHCP6_PD_POOL = os.environ.get('DHCP6_PD_POOL', '')  # prefixes delegated to routers (IA_PD, RFC 3633), e.g. 2001:db8:ff00::/40; empty = none
-DHCP6_PD_LEN = int(os.environ.get('DHCP6_PD_LEN', '56'))  # the length of each delegated prefix
-DHCP6_PD_ROUTES = _bool(os.environ.get('DHCP6_PD_ROUTES', 'false'))  # install kernel routes (`ip -6 route`) for delegated IA_PD prefixes
-DHCP6_LEASE = int(os.environ.get('DHCP6_LEASE', '86400'))  # valid lifetime in seconds
-DHCP6_RAPID = _bool(os.environ.get('DHCP6_RAPID', 'false'))  # rapid commit (two messages instead of four)
-DHCP_RA = _bool(os.environ.get('DHCP_RA', 'false'))  # send IPv6 Router Advertisements with DNS servers, search list and DNR (zones/dhcp/ra.py); needs DHCP_INTERFACE
-DHCP_RA_INTERVAL = int(os.environ.get('DHCP_RA_INTERVAL', '600'))  # seconds between advertisements
-DHCP_RA_ROUTER_LIFETIME = int(os.environ.get('DHCP_RA_ROUTER_LIFETIME', '0'))  # 0: this host is NOT a default router; >0 makes it one
-DHCP_RA_SLAAC = _bool(os.environ.get('DHCP_RA_SLAAC', 'true'))  # the prefix DHCP6_PREFIX is announced for stateless address autoconfiguration
-DHCP6_DNS = os.environ.get('DHCP6_DNS', '')  # IPv6 addresses of the DNS servers given to clients
-DHCP_SUBNETS = os.environ.get('DHCP_SUBNETS', '')  # more networks, reached through relay agents: a JSON list, see zones/dhcp/v4.py scopes()
-DHCP_UNICAST = _bool(os.environ.get('DHCP_UNICAST', 'false'))  # Linux, root or CAP_NET_RAW, needs DHCP_INTERFACE: reply to a client that has no address yet straight to its hardware address instead of broadcasting
-DHCP_DNR = _bool(os.environ.get('DHCP_DNR', 'true'))  # announce the DNS_DDR resolvers (RFC 9463, option 162) to clients that ask
-DHCP_FAILOVER_SECS = int(os.environ.get('DHCP_FAILOVER_SECS', '0'))  # standby failover delay: answer DISCOVER only when client secs >= this value (0 = primary)
-DHCP6_PREFERENCE = int(os.environ.get('DHCP6_PREFERENCE', '0'))  # RFC 8415 §21.8 server preference option (0 = not sent; 255 = immediate selection, lower = backup)
+DHCP = False
+DHCP_SERVER = ''  # this server's own address on the network
+DHCP_NETMASK = '255.255.255.0'
+DHCP_RANGE = ''  # first-last
+DHCP_ROUTER = ''
+DHCP_DNS = ''  # empty = DHCP_SERVER
+DHCP_DOMAIN = ''
+DHCP_LEASE = 86400
+DHCP_RESERVATIONS = ''  # aa:bb:cc:dd:ee:ff=192.168.1.10 ... (space separated)
+DHCP_INTERFACE = ''  # Linux: answer on this interface only
+DHCP_NTP = ''  # NTP servers (option 42), space separated
+DHCP_SEARCH = ''  # search domains (option 119, RFC 3397); empty = DHCP_DOMAIN
+DHCP_ROUTES = ''  # static routes (option 121, RFC 3442): 10.0.0.0/8=192.168.1.5 ... (net=gateway, space separated)
+DHCP_MTU = 0  # option 26, 0 = not sent
+DHCP_BOOT_SERVER = ''  # PXE / TFTP server (option 66)
+DHCP_BOOT_FILE = ''  # boot file name (option 67 and the BOOTP file field)
+DHCP_PROBE = True  # ping an address before offering it (RFC 2131 3.1.2)
+DHCP_NAMES = True  # the DNS server answers <client host name>.<DHCP_DOMAIN> from the leases
+DHCP6 = False  # stateless DHCPv6 (zones/dhcp/v6.py): DNS servers, search list, DNR; needs DHCP_INTERFACE
+DHCP6_PREFIX = ''  # the on-link prefix, e.g. 2001:db8:1::/64 (Confirm, Router Advertisements)
+DHCP6_POOL = ''  # first-last: addresses given to clients (IA_NA); empty = no addresses
+DHCP6_PD_POOL = ''  # prefixes delegated to routers (IA_PD, RFC 3633), e.g. 2001:db8:ff00::/40; empty = none
+DHCP6_PD_LEN = 56  # the length of each delegated prefix
+DHCP6_PD_ROUTES = False  # install kernel routes (`ip -6 route`) for delegated IA_PD prefixes
+DHCP6_LEASE = 86400  # valid lifetime in seconds
+DHCP6_RAPID = False  # rapid commit (two messages instead of four)
+DHCP_RA = False  # send IPv6 Router Advertisements with DNS servers, search list and DNR (zones/dhcp/ra.py); needs DHCP_INTERFACE
+DHCP_RA_INTERVAL = 600  # seconds between advertisements
+DHCP_RA_ROUTER_LIFETIME = 0  # 0: this host is NOT a default router; >0 makes it one
+DHCP_RA_SLAAC = True  # the prefix DHCP6_PREFIX is announced for stateless address autoconfiguration
+DHCP6_DNS = ''  # IPv6 addresses of the DNS servers given to clients
+DHCP_SUBNETS = ''  # more networks, reached through relay agents: a JSON list, see zones/dhcp/v4.py scopes()
+DHCP_UNICAST = False  # Linux, root or CAP_NET_RAW, needs DHCP_INTERFACE: reply to a client that has no address yet straight to its hardware address instead of broadcasting
+DHCP_DNR = True  # announce the DNS_DDR resolvers (RFC 9463, option 162) to clients that ask
+DHCP_FAILOVER_SECS = 0  # standby failover delay: answer DISCOVER only when client secs >= this value (0 = primary)
+DHCP6_PREFERENCE = 0  # RFC 8415 §21.8 server preference option (0 = not sent; 255 = immediate selection, lower = backup)

@@ -101,6 +101,21 @@ class ReservationServerTests(TestCase):
         self.assertEqual(server.cfg.reservations, {})
 
 
+class EnvImportTests(TestCase):
+    def test_migration_imports_env_once(self):
+        import importlib
+        from django.apps import apps
+        mig = importlib.import_module('zones.migrations.0034_dhcp_settings_from_env')
+        Setting.objects.create(key='dhcp:DHCP_ROUTER', value='10.0.0.1')  # saved in the GUI: stays
+        env = {'DHCP': 'True', 'DHCP_ROUTER': '10.9.9.9', 'DHCP6_POOL': 'fd00::100-fd00::1ff', 'DHCP_LEASE': '600'}
+        with mock.patch.dict('os.environ', env):
+            mig.from_env(apps, None)
+        self.assertEqual(Setting.objects.get(key='dhcp:DHCP').value, 'true')
+        self.assertEqual(Setting.objects.get(key='dhcp:DHCP_ROUTER').value, '10.0.0.1')
+        self.assertEqual(dhcp_settings().DHCP6_POOL, 'fd00::100-fd00::1ff')
+        self.assertEqual(dhcp_settings().DHCP_LEASE, 600)
+
+
 class SettingsReloadTests(TestCase):
     def cmd(self):
         from .management.commands.rundhcp import Command

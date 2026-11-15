@@ -284,7 +284,7 @@ def arp_probe(ip, interface=None, src_ip=ZERO, timeout=0.25):
     import select
     import socket
     import time
-    iface = interface if interface is not None else getattr(settings, 'DHCP_INTERFACE', '')
+    iface = interface if interface is not None else dhcp_settings().DHCP_INTERFACE
     if not iface or not hasattr(socket, 'AF_PACKET'):
         return False
     try:
@@ -292,7 +292,7 @@ def arp_probe(ip, interface=None, src_ip=ZERO, timeout=0.25):
             mac = bytes.fromhex(f.read().strip().replace(':', ''))
         with socket.socket(socket.AF_PACKET, socket.SOCK_RAW, socket.htons(0x0806)) as raw:
             raw.bind((iface, 0x0806))
-            raw.send(arp_request(mac, src_ip or getattr(settings, 'DHCP_SERVER', '') or ZERO, ip))
+            raw.send(arp_request(mac, src_ip or dhcp_settings().DHCP_SERVER or ZERO, ip))
             deadline = time.monotonic() + timeout
             while (wait := deadline - time.monotonic()) > 0:
                 ready, _, _ = select.select([raw], [], [], wait)
@@ -580,8 +580,6 @@ class Server:
 
 
 def _name_cfg():
-    if settings.DHCP and settings.DHCP_NAMES and settings.DHCP_DOMAIN.strip('.'):
-        return True, settings.DHCP_DOMAIN.strip('.').lower()
     s = dhcp_settings()
     return bool(s.DHCP and s.DHCP_NAMES and s.DHCP_DOMAIN.strip('.')), s.DHCP_DOMAIN.strip('.').lower()
 

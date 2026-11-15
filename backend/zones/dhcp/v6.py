@@ -11,7 +11,6 @@ import uuid
 from dataclasses import dataclass
 from datetime import timedelta
 
-from django.conf import settings
 from django.utils import timezone
 
 from ..dnsd import ddr
@@ -32,13 +31,13 @@ MAX_IA, MAX_PER_CLIENT = 8, 16
 
 def sync_pd_route(prefix, peer_ip=None, interface=None, add=True, enabled=None):
     """Install or remove a kernel IPv6 route (`ip -6 route replace/del`) for a delegated IA_PD prefix when DHCP6_PD_ROUTES=true."""
-    on = getattr(settings, 'DHCP6_PD_ROUTES', False) if enabled is None else enabled
+    on = dhcp.dhcp_settings().DHCP6_PD_ROUTES if enabled is None else enabled
     if not on:
         return False
     cmd = ['ip', '-6', 'route', 'replace' if add else 'del', str(prefix)]
     if add and peer_ip:
         cmd += ['via', str(peer_ip).split('%')[0]]
-    iface = interface or getattr(settings, 'DHCP_INTERFACE', '')
+    iface = interface or dhcp.dhcp_settings().DHCP_INTERFACE
     if add and iface:
         cmd += ['dev', iface]
     try:

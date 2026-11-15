@@ -206,7 +206,7 @@ DNS_DDR=dot:dns.example.lan@192.168.1.23,2001:db8::53 doh:dns.example.lan/dns-qu
 ### Built-in DHCPv4, DHCPv6 and Router Advertisements (`rundhcp`)
 
 ```sh
-python manage.py rundhcp    # off by default: set DHCP=true (and optional DHCP6=true, DHCP_RA=true) in .env
+python manage.py rundhcp    # off by default: turn DHCP (and optional DHCPv6, Router Advertisements) on in the GUI, DHCP > DHCP settings
 ```
 
 - **DHCPv4 (RFC 2131/2132/3046/3118/3203/3396/3397/3442/4388/4702/6842):** address pool (`DHCP_RANGE`), reservations by MAC (GUI with CSV import/export, or `DHCP_RESERVATIONS`), relay agent scopes (`DHCP_SUBNETS`, option 82 echoed), Leasequery (RFC 4388), authenticated `FORCERENEW` (RFC 3203 / RFC 3118 HMAC-MD5 per-client Reconfigure Key, option 90), standby failover delay (`DHCP_FAILOVER_SECS`), NTP (42), domain search list (119), classless static routes (121), MTU (26), PXE boot (66/67), DNR (162), direct hardware unicast (`DHCP_UNICAST`), and address conflict probing (`DHCP_PROBE`: ARP Who-Has on `DHCP_INTERFACE` when `CAP_NET_RAW` is available, falling back to ICMP echo).

@@ -272,9 +272,9 @@ Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or 
 
 ### Optional: DHCP, DHCPv6 and Router Advertisements
 
-`rundhcp` is a DHCP server for your network, set in `.env` (see `.env.example`; everything is off by default). It can run DHCPv4 (an address range, fixed addresses by MAC, router, DNS servers, domain, NTP, routes, PXE, relay agents), DHCPv6 (addresses, delegated prefixes, or only the DNS information), and IPv6 Router Advertisements with the DNS servers. With `DNS_DDR` set it tells clients about your encrypted resolvers (RFC 9463). The leases are in the database (GUI page *DHCP*, Django admin).
+`rundhcp` is a DHCP server for your network, set in the GUI (**DHCP > DHCP settings**, saved in the database, nothing in `.env`; everything is off by default). It can run DHCPv4 (an address range, fixed addresses by MAC, router, DNS servers, domain, NTP, routes, PXE, relay agents), DHCPv6 (addresses, delegated prefixes, or only the DNS information), and IPv6 Router Advertisements with the DNS servers. With `DNS_DDR` set it tells clients about your encrypted resolvers (RFC 9463). The leases are in the database (GUI page *DHCP*, Django admin).
 
-**Turn off the DHCP server of your router first: two DHCP servers on one network hand out conflicting addresses.** Then in `.env` set `DHCP=true`, `DHCP_SERVER` (the address of this host), `DHCP_RANGE` and, on a host with several interfaces, `DHCP_INTERFACE`. `DHCP6=true` and `DHCP_RA=true` need `DHCP_INTERFACE`. Run `manage.py migrate` first (tables of leases).
+**Turn off the DHCP server of your router first: two DHCP servers on one network hand out conflicting addresses.** Then, in *DHCP settings*, turn DHCP on and set `DHCP_SERVER` (the address of this host), `DHCP_RANGE` and, on a host with several interfaces, `DHCP_INTERFACE`. While DHCP is off `rundhcp` just waits; a change in the GUI applies within 2 seconds. `DHCP6=true` and `DHCP_RA=true` need `DHCP_INTERFACE`. Run `manage.py migrate` first (tables of leases).
 
 It binds UDP ports 67 and 547: the same `setcap` as port 53 (next section) is enough. `DHCP_UNICAST` and `DHCP_RA` also need `CAP_NET_RAW`, and `DHCP_PROBE` needs the `ping` program (package `iputils-ping`):
 
