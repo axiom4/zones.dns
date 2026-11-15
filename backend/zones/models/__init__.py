@@ -4,6 +4,7 @@ from .ip_geo import IpGeo
 from .mfa import Passkey, TotpDevice
 from .query_log import QueryLog
 from .dhcp_reservation import DhcpReservation
+from .dhcp6_reservation import Dhcp6Reservation
 from .lease import DhcpLease
 from .mac_vendor import MacVendor
 from .lease6 import Dhcp6Lease
@@ -13,4 +14,4 @@ from .stat import DomainStat, GeoStat, LogTotal, StatCount
 from .static_host import StaticHost
 from .zone import Zone
 
-__all__ = ['MacVendor', 'DhcpReservation', 'DhcpLease', 'Dhcp6Lease', 'DataVersion', 'Passkey', 'TotpDevice', 'IpGeo', 'DomainStat', 'GeoStat', 'LogTotal', 'StatCount', 'BlockedDomain', 'PersonalBlock', 'PublicBlocklistEntry', 'QueryLog', 'RECORD_TYPES', 'Record', 'StaticHost', 'Zone', 'build_rr', 'cname_conflict', 'CNAME_ALONE', 'Setting', 'PERSONAL_BLOCKS', 'PUBLIC_LISTS', 'COUNTS_KEY']
+__all__ = ['MacVendor', 'Dhcp6Reservation', 'DhcpReservation', 'DhcpLease', 'Dhcp6Lease', 'DataVersion', 'Passkey', 'TotpDevice', 'IpGeo', 'DomainStat', 'GeoStat', 'LogTotal', 'StatCount', 'BlockedDomain', 'PersonalBlock', 'PublicBlocklistEntry', 'QueryLog', 'RECORD_TYPES', 'Record', 'StaticHost', 'Zone', 'build_rr', 'cname_conflict', 'CNAME_ALONE', 'Setting', 'PERSONAL_BLOCKS', 'PUBLIC_LISTS', 'COUNTS_KEY']

@@ -18,6 +18,9 @@ export type { DestinationCountry } from './models/destination-country';
 export type { DestinationNetwork } from './models/destination-network';
 export type { DestinationPoint } from './models/destination-point';
 export type { Destinations } from './models/destinations';
+export type { Dhcp6Reservation } from './models/dhcp-6-reservation';
+export type { Dhcp6ReservationImportRequest } from './models/dhcp-6-reservation-import-request';
+export type { Dhcp6ReservationRequest } from './models/dhcp-6-reservation-request';
 export type { DhcpLease } from './models/dhcp-lease';
 export type { DhcpPingRequestRequest } from './models/dhcp-ping-request-request';
 export type { DhcpPingResult } from './models/dhcp-ping-result';
@@ -61,6 +64,7 @@ export type { PaginatedQueryLogGroupList } from './models/paginated-query-log-gr
 export type { PaginatedQueryLogList } from './models/paginated-query-log-list';
 export type { PasskeyInfo } from './models/passkey-info';
 export type { PatchedBlockedDomainRequest } from './models/patched-blocked-domain-request';
+export type { PatchedDhcp6ReservationRequest } from './models/patched-dhcp-6-reservation-request';
 export type { PatchedDhcpReservationRequest } from './models/patched-dhcp-reservation-request';
 export type { PatchedDhcpSettingsRequest } from './models/patched-dhcp-settings-request';
 export type { PatchedPersonalSwitchRequest } from './models/patched-personal-switch-request';

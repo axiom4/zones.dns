@@ -124,10 +124,72 @@ class DnsListTests(TestCase):
             self.assertEqual([str(x) for x in scopes(s)[0].dns], ['192.168.1.23', '192.168.1.254'])
 
 
+class Reservation6Tests(TestCase):
+    def setUp(self):
+        from .dhcp.v6 import Config6, Server6
+        cfg = Config6([ipaddress.IPv6Address('2001:db8::53')], ['lan'], [], 1200, ipaddress.IPv6Network('2001:db8:1::/64'),
+                      ipaddress.IPv6Address('2001:db8:1::100'), ipaddress.IPv6Address('2001:db8:1::101'), None, 56, name='t')
+        self.s = Server6(cfg)
+        self.api = APIClient()
+        self.api.force_authenticate(get_user_model().objects.create_user('staff6', password='x', is_staff=True))
+
+    def take(self, duid, iaid=1, only_existing=False):
+        from django.utils import timezone
+        return self.s._take('na', duid, iaid, [], timezone.now(), 3600, only_existing)
+
+    def test_reserved_address_goes_to_its_client_and_to_nobody_else(self):
+        from .models import Dhcp6Reservation
+        Dhcp6Reservation.objects.create(duid='aa' * 8, ip='2001:db8:1::100')
+        self.assertEqual(self.take('bb' * 8), '2001:db8:1::101')  # ::100 is not free for the others
+        self.assertIsNone(self.take('cc' * 8))  # pool exhausted
+        self.assertEqual(self.take('aa' * 8), '2001:db8:1::100')  # it takes its own, though the other holds ::101
+        Dhcp6Reservation.objects.create(duid='dd' * 8, ip='2001:db8:1::50')  # outside the pool, inside the prefix
+        self.assertEqual(self.take('dd' * 8), '2001:db8:1::50')
+        Dhcp6Reservation.objects.filter(duid='dd' * 8).update(ip='2001:db8:1::51')
+        self.assertIsNone(self.take('dd' * 8, only_existing=True))  # a renewal of the old address: NoBinding, the client asks again
+        self.assertEqual(self.take('dd' * 8), '2001:db8:1::51')
+
+    @override_settings(DHCP6_PREFIX='2001:db8:1::/64')
+    def test_api(self):
+        r = self.api.post('/api/dhcp/reservations6/', {'duid': '00:03:00:01:D8:3A:DD:BE:4E:69', 'ip': '2001:db8:1::77', 'note': 'cam'}, format='json')
+        self.assertEqual(r.status_code, 201, r.content)
+        self.assertEqual((r.json()['duid'], r.json()['mac']), ('00030001d83addbe4e69', 'd8:3a:dd:be:4e:69'))
+        self.assertEqual(self.api.post('/api/dhcp/reservations6/', {'duid': '00030001d83addbe4e69', 'ip': '2001:db8:1::78'}, format='json').status_code, 400)  # DUID twice
+        self.assertEqual(self.api.post('/api/dhcp/reservations6/', {'duid': 'ab' * 8, 'ip': '2001:db8:1::77'}, format='json').status_code, 400)  # address twice
+        self.assertEqual(self.api.post('/api/dhcp/reservations6/', {'duid': 'ab' * 8, 'ip': '2001:db9::1'}, format='json').status_code, 400)  # outside the prefix
+        self.assertEqual(self.api.post('/api/dhcp/reservations6/', {'duid': 'xyz', 'ip': '2001:db8:1::79'}, format='json').status_code, 400)
+
+
+class Reservation6CsvTests(TestCase):
+    def setUp(self):
+        self.api = APIClient()
+        self.api.force_authenticate(get_user_model().objects.create_user('staff6c', password='x', is_staff=True))
+
+    @override_settings(DHCP6_PREFIX='2001:db8:1::/64')
+    def test_import_and_export(self):
+        from .models import Dhcp6Reservation
+        csv = 'duid,ip,note,enabled\n00:03:00:01:d8:3a:dd:be:4e:69,2001:db8:1::10,cam,true\n' + 'ab' * 8 + ',2001:db8:1::11,,false\n'
+        r = self.api.post('/api/dhcp/reservations6/import/', {'text': csv, 'dry_run': True}, format='json').json()
+        self.assertEqual((r['created'], r['errors']), (2, []))
+        self.assertEqual(Dhcp6Reservation.objects.count(), 0)  # a preview changes nothing
+        r = self.api.post('/api/dhcp/reservations6/import/', {'text': csv}, format='json').json()
+        self.assertEqual(r['created'], 2)
+        self.assertFalse(Dhcp6Reservation.objects.get(duid='ab' * 8).enabled)
+        again = self.api.post('/api/dhcp/reservations6/import/', {'text': csv}, format='json').json()
+        self.assertEqual((again['created'], again['skipped']), (0, 2))
+        # no header, columns in any order; one bad line: nothing changes
+        bad = self.api.post('/api/dhcp/reservations6/import/', {'text': 'cd' * 8 + ',2001:db8:1::12\n2001:db9::1,' + 'ef' * 8}, format='json').json()
+        self.assertEqual(len(bad['errors']), 1)
+        self.assertEqual(Dhcp6Reservation.objects.count(), 2)
+        out = self.api.get('/api/dhcp/reservations6/export/').content.decode().splitlines()
+        self.assertEqual(out[0], 'duid,ip,note,enabled')
+        self.assertIn('00030001d83addbe4e69,2001:db8:1::10,cam,true', out)
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone
-        from .views.dhcp import duid_mac
+        from .dhcp.v6 import duid_mac
         llt, ll = '00010001' + '2b3c4d5e' + 'd83addbe4e69', '00030001' + 'd83addbe4e69'
         self.assertEqual(duid_mac(llt), 'd8:3a:dd:be:4e:69')
         self.assertEqual(duid_mac(ll), 'd8:3a:dd:be:4e:69')

@@ -7,25 +7,11 @@ from rest_framework.views import APIView
 
 from .. import netcheck, oui
 from ..dhcp import v4 as dhcp, v6 as dhcp6, ra
+from ..dhcp.v6 import duid_mac
 from ..models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, Setting
 from ..serializers import DhcpLeaseSerializer, DhcpPingRequestSerializer, DhcpPingResultSerializer, DhcpSettingsSerializer, MacVendorSerializer
 
 LIMIT = 1000
-
-
-def duid_mac(duid):
-    """The MAC address inside a DUID of type 1 (link-layer address plus time) or 3 (link-layer address), hex as stored; '' for the others (type 2, 4, random)."""
-    try:
-        raw = bytes.fromhex(duid)
-    except ValueError:
-        return ''
-    if len(raw) >= 14 and raw[:2] == b'\x00\x01' and raw[2:4] == b'\x00\x01':  # DUID-LLT over Ethernet
-        mac = raw[8:14]
-    elif len(raw) >= 10 and raw[:2] == b'\x00\x03' and raw[2:4] == b'\x00\x01':  # DUID-LL over Ethernet
-        mac = raw[4:10]
-    else:
-        return ''
-    return ':'.join(f'{b:02x}' for b in mac)
 
 
 class DhcpLeasesView(APIView):

@@ -15,7 +15,7 @@ from django.utils import timezone
 
 from ..dnsd import ddr
 from . import v4 as dhcp
-from ..models import Dhcp6Lease
+from ..models import Dhcp6Lease, Dhcp6Reservation
 
 SOLICIT, ADVERTISE, REQUEST, CONFIRM, RENEW, REBIND, REPLY, RELEASE, DECLINE, RECONFIGURE, INFORMATION_REQUEST, RELAY_FORW, RELAY_REPL, LEASEQUERY, LEASEQUERY_REPLY = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 CLIENTID, SERVERID, IA_NA, IA_TA, IAADDR, ORO, PREFERENCE, AUTH, STATUS, RAPID, DNS, DOMAINS, IA_PD, IAPREFIX, REFRESH, INTERFACE_ID, RELAY_MSG, DNR = 1, 2, 3, 4, 5, 6, 7, 11, 13, 14, 23, 24, 25, 26, 32, 18, 9, 144
@@ -27,6 +27,21 @@ OFFER_HOLD, MAX_HOPS, MAX_PD_SCAN = 60, 32, 65536
 # one packet may carry hundreds of IAs: each would take an address or a prefix (and an `ip route` with DHCP6_PD_ROUTES), so a single client
 # could empty the pool with a few messages. Real clients use one or two per kind.
 MAX_IA, MAX_PER_CLIENT = 8, 16
+
+
+def duid_mac(duid):
+    """The MAC address inside a DUID of type 1 (link-layer address plus time) or 3 (link-layer address), hex as stored; '' for the others (type 2, 4, random)."""
+    try:
+        raw = bytes.fromhex(duid)
+    except ValueError:
+        return ''
+    if len(raw) >= 14 and raw[:2] == b'\x00\x01' and raw[2:4] == b'\x00\x01':  # DUID-LLT over Ethernet
+        mac = raw[8:14]
+    elif len(raw) >= 10 and raw[:2] == b'\x00\x03' and raw[2:4] == b'\x00\x01':  # DUID-LL over Ethernet
+        mac = raw[4:10]
+    else:
+        return ''
+    return ':'.join(f'{b:02x}' for b in mac)
 
 
 def sync_pd_route(prefix, peer_ip=None, interface=None, add=True, enabled=None):
@@ -364,7 +379,18 @@ class Server6:
         """The address or prefix (text) this IA holds now, allocating one unless only_existing; None when there is none."""
         c = self.cfg
         cur = Dhcp6Lease.objects.filter(duid=duid, iaid=iaid, kind=kind).first()
-        if cur and self._in_pool(kind, cur.value):
+        blocked = set()  # addresses reserved for other clients: never given out, never kept
+        if kind == 'na':
+            mine = Dhcp6Reservation.objects.filter(enabled=True, duid=duid).values_list('ip', flat=True).first()
+            blocked = set(Dhcp6Reservation.objects.filter(enabled=True).exclude(duid=duid).values_list('ip', flat=True))
+            if mine:  # the reserved address wins over the pool, and may lie outside it
+                if cur and cur.value == mine:
+                    return self._store(kind, duid, iaid, mine, now, seconds, peer_ip=peer_ip)
+                if only_existing:
+                    return None  # NoBinding: the client asks again and is given the reserved one
+                if not Dhcp6Lease.objects.filter(duid=duid, kind=kind, value=mine).exclude(iaid=iaid).exists():  # another IA of this client has it
+                    return self._store(kind, duid, iaid, mine, now, seconds, peer_ip=peer_ip)
+        if cur and self._in_pool(kind, cur.value) and cur.value not in blocked:
             return self._store(kind, duid, iaid, cur.value, now, seconds, peer_ip=peer_ip)
         if only_existing:
             return None
@@ -375,10 +401,10 @@ class Server6:
             return None
         for h in hints:  # the client may ask for a particular one
             want = self._hint(kind, h)
-            if want and self._in_pool(kind, want) and self._free(None, duid, check=want, iaid=iaid, kind=kind, now=now):
+            if want and want not in blocked and self._in_pool(kind, want) and self._free(None, duid, check=want, iaid=iaid, kind=kind, now=now):
                 return self._store(kind, duid, iaid, want, now, seconds, peer_ip=peer_ip)
         kinds = ('na', 'ta') if kind in ('na', 'ta') else ('pd',)
-        taken = set(Dhcp6Lease.objects.filter(kind__in=kinds, expires__gt=now).exclude(duid=duid, iaid=iaid, kind=kind).values_list('value', flat=True))
+        taken = set(Dhcp6Lease.objects.filter(kind__in=kinds, expires__gt=now).exclude(duid=duid, iaid=iaid, kind=kind).values_list('value', flat=True)) | blocked
         for cand in self._candidates(kind):
             if cand not in taken:
                 return self._store(kind, duid, iaid, cand, now, seconds, peer_ip=peer_ip)

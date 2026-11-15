@@ -2,17 +2,18 @@ import { Component, computed, inject, input, signal, viewChild } from '@angular/
 import { FormsModule } from '@angular/forms';
 import { Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
-import { dhcpLeasesDestroy, dhcpReservationsList, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
+import { dhcpLeasesDestroy, dhcpReservationsList, dhcpReservations6List, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
 import { DhcpLease, DhcpSettings } from '../api/models';
 import { byIp } from '../lib/ip';
 import { DhcpReservations } from '../dhcp-reservations/dhcp-reservations';
+import { DhcpReservations6 } from '../dhcp-reservations6/dhcp-reservations6';
 import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-dhcp-page',
-  imports: [FormsModule, RouterLink, DhcpReservations, PingLive],
+  imports: [FormsModule, RouterLink, DhcpReservations, DhcpReservations6, PingLive],
   templateUrl: './dhcp-page.html',
 })
 export class DhcpPage {
@@ -25,9 +26,10 @@ export class DhcpPage {
   saved = signal(false);
   private router = inject(Router);
   section = input('leases', { alias: 'tab' }); // the :tab of the route /dhcp/:tab
-  tab = computed(() => (['leases', 'leases6', 'reservations'].includes(this.section()) ? this.section() : 'leases'));
+  tab = computed(() => (['leases', 'leases6', 'reservations', 'reservations6'].includes(this.section()) ? this.section() : 'leases'));
   shown = computed(() => this.leases().filter(l => l.family === (this.tab() === 'leases6' ? 6 : 4)));
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
+  reserve6 = signal<{ duid: string; ip: string } | null>(null);
   reserved = signal(new Set<string>()); // MACs and addresses that already have a reservation
   q = '';
   all = false;
@@ -36,13 +38,14 @@ export class DhcpPage {
 
   load() {
     return this.ui.run(async () => {
-      const [leases, cfg, res] = await Promise.all([
+      const [leases, cfg, res, res6] = await Promise.all([
         this.api.invoke(dhcpLeasesList, { q: this.q || undefined, all: this.all || undefined }),
         this.api.invoke(dhcpSettingsRetrieve),
         this.api.invoke(dhcpReservationsList),
+        this.api.invoke(dhcpReservations6List),
       ]);
       this.leases.set([...leases].sort((a, b) => byIp(a.address, b.address)));
-      this.reserved.set(new Set(res.flatMap(r => [r.mac, r.ip])));
+      this.reserved.set(new Set([...res.flatMap(r => [r.mac, r.ip]), ...res6.flatMap(r => [r.duid, r.ip])]));
       this.cfg.set(cfg);
     });
   }
@@ -58,6 +61,11 @@ export class DhcpPage {
   fix(l: DhcpLease) {
     this.reserve.set({ mac: l.client, ip: l.address, hostname: l.hostname });
     this.router.navigate(['/dhcp', 'reservations']);
+  }
+  /** Make the address of a DHCPv6 lease fixed for its client (DUID): opens the DHCPv6 reservations with the form filled in. */
+  fix6(l: DhcpLease) {
+    this.reserve6.set({ duid: l.client, ip: l.address });
+    this.router.navigate(['/dhcp', 'reservations6']);
   }
   watch(l: DhcpLease) { this.live()?.open(l.address); }
   pingOne(l: DhcpLease) { return this.ui.run(() => this.ping.once(l.address)); }

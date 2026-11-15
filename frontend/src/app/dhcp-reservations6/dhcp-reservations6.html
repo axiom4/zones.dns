@@ -1,0 +1,68 @@
+<header>
+  <div>
+    <h2>DHCPv6 reservations</h2>
+    <p class="soft">{{ items().length }} {{ items().length === 1 ? 'reservation' : 'reservations' }}. The client with this DUID always gets this IPv6 address (inside the DHCPv6 prefix, the pool is not needed) and nobody else is given it; changes apply at once, no restart. Use the <b>Reserve</b> button on a lease in <i>Leases 6</i> to fill the form.</p>
+  </div>
+  <div class="actions">
+    @if (items().length > 5) {
+      <input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search" aria-label="Search reservations" autocomplete="off">
+    }
+    <button class="ghost" type="button" (click)="pingAll()" [disabled]="ping.busy() || !items().length">{{ ping.busy() ? 'Pinging…' : 'Ping all' }}</button>
+    <button class="ghost" type="button" (click)="openImport()">Import</button>
+    <button class="ghost" type="button" (click)="exportCsv()" [disabled]="!items().length">Export</button>
+  </div>
+</header>
+<form class="composer" (ngSubmit)="add()">
+  <input class="grow" name="d" [(ngModel)]="draft.duid" placeholder="DUID 00:03:00:01:d8:3a:dd:be:4e:69" autocomplete="off" aria-label="DUID" required>
+  <input class="addr" name="i" [(ngModel)]="draft.ip" placeholder="IPv6 address" autocomplete="off" aria-label="IPv6 address" required>
+  <input class="comment" name="o" [(ngModel)]="draft.note" placeholder="Note (optional)" autocomplete="off" aria-label="Note">
+  <button class="primary">Reserve</button>
+</form>
+<ul class="records leases">
+  @for (r of shown(); track r.id) {
+    @if (editing() === r.id) {
+      <li class="editing">
+        <form class="composer inline-edit" (ngSubmit)="save(r)">
+          <input class="grow" name="ed" [(ngModel)]="edit.duid" autocomplete="off" aria-label="DUID" required>
+          <input class="addr" name="ei" [(ngModel)]="edit.ip" autocomplete="off" aria-label="IPv6 address" required>
+          <input class="comment" name="eo" [(ngModel)]="edit.note" autocomplete="off" aria-label="Note">
+          <button class="mini primary">Save</button>
+          <button type="button" class="mini" (click)="editing.set(null)">Cancel</button>
+        </form>
+      </li>
+    } @else {
+      <li [class.off]="r.enabled === false">
+        <span class="type" data-t="AAAA">v6</span>
+        <span class="rname">{{ r.ip }}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
+        <span class="rvalue" [title]="'DUID ' + r.duid">{{ r.mac || r.duid }}@if (r.vendor) {<small class="note-t">{{ r.vendor }}</small>} @else if (!r.mac) {<small class="note-t">DUID</small>}</span>
+        @if (ping.label(r.ip); as p) { <span class="pingr" [class.up]="ping.results()[r.ip]?.up">{{ p }}</span> }
+        <button class="mini" type="button" (click)="pingOne(r)" (dblclick)="watch(r)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + r.ip">Ping</button>
+        <button class="switch" role="switch" [attr.aria-checked]="r.enabled !== false" (click)="toggle(r)"
+                [title]="r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
+        <button class="icon edit" (click)="startEdit(r)" [attr.aria-label]="'Edit ' + r.ip">✎</button>
+        <button class="icon" (click)="del(r)" [attr.aria-label]="'Delete ' + r.ip">✕</button>
+      </li>
+    }
+  } @empty {
+    <li class="empty">{{ items().length ? 'No results for your search.' : 'No reservations. Add one above, or press Reserve on a lease in Leases 6.' }}</li>
+  }
+</ul>
+<dialog #imp class="confirm wide" (click)="$event.target === imp ? imp.close() : null">
+  <h3>Import DHCPv6 reservations</h3>
+  <p class="soft">CSV, one per line: <code>duid,ip</code> (optional: note, enabled). With a header line (<code>duid,ip,note,enabled</code>) the columns can be in any order; without one the IPv6 address is found by its look and the other first field is the DUID. Separator <code>,</code> <code>;</code> or tab. Lines starting with <code>#</code> are ignored. Any error in the file and nothing is changed.</p>
+  <input type="file" accept=".csv,.txt,text/csv,text/plain" (change)="pickFile($event)" aria-label="CSV file">
+  <textarea [(ngModel)]="importText" name="it" rows="9" placeholder="00:03:00:01:d8:3a:dd:be:4e:69,2001:db8:1::10" aria-label="CSV content" (ngModelChange)="importResult.set(null)"></textarea>
+  <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Replace the existing reservations</label>
+  @if (importResult(); as r) {
+    <div class="result">
+      <b>{{ r.created }}</b> to create, <b>{{ r.updated }}</b> to update, <b>{{ r.skipped }}</b> unchanged
+      @for (e of r.errors; track e) { <p class="error">{{ e }}</p> }
+    </div>
+  }
+  <div class="actions">
+    <button class="ghost" (click)="imp.close()">Close</button>
+    <button class="ghost" (click)="runImport(true)" [disabled]="!importText.trim()">Preview</button>
+    <button class="primary" (click)="confirmImport()" [disabled]="!importText.trim()">Import</button>
+  </div>
+</dialog>
+<app-ping-live />

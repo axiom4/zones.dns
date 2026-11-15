@@ -2,9 +2,12 @@
   <a routerLink="/dhcp/leases" [class.on]="tab() === 'leases'" (click)="reserve.set(null); load()">Leases</a>
   <a routerLink="/dhcp/leases6" [class.on]="tab() === 'leases6'" (click)="reserve.set(null); load()">Leases 6</a>
   <a routerLink="/dhcp/reservations" [class.on]="tab() === 'reservations'">Reservations</a>
+  <a routerLink="/dhcp/reservations6" [class.on]="tab() === 'reservations6'" (click)="reserve6.set(null)">Reservations 6</a>
 </nav>
 @if (tab() === 'reservations') {
   @for (r of [reserve()]; track r) { <app-dhcp-reservations [prefill]="r" /> }
+} @else if (tab() === 'reservations6') {
+  @for (r of [reserve6()]; track r) { <app-dhcp-reservations6 [prefill]="r" /> }
 } @else {
 <header>
   <div>
@@ -104,6 +107,7 @@
       <span class="ttlv">{{ l.active ? 'until' : 'ended' }} {{ when(l.expires) }}</span>
       @if (l.kind === 'address') { <button class="mini" type="button" (click)="pingOne(l)" (dblclick)="watch(l)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + l.address">Ping</button> }
       @if (l.family === 4 && l.kind === 'address') { <button class="mini" type="button" (click)="fix(l)" [disabled]="isReserved(l)" [title]="isReserved(l) ? 'Already reserved' : ''" [attr.aria-label]="'Reserve ' + l.address + ' for ' + l.client">{{ isReserved(l) ? 'Reserved' : 'Reserve' }}</button> }
+      @if (l.family === 6 && l.kind === 'address') { <button class="mini" type="button" (click)="fix6(l)" [disabled]="isReserved(l)" [title]="isReserved(l) ? 'Already reserved' : ''" [attr.aria-label]="'Reserve ' + l.address + ' for ' + l.client">{{ isReserved(l) ? 'Reserved' : 'Reserve' }}</button> }
       <button class="icon" (click)="end(l)" [attr.aria-label]="'End the lease of ' + l.address">✕</button>
     </li>
   } @empty {

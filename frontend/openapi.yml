@@ -571,6 +571,180 @@ paths:
               schema:
                 $ref: '#/components/schemas/DhcpReservationImportResult'
           description: ''
+  /api/dhcp/reservations6/:
+    get:
+      operationId: dhcp_reservations6_list
+      description: Fixed DHCPv6 addresses by client DUID.
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Dhcp6Reservation'
+          description: ''
+    post:
+      operationId: dhcp_reservations6_create
+      description: Fixed DHCPv6 addresses by client DUID.
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Dhcp6ReservationRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dhcp6Reservation'
+          description: ''
+  /api/dhcp/reservations6/{id}/:
+    get:
+      operationId: dhcp_reservations6_retrieve
+      description: Fixed DHCPv6 addresses by client DUID.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCPv6 reservation.
+        required: true
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dhcp6Reservation'
+          description: ''
+    put:
+      operationId: dhcp_reservations6_update
+      description: Fixed DHCPv6 addresses by client DUID.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCPv6 reservation.
+        required: true
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Dhcp6ReservationRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dhcp6Reservation'
+          description: ''
+    patch:
+      operationId: dhcp_reservations6_partial_update
+      description: Fixed DHCPv6 addresses by client DUID.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCPv6 reservation.
+        required: true
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDhcp6ReservationRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Dhcp6Reservation'
+          description: ''
+    delete:
+      operationId: dhcp_reservations6_destroy
+      description: Fixed DHCPv6 addresses by client DUID.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCPv6 reservation.
+        required: true
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/dhcp/reservations6/export/:
+    get:
+      operationId: dhcp_reservations6_export_retrieve
+      description: Every reservation as CSV (duid,ip,note,enabled).
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema:
+                type: string
+          description: ''
+  /api/dhcp/reservations6/import/:
+    post:
+      operationId: dhcp_reservations6_import_create
+      description: Add or update reservations from CSV (matched by DUID); with replace
+        the table is emptied first.
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Dhcp6ReservationImportRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpReservationImportResult'
+          description: ''
   /api/dhcp/settings/:
     get:
       operationId: dhcp_settings_retrieve
@@ -2340,6 +2514,81 @@ components:
       - pending
       - points
       - scanned
+    Dhcp6Reservation:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        duid:
+          type: string
+          maxLength: 260
+        ip:
+          type: string
+          format: ipv6
+        note:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+        mac:
+          type: string
+          readOnly: true
+          description: MAC address inside the DUID (types 1 and 3), empty for the
+            others
+        vendor:
+          type: string
+          readOnly: true
+          description: Maker of the network card, empty if unknown
+      required:
+      - created
+      - duid
+      - id
+      - ip
+      - mac
+      - vendor
+    Dhcp6ReservationImportRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: 'CSV: duid,ip,note,enabled (first line may be that header)'
+          maxLength: 2000000
+        replace:
+          type: boolean
+          default: false
+          description: Delete every reservation first (needs a second factor when
+            the user has one)
+        dry_run:
+          type: boolean
+          default: false
+          description: Only count, change nothing
+      required:
+      - text
+    Dhcp6ReservationRequest:
+      type: object
+      properties:
+        duid:
+          type: string
+          minLength: 1
+          maxLength: 260
+        ip:
+          type: string
+          format: ipv6
+          minLength: 1
+        note:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
+      required:
+      - duid
+      - ip
     DhcpLease:
       type: object
       properties:
@@ -3256,6 +3505,22 @@ components:
           type: string
           format: date-time
           nullable: true
+    PatchedDhcp6ReservationRequest:
+      type: object
+      properties:
+        duid:
+          type: string
+          minLength: 1
+          maxLength: 260
+        ip:
+          type: string
+          format: ipv6
+          minLength: 1
+        note:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
     PatchedDhcpReservationRequest:
       type: object
       properties:
