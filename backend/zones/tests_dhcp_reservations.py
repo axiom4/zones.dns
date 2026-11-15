@@ -183,3 +183,29 @@ class VendorAndPingTests(TestCase):
             with mock.patch('zones.management.commands.update_oui.MIN_ROWS', 2):
                 call_command('update_oui', stdout=mock.Mock())
         self.assertEqual(dict(MacVendor.objects.values_list('prefix', 'name')), {'001BC5001': 'OpenRB.com, Direct SIA', 'F4F5D8': 'Google, Inc.'})
+
+
+class IcmpTests(TestCase):
+    def test_packets(self):
+        from . import netcheck
+        pkt = netcheck.echo_request(4, 0x1234, 7)
+        self.assertEqual((pkt[0], pkt[1]), (8, 0))
+        self.assertEqual(netcheck.checksum(pkt), 0)  # a packet with a right checksum sums to zero
+        self.assertEqual(netcheck.echo_request(6, 1, 1)[0], 128)
+        reply = bytes([0, 0, 0, 0]) + pkt[4:]
+        self.assertTrue(netcheck.is_reply(4, reply, 7, 0x1234))
+        self.assertTrue(netcheck.is_reply(4, bytes([0x45]) + b'\0' * 19 + reply, 7))  # with the IP header of a raw socket
+        self.assertFalse(netcheck.is_reply(4, reply, 8))  # another sequence number
+        self.assertFalse(netcheck.is_reply(4, pkt, 7))  # a request, not a reply
+        self.assertTrue(netcheck.is_reply(6, bytes([129, 0, 0, 0]) + pkt[4:], 7))
+
+    def test_loopback_answers_and_a_closed_door_does_not(self):
+        import ipaddress
+
+        from . import netcheck
+        up, ms = netcheck.ping_one(ipaddress.ip_address('127.0.0.1'))
+        self.assertTrue(up)
+        self.assertIsNotNone(ms)
+        with mock.patch('zones.netcheck._socket', side_effect=netcheck.Unavailable), mock.patch('zones.netcheck.ping_command', return_value=(True, 0.5)) as cmd:
+            self.assertEqual(netcheck.ping_one(ipaddress.ip_address('127.0.0.1')), (True, 0.5))  # no socket allowed: the ping program
+        self.assertTrue(cmd.called)
