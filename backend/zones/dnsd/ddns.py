@@ -1,6 +1,8 @@
 """Dynamic DNS Updates (RFC 2136) for authoritative zones (OPCODE.UPDATE = 5).
 
-Controlled by settings.DNS_UPDATE_ALLOW (comma-separated list of IP addresses or CIDR networks).
+Every UPDATE must be signed with TSIG (RFC 8945, keys in settings.DNS_UPDATE_KEYS, see tsig.py): an IP address can be forged over UDP, and
+DoH / DoT clients all reach the daemon from 127.0.0.1. settings.DNS_UPDATE_ALLOW (IP addresses or CIDR networks, comma separated) narrows down
+who may send them as well. No key = UPDATE refused. The message is applied whole or not at all (RFC 2136 §3.4).
 """
 import ipaddress
 
@@ -9,6 +11,7 @@ from django.db import transaction
 from dnslib import QTYPE, RCODE
 
 from ..models import DataVersion, Record, Zone
+from . import tsig
 
 CLASS_IN, CLASS_NONE, CLASS_ANY = 1, 254, 255
 _SUPPORTED_TYPES = {'A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SRV', 'NAPTR', 'PTR', 'CAA', 'SVCB', 'HTTPS', 'TLSA', 'SSHFP'}
@@ -17,7 +20,9 @@ _SUPPORTED_TYPES = {'A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SRV', 'NAPTR', 'PT
 def _client_allowed(client_ip):
     """Return True if client_ip matches any entry in settings.DNS_UPDATE_ALLOW."""
     allow_raw = getattr(settings, 'DNS_UPDATE_ALLOW', '') or ''
-    if not allow_raw or not client_ip:
+    if not allow_raw:
+        return True  # no address list: the TSIG key alone decides
+    if not client_ip:
         return False
     try:
         addr = ipaddress.ip_address(client_ip.split('%')[0])
@@ -63,8 +68,15 @@ def _rdata_to_value(rr):
     return str(rd)
 
 
-def handle_update(request, client_ip):
-    """Process an RFC 2136 UPDATE message and return a DNSRecord response."""
+class _Abort(Exception):
+    """Stops an UPDATE with this rcode; raised inside the transaction, so what was already changed is rolled back."""
+    def __init__(self, rcode):
+        super().__init__(rcode)
+        self.rcode = rcode
+
+
+def handle_update(request, client_ip, wire=None):
+    """Process an RFC 2136 UPDATE message and return a DNSRecord response. wire: the bytes received (the TSIG MAC covers them)."""
     reply = request.reply()
     reply.rr = []
     reply.auth = []
@@ -75,109 +87,86 @@ def handle_update(request, client_ip):
         reply.header.rcode = RCODE.FORMERR
         return reply
 
-    zname = str(request.q.qname).rstrip('.').lower()
-    zone = Zone.objects.filter(name__iexact=zname, enabled=True).first()
-    if not zone:
-        reply.header.rcode = RCODE.NOTAUTH
-        return reply
-
-    if not _client_allowed(client_ip):
+    # who is asking, before anything about the zones is told (NOTAUTH / NOTZONE would list them)
+    if not tsig.keys() or not _client_allowed(client_ip):
         reply.header.rcode = RCODE.REFUSED
         return reply
+    try:
+        key, alg, mac = tsig.verify(wire or b'')
+    except tsig.TsigError:
+        reply.header.rcode = RCODE.NOTAUTH  # RFC 8945 §5.2: unsigned or badly signed
+        return reply
 
-    with transaction.atomic():
-        # 1. Prerequisite Section (carried in the Answer section `request.rr`, RFC 2136 §3.2)
-        for pre in request.rr:
-            rel = _rel_name(pre.rname, zone.name)
-            if rel is None:
-                reply.header.rcode = RCODE.NOTZONE
-                return reply
-            rtype = QTYPE.get(pre.rtype, '')
-            if pre.rclass == CLASS_ANY:
-                if pre.ttl != 0:
-                    reply.header.rcode = RCODE.FORMERR
-                    return reply
-                if pre.rtype == QTYPE.ANY:
-                    # Name is in use (YXDOMAIN)
-                    if not Record.objects.filter(zone=zone, name=rel).exists():
-                        reply.header.rcode = RCODE.YXDOMAIN
-                        return reply
-                else:
-                    # RRset exists (value independent) (YXRRSET)
-                    if not Record.objects.filter(zone=zone, name=rel, type=rtype).exists():
-                        reply.header.rcode = RCODE.YXRRSET
-                        return reply
-            elif pre.rclass == CLASS_NONE:
-                if pre.ttl != 0:
-                    reply.header.rcode = RCODE.FORMERR
-                    return reply
-                if pre.rtype == QTYPE.ANY:
-                    # Name is not in use (NXDOMAIN)
-                    if Record.objects.filter(zone=zone, name=rel).exists():
-                        reply.header.rcode = RCODE.NXDOMAIN
-                        return reply
-                else:
-                    # RRset does not exist (NXRRSET)
-                    if Record.objects.filter(zone=zone, name=rel, type=rtype).exists():
-                        reply.header.rcode = RCODE.NXRRSET
-                        return reply
-            elif pre.rclass == CLASS_IN:
-                if pre.ttl != 0:
-                    reply.header.rcode = RCODE.FORMERR
-                    return reply
-                val = _rdata_to_value(pre)
-                if not Record.objects.filter(zone=zone, name=rel, type=rtype, value=val).exists():
-                    reply.header.rcode = RCODE.YXRRSET
-                    return reply
-            else:
-                reply.header.rcode = RCODE.FORMERR
-                return reply
-
-        # 2. Update Section (carried in the Authority section `request.auth`, RFC 2136 §3.4)
-        changed = False
-        for upd in request.auth:
-            rel = _rel_name(upd.rname, zone.name)
-            if rel is None:
-                reply.header.rcode = RCODE.NOTZONE
-                return reply
-            rtype = QTYPE.get(upd.rtype, '')
-            if upd.rclass == CLASS_IN:
-                # Add to an RRset
-                if rtype not in _SUPPORTED_TYPES:
-                    reply.header.rcode = RCODE.FORMERR
-                    return reply
-                val = _rdata_to_value(upd)
-                ttl = int(upd.ttl) if upd.ttl else None
-                if rtype == 'CNAME':
-                    Record.objects.filter(zone=zone, name=rel, type='CNAME').delete()
-                rec, created = Record.objects.get_or_create(
-                    zone=zone, name=rel, type=rtype, value=val,
-                    defaults={'ttl': ttl},
-                )
-                if not created and rec.ttl != ttl:
-                    rec.ttl = ttl
-                    rec.save(update_fields=['ttl'])
-                changed = True
-            elif upd.rclass == CLASS_ANY:
-                # Delete an RRset or all RRsets from a name
-                if upd.rtype == QTYPE.ANY:
-                    deleted, _ = Record.objects.filter(zone=zone, name=rel).delete()
-                else:
-                    deleted, _ = Record.objects.filter(zone=zone, name=rel, type=rtype).delete()
-                if deleted:
-                    changed = True
-            elif upd.rclass == CLASS_NONE:
-                # Delete a specific RR from an RRset
-                val = _rdata_to_value(upd)
-                deleted, _ = Record.objects.filter(zone=zone, name=rel, type=rtype, value=val).delete()
-                if deleted:
-                    changed = True
-            else:
-                reply.header.rcode = RCODE.FORMERR
-                return reply
-
-        if changed:
-            DataVersion.bump()
-
-    reply.header.rcode = RCODE.NOERROR
+    zname = str(request.q.qname).rstrip('.').lower()
+    zone = Zone.objects.filter(name__iexact=zname, enabled=True).first()
+    try:
+        if not zone:
+            raise _Abort(RCODE.NOTAUTH)
+        with transaction.atomic():
+            _apply(request, zone)
+        reply.header.rcode = RCODE.NOERROR
+    except _Abort as e:
+        reply.header.rcode = e.rcode
+    reply.wire = tsig.sign(reply.pack(), key, alg, mac)
     return reply
+
+
+def _apply(request, zone):
+    """Prerequisites, then updates; raises _Abort (the caller's transaction rolls back) at the first failure."""
+    # 1. Prerequisite Section (carried in the Answer section `request.rr`, RFC 2136 §3.2; failure codes of §3.2.5)
+    for pre in request.rr:
+        rel = _rel_name(pre.rname, zone.name)
+        if rel is None:
+            raise _Abort(RCODE.NOTZONE)
+        rtype = QTYPE.get(pre.rtype, '')
+        if pre.ttl != 0:
+            raise _Abort(RCODE.FORMERR)
+        if pre.rclass == CLASS_ANY:
+            if pre.rtype == QTYPE.ANY:  # name is in use
+                if not Record.objects.filter(zone=zone, name=rel).exists():
+                    raise _Abort(RCODE.NXDOMAIN)
+            elif not Record.objects.filter(zone=zone, name=rel, type=rtype).exists():  # RRset exists (value independent)
+                raise _Abort(RCODE.NXRRSET)
+        elif pre.rclass == CLASS_NONE:
+            if pre.rtype == QTYPE.ANY:  # name is not in use
+                if Record.objects.filter(zone=zone, name=rel).exists():
+                    raise _Abort(RCODE.YXDOMAIN)
+            elif Record.objects.filter(zone=zone, name=rel, type=rtype).exists():  # RRset does not exist
+                raise _Abort(RCODE.YXRRSET)
+        elif pre.rclass == CLASS_IN:  # RRset exists (value dependent)
+            if not Record.objects.filter(zone=zone, name=rel, type=rtype, value=_rdata_to_value(pre)).exists():
+                raise _Abort(RCODE.NXRRSET)
+        else:
+            raise _Abort(RCODE.FORMERR)
+
+    # 2. Update Section (carried in the Authority section `request.auth`, RFC 2136 §3.4)
+    changed = False
+    for upd in request.auth:
+        rel = _rel_name(upd.rname, zone.name)
+        if rel is None:
+            raise _Abort(RCODE.NOTZONE)
+        rtype = QTYPE.get(upd.rtype, '')
+        if upd.rclass == CLASS_IN:
+            # Add to an RRset
+            if rtype not in _SUPPORTED_TYPES:
+                raise _Abort(RCODE.FORMERR)
+            val = _rdata_to_value(upd)
+            ttl = int(upd.ttl) if upd.ttl else None
+            if rtype == 'CNAME':
+                Record.objects.filter(zone=zone, name=rel, type='CNAME').delete()
+            rec, created = Record.objects.get_or_create(zone=zone, name=rel, type=rtype, value=val, defaults={'ttl': ttl})
+            if not created and rec.ttl != ttl:
+                rec.ttl = ttl
+                rec.save(update_fields=['ttl'])
+            changed = True
+        elif upd.rclass == CLASS_ANY:
+            # Delete an RRset or all RRsets from a name
+            qs = Record.objects.filter(zone=zone, name=rel) if upd.rtype == QTYPE.ANY else Record.objects.filter(zone=zone, name=rel, type=rtype)
+            changed = qs.delete()[0] > 0 or changed
+        elif upd.rclass == CLASS_NONE:
+            # Delete a specific RR from an RRset
+            changed = Record.objects.filter(zone=zone, name=rel, type=rtype, value=_rdata_to_value(upd)).delete()[0] > 0 or changed
+        else:
+            raise _Abort(RCODE.FORMERR)
+    if changed:
+        DataVersion.bump()

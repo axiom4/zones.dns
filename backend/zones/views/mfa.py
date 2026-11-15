@@ -4,7 +4,7 @@ from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
 from django.db import transaction
-from drf_spectacular.utils import extend_schema
+from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.authtoken.models import Token
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny, IsAdminUser
@@ -31,6 +31,13 @@ def _enrol_user(d, auth, consume=False):
             raise mfa.MfaError('forbidden')
         return auth
     return mfa.read_ticket(d.get('ticket'), 'setup', consume=consume)
+
+
+def _confirm_change(d, auth, user):
+    """A signed-in user who already has a factor proves one before adding another (step-up, scope mfa-change): a stolen token alone cannot
+    plant the attacker's own authenticator or passkey. During login (setup ticket) there is no factor yet, so nothing to prove."""
+    if auth and auth.is_authenticated and mfa.methods(user):
+        mfa.use_grant(user, 'mfa-change', d.get('grant'))
 
 
 def _enrol_token(d, auth, user):
@@ -72,7 +79,7 @@ def _stepup(d, auth):
     if not (auth and auth.is_authenticated and auth.is_staff):
         raise mfa.MfaError('forbidden')
     scope = str(d.get('scope', ''))
-    if not re.fullmatch(r'zone-delete:\d+', scope):
+    if not re.fullmatch(r'zone-delete:\d+|mfa-change', scope):
         raise mfa.MfaError('forbidden')
     return auth, scope
 
@@ -124,6 +131,7 @@ def totp_confirm(d, auth):
     dev = TotpDevice(user=user, secret=secret, confirmed=True)
     if not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
+    _confirm_change(d, auth, user)
     TotpDevice.objects.filter(user=user).delete()
     dev.save()
     cache.delete(f'totp-new:{user.pk}')
@@ -136,6 +144,7 @@ def passkey_register_options(d, auth):
 
 def passkey_register(d, auth):
     user = _enrol_user(d, auth)
+    _confirm_change(d, auth, user)
     mfa.register_passkey(user, d.get('credential'), d.get('name'))
     return {'token': _enrol_token(d, auth, user)}
 
@@ -206,12 +215,29 @@ class MfaStatusView(APIView):
                          'passkeys': [{'id': p.id, 'name': p.name, 'created': p.created} for p in u.passkeys.order_by('created')]})
 
 
+GRANT = OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
+                         description='Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change). Required when the user has a second factor.')
+
+
+def _need_grant(request):
+    """None if the request carries a valid mfa-change grant (or the user has no factor to prove), else the 403 answer."""
+    if not mfa.methods(request.user):
+        return None
+    try:
+        mfa.use_grant(request.user, 'mfa-change', request.headers.get('X-MFA-Grant'))
+    except mfa.MfaError as e:
+        return Response({'detail': e.text, 'mfa_required': True}, status=403)
+    return None
+
+
 class TotpRemoveView(APIView):
     permission_classes = [IsAdminUser]
 
-    @extend_schema(request=None, responses={204: None})
+    @extend_schema(request=None, responses={204: None}, parameters=[GRANT])
     def delete(self, request):
-        """Remove the authenticator app (not if it is the last factor and MFA is required)."""
+        """Remove the authenticator app (not if it is the last factor and MFA is required). Needs a step-up grant (scope mfa-change)."""
+        if (denied := _need_grant(request)) is not None:
+            return denied
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=request.user.pk)
             if settings.MFA_REQUIRED and not request.user.passkeys.exists():
@@ -223,9 +249,11 @@ class TotpRemoveView(APIView):
 class PasskeyRemoveView(APIView):
     permission_classes = [IsAdminUser]
 
-    @extend_schema(request=None, responses={204: None})
+    @extend_schema(request=None, responses={204: None}, parameters=[GRANT])
     def delete(self, request, pk):
-        """Remove a passkey (not if it is the last factor and MFA is required)."""
+        """Remove a passkey (not if it is the last factor and MFA is required). Needs a step-up grant (scope mfa-change)."""
+        if (denied := _need_grant(request)) is not None:
+            return denied
         user = request.user
         with transaction.atomic():
             get_user_model().objects.select_for_update().get(pk=user.pk)

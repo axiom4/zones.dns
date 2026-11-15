@@ -41,7 +41,7 @@ The menu also has **Django admin ↗** (superusers only), which opens the admin:
 
 The interface adapts to phones (portrait and landscape) and tablets: below 1100 px the sidebar becomes a top bar.
 The Angular sources in `frontend/src/app/` have one folder per component (`zone-page/zone-page.ts` + `zone-page.html`), `services/` for injectable classes and `lib/` for plain helpers.
-The API is described in OpenAPI (`/api/schema/`, docs at `/api/docs/`) and the Angular client is generated from it: after any API change run `npm run api:gen` in `frontend/`.
+The API is described in OpenAPI (`/api/schema/`, docs at `/api/docs/`; staff only: open them after entering the Django admin from the GUI, or send the token) and the Angular client is generated from it: after any API change run `npm run api:gen` in `frontend/`.
 The interface language is English.
 
 ## Configuration (`backend/.env`)
@@ -60,7 +60,9 @@ Every variable, with example values and comments, is in `backend/.env.example`. 
 | `GUI_URL` | Where `/admin/login/` sends people (the GUI). |
 | `SUSPICIOUS_MODE`, `SUSPICIOUS_ALLOW` (+ thresholds) | Suspicious queries. |
 | `DNS_AUTHORITATIVE` | `true` (default): a name or record type missing from an internal zone gets NXDOMAIN/NODATA. `false`: it is forwarded to the upstream (a zone that overrides only some names of a real domain). |
-| `DNS_DNSSEC`, `DNS_RATE_LIMIT`, `DNS_UPDATE_ALLOW` | DNSSEC validation on upstream answers (`AD=1` / `SERVFAIL` on bogus), per-client query rate limiting (`REFUSED`), and allowed client IPs/CIDRs for RFC 2136 dynamic DNS updates (`OPCODE=UPDATE`). |
+| `DNS_ALLOW_QUERY` | Who may use the resolver (CIDRs; default the private, loopback and link-local networks): everybody else gets `REFUSED`, so a firewall mistake does not make it an open resolver. `*` = anyone. |
+| `DNS_DNSSEC`, `DNS_RATE_LIMIT` | DNSSEC validation on upstream answers through the chain of trust from the root trust anchors (`AD=1` only when every RRset is signed by keys that chain to the root; `SERVFAIL` on bogus; an unsigned delegation passes without `AD`; the absence of a DS is not proven with NSEC/NSEC3) and per-client query rate limiting (`REFUSED`). |
+| `DNS_UPDATE_KEYS`, `DNS_UPDATE_ALLOW` | RFC 2136 dynamic DNS updates (`OPCODE=UPDATE`) must be signed with TSIG (RFC 8945): `DNS_UPDATE_KEYS` = `name:base64secret` (hmac-sha256 / hmac-sha512; `nsupdate -y hmac-sha256:name:secret`); the answer is signed too, a message is applied whole or not at all, and a replayed one is refused. No key = no updates. `DNS_UPDATE_ALLOW` (IPs/CIDRs) narrows down the senders further. Updates never come through DoH (only queries are passed on). |
 | `TIME_ZONE` | Zone the Django admin shows times in (the GUI uses the browser's). MySQL/MariaDB then needs the time zone tables, see below. |
 | `REDIS_URL`, `DNS_CACHE` (+ TTLs) | Cache. |
 | `GEOIP_CITY_DB`, `GEOIP_ASN_DB`, `GEOIP_ONLINE_FALLBACK` | Geolocation. |

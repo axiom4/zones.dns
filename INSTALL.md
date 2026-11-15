@@ -299,7 +299,7 @@ Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving
 
 ## 9. Firewall
 
-Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). Keep `8000`, the database and Redis closed to the outside.
+Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). Keep `8000`, the database and Redis closed to the outside. The daemon also refuses the clients outside `DNS_ALLOW_QUERY` (private networks by default): if your clients use public addresses (IPv6 global addresses, a VPS), list their networks there.
 
 ## 10. Verify the installation
 

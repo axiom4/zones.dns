@@ -25,6 +25,9 @@ LQ_QUERY, CLIENT_DATA, CLT_TIME, LQ_RELAY_DATA = 44, 45, 46, 47
 QUERY_BY_ADDRESS, QUERY_BY_CLIENTID = 1, 2
 SUCCESS, NOADDRS, NOBINDING, NOTONLINK, NOPREFIX, UNKNOWN_QUERY_TYPE, MALFORMED_QUERY, NOT_CONFIGURED = 0, 2, 3, 4, 6, 7, 8, 9
 OFFER_HOLD, MAX_HOPS, MAX_PD_SCAN = 60, 32, 65536
+# one packet may carry hundreds of IAs: each would take an address or a prefix (and an `ip route` with DHCP6_PD_ROUTES), so a single client
+# could empty the pool with a few messages. Real clients use one or two per kind.
+MAX_IA, MAX_PER_CLIENT = 8, 16
 
 
 def sync_pd_route(prefix, peer_ip=None, interface=None, add=True, enabled=None):
@@ -315,7 +318,7 @@ class Server6:
     def _bind(self, o, duid, now, seconds, mode, peer_ip=None):
         """(IA options for the reply, whether any binding was known). mode RENEW_ONLY: only what the client already has (Renew / Rebind)."""
         body, known, seen = b'', False, set()
-        for ia in o.get(IA_NA, []):
+        for ia in o.get(IA_NA, [])[:MAX_IA]:
             if len(ia) < 12:
                 continue
             iaid = struct.unpack('!I', ia[:4])[0]
@@ -325,7 +328,7 @@ class Server6:
             got = self._take('na', duid, iaid, (options(ia[12:]) or {}).get(IAADDR, []), now, seconds, mode == RENEW_ONLY)
             known = known or got is not None
             body += self._ia(IA_NA, iaid, got, 'na', mode)
-        for ia in o.get(IA_TA, []):
+        for ia in o.get(IA_TA, [])[:MAX_IA]:
             if len(ia) < 4:
                 continue
             iaid = struct.unpack('!I', ia[:4])[0]
@@ -335,7 +338,7 @@ class Server6:
             got = self._take('ta', duid, iaid, (options(ia[4:]) or {}).get(IAADDR, []), now, seconds, mode == RENEW_ONLY)
             known = known or got is not None
             body += self._ia(IA_TA, iaid, got, 'ta', mode)
-        for ia in o.get(IA_PD, []):
+        for ia in o.get(IA_PD, [])[:MAX_IA]:
             if len(ia) < 12:
                 continue
             iaid = struct.unpack('!I', ia[:4])[0]
@@ -366,6 +369,8 @@ class Server6:
             return self._store(kind, duid, iaid, cur.value, now, seconds, peer_ip=peer_ip)
         if only_existing:
             return None
+        if Dhcp6Lease.objects.filter(duid=duid, kind=kind, expires__gt=now).exclude(iaid=iaid).count() >= MAX_PER_CLIENT:
+            return None  # NoAddrsAvail / NoPrefixAvail: this client holds enough already
         pool_on = c.na_first if kind in ('na', 'ta') else c.pd_pool
         if pool_on is None:
             return None

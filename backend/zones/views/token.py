@@ -25,7 +25,7 @@ def client_ip(request):
             return real[:64]
         xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
         if xff:
-            return xff.split(',')[0].strip()[:64]
+            return xff.split(',')[-1].strip()[:64]  # the last entry is the one our proxy added; the first ones are what the client sent
     return request.META.get('REMOTE_ADDR', '')[:64]
 
 
@@ -43,14 +43,12 @@ class TokenView(APIView):
         uname = str(request.data.get('username', ''))
         ip = client_ip(request)
         try:
-            mfa.login_guard(f'u:{uname[:64]}')
-            mfa.login_guard(f'ip:{ip}')
+            mfa.login_guard(uname, ip)
         except mfa.MfaError as e:
             return Response({'detail': e.text}, status=429)
         user = authenticate(request, username=uname, password=str(request.data.get('password', '')))
         if user is None:
-            mfa.login_fail(f'u:{uname[:64]}')
-            mfa.login_fail(f'ip:{ip}')
+            mfa.login_fail(uname, ip)
             return Response({'detail': 'Wrong credentials.'}, status=400)
         if not user.is_staff:  # only someone who knows the password sees this
             return Response({'detail': NOT_STAFF}, status=400)
@@ -98,14 +96,12 @@ class EncryptedTokenView(EncryptedView):
         uname = payload['u']
         ip = client_ip(request)
         try:
-            mfa.login_guard(f'u:{uname[:64]}')
-            mfa.login_guard(f'ip:{ip}')
+            mfa.login_guard(uname, ip)
         except mfa.MfaError as e:
             return {'error': e.text}, 429
         user = authenticate(request, username=uname, password=payload['p'])
         if user is None:
-            mfa.login_fail(f'u:{uname[:64]}')
-            mfa.login_fail(f'ip:{ip}')
+            mfa.login_fail(uname, ip)
             return {'error': 'Wrong credentials.'}, 401
         if not user.is_staff:
             return {'error': NOT_STAFF}, 403

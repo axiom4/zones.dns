@@ -2,6 +2,7 @@ import { Component, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import qrcode from 'qrcode-generator';
 import { MfaClient } from '../services/mfa-client';
+import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 import { createPasskey, passkeyError, passkeysSupported } from '../services/webauthn';
 
@@ -14,6 +15,7 @@ import { createPasskey, passkeyError, passkeysSupported } from '../services/weba
 export class MfaEnrol {
   private mfa = inject(MfaClient);
   private ui = inject(Ui);
+  private stepUp = inject(StepUp);
   ticket = input('');
   done = output<string>(); // API token
   mode = signal<'choose' | 'totp'>('choose');
@@ -31,15 +33,24 @@ export class MfaEnrol {
   }
 
   confirmTotp() {
-    return this.ui.run(async () => this.done.emit((await this.mfa.call('totp-confirm', { ticket: this.ticket(), code: this.code })).token));
+    return this.ui.run(async () => {
+      const grant = await this.grant();
+      if (grant === null) return;
+      this.done.emit((await this.mfa.call('totp-confirm', { ticket: this.ticket(), code: this.code, grant })).token);
+    });
   }
+
+  /** On the Security page a factor that exists confirms the new one (step-up); during login there is none yet. null = cancelled. */
+  private async grant(): Promise<string | null> { return this.ticket() ? '' : this.stepUp.request('mfa-change'); }
 
   addPasskey() {
     return this.ui.run(async () => {
       const { options } = await this.mfa.call('passkey-register-options', { ticket: this.ticket() });
       let credential: unknown;
       try { credential = await createPasskey(options); } catch (e) { throw { message: passkeyError(e) }; }
-      this.done.emit((await this.mfa.call('passkey-register', { ticket: this.ticket(), credential, name: deviceName() })).token);
+      const grant = await this.grant();
+      if (grant === null) return;
+      this.done.emit((await this.mfa.call('passkey-register', { ticket: this.ticket(), credential, name: deviceName(), grant })).token);
     });
   }
 }

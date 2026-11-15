@@ -14,6 +14,7 @@ class Handler(DNSHandler):
     """dnslib's handler, minus a second pack(): resolver.finish() already packed (and cut) the UDP answer to measure it."""
 
     def get_reply(self, data):
+        self.wire = data  # the bytes received: a TSIG signature (DNS UPDATE) is checked over them
         request = DNSRecord.parse(data)
         self.server.logger.log_request(self, request)
         reply = self.server.resolver.resolve(request, self)

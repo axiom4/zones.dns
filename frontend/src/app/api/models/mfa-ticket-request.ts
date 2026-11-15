@@ -4,6 +4,11 @@
 export interface MfaTicketRequest {
 
   /**
+   * Signed in and adding a factor while one exists: the step-up grant of scope mfa-change
+   */
+  grant?: string;
+
+  /**
    * Login ticket; not needed when already logged in
    */
   ticket?: string;

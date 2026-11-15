@@ -84,17 +84,29 @@ def fail(user):
     raise MfaError('wrong_code')
 
 
-def login_guard(key):
-    if cache.get(f'login-fail:{key}', 0) >= MAX_FAILS * 2:
-        raise MfaError('locked')
+USER_MAX_FAILS = 100  # wrong passwords for one user per 5 minutes from all addresses together
 
 
-def login_fail(key):
-    cache.add(f'login-fail:{key}', 0, 300)
-    try:
-        cache.incr(f'login-fail:{key}')
-    except ValueError:
-        pass
+def _login_keys(uname, ip):
+    """(counter, limit) of a sign-in: per address, per user and address, per user. A user is locked for the addresses that guessed wrong,
+    not everywhere: someone who only knows the user name cannot lock the owner out with a few wrong passwords (that needs USER_MAX_FAILS)."""
+    u = uname[:64]
+    return [(f'ip:{ip}', MAX_FAILS * 2), (f'uip:{u}|{ip}', MAX_FAILS * 2), (f'u:{u}', USER_MAX_FAILS)]
+
+
+def login_guard(uname, ip):
+    for key, limit in _login_keys(uname, ip):
+        if cache.get(f'login-fail:{key}', 0) >= limit:
+            raise MfaError('locked')
+
+
+def login_fail(uname, ip):
+    for key, _ in _login_keys(uname, ip):
+        cache.add(f'login-fail:{key}', 0, 300)
+        try:
+            cache.incr(f'login-fail:{key}')
+        except ValueError:
+            pass
 
 
 # ---- step-up: a logged-in user proves a factor again for one dangerous action (e.g. deleting a zone)

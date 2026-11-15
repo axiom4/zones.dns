@@ -32,7 +32,7 @@ load_dotenv(BASE_DIR / '.env')
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-dev-only')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DEBUG', 'true').lower() == 'true'
+DEBUG = os.environ.get('DEBUG', 'false').lower() == 'true'  # off unless asked: a .env that lost the line must not show tracebacks and settings
 if not DEBUG and (len(SECRET_KEY) < 50 or SECRET_KEY.startswith('django-insecure') or len(set(SECRET_KEY)) < 5):
     # The key signs sessions, login tickets and the one-use ticket that opens the Django admin: a known key means a forgeable admin session.
     raise ImproperlyConfigured('Weak SECRET_KEY with DEBUG=false. Generate one: '
@@ -175,7 +175,8 @@ REST_FRAMEWORK = {
 SPECTACULAR_SETTINGS = {
     'TITLE': 'Zones.dns API',
     'VERSION': __version__,
-    'SERVE_PERMISSIONS': ['rest_framework.permissions.AllowAny'],  # docs open; API calls still need the token
+    'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],  # the map of the API is not public: staff only
+    'SERVE_AUTHENTICATION': ['rest_framework.authentication.SessionAuthentication', 'zones.security.authentication.ExpiringTokenAuthentication'],  # the Django admin session opens the docs in the browser
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,  # request bodies without read-only fields (id)
 }
@@ -237,6 +238,8 @@ DNS_STALE_TTL = int(os.environ.get('DNS_STALE_TTL', '86400'))  # seconds an expi
 DNS_RATE_LIMIT = int(os.environ.get('DNS_RATE_LIMIT', '0'))  # max queries per client IP per DNS_RATE_WINDOW seconds; 0 = off
 DNS_RATE_WINDOW = int(os.environ.get('DNS_RATE_WINDOW', '1'))  # window length in seconds for DNS_RATE_LIMIT
 DNS_DNSSEC = os.environ.get('DNS_DNSSEC', 'false').lower() in ('1', 'true', 'yes', 'on')  # validate RRSIGs on upstream answers (RFC 4035)
+DNS_ALLOW_QUERY = os.environ.get('DNS_ALLOW_QUERY', '10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,100.64.0.0/10,169.254.0.0/16,127.0.0.0/8,fc00::/7,fe80::/10,::1/128').strip()  # who may ask (CIDRs); '*' = anyone: never on a public address (open resolver)
+DNS_UPDATE_KEYS = os.environ.get('DNS_UPDATE_KEYS', '').strip()  # TSIG keys for RFC 2136 DNS UPDATE: name:base64secret, comma separated; empty = UPDATE refused
 DNS_UPDATE_ALLOW = os.environ.get('DNS_UPDATE_ALLOW', '').strip()  # comma-separated client IPs/CIDRs allowed to send RFC 2136 DNS UPDATEs
 
 # Suspicious queries (tunnelling, DGA, recon). off | log (only flag in the query log) | block (answer NXDOMAIN).

@@ -5,6 +5,11 @@ export interface StepUpCodeRequest {
   code: string;
 
   /**
+   * Signed in and adding a factor while one exists: the step-up grant of scope mfa-change
+   */
+  grant?: string;
+
+  /**
    * The action to confirm, e.g. zone-delete:7
    */
   scope: string;

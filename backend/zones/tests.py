@@ -832,6 +832,16 @@ class Dhcp6Tests(TestCase):
         self.assertIsNone(self.s.handle(self.msg(11, ias=[self.ia(IA_NA)])))  # IA options in an Information-request: invalid
         self.assertIsNone(self.s.handle(self.msg(11, sid=b'\x00\x04other')))  # for another server
 
+    def test_one_client_cannot_take_the_whole_prefix_pool(self):
+        from .dhcp.v6 import IA_PD, MAX_IA, MAX_PER_CLIENT, parse
+        from .models import Dhcp6Lease
+        many = [self.ia(IA_PD, i) for i in range(200)]  # one packet asking for 200 prefixes
+        typ, _, o = parse(self.s.handle(self.msg(3, sid=self.s.duid, ias=many)))
+        self.assertEqual(len(o[IA_PD]), MAX_IA)
+        for start in range(MAX_IA, 200, MAX_IA):  # and many more packets with new IAIDs
+            self.s.handle(self.msg(3, sid=self.s.duid, ias=many[start:start + MAX_IA]))
+        self.assertEqual(Dhcp6Lease.objects.filter(kind='pd').count(), MAX_PER_CLIENT)
+
     def test_solicit_advertise_request_reply_gives_an_address_and_a_prefix(self):
         import ipaddress
         import struct
@@ -1403,37 +1413,62 @@ class SecurityAndProtocolHardeningTests(TestCase):
         rrsig_rr = RR('www.example.com.', QTYPE.RRSIG, rdata=RRSIG(QTYPE.A, 13, 3, 300, now + 3600, now - 60, tag, 'example.com.', raw_sig), ttl=300)
         self.assertTrue(dnssec.verify_rrsig([a_rr], rrsig_rr, [dnskey_rr], now=now))
 
-        # Resolver sets AD=1 on valid DNSSEC reply and returns SERVFAIL on bogus signature (unless CD=1)
-        def make_upstream_reply(sig_bytes):
-            def _send(self_pkt, host, port, tcp=False, timeout=2, ipv6=False):
-                ans = self_pkt.reply()
-                ans.add_answer(a_rr)
-                ans.add_answer(RR('www.example.com.', QTYPE.RRSIG, rdata=RRSIG(QTYPE.A, 13, 3, 300, now + 3600, now - 60, tag, 'example.com.', sig_bytes), ttl=300))
-                ans.add_auth(dnskey_rr)
-                return ans.pack()
-            return _send
-
-        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=make_upstream_reply(raw_sig)):
+        # The resolver: AD=1 only through the chain of trust, SERVFAIL on a bogus answer (unless CD=1)
+        pki = DnssecPki(now)
+        r._validator.anchors = [pki.root_ds]
+        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=pki.upstream()):
             rep_ok = r.resolve(DNSRecord.question('www.example.com', 'A'), h)
             self.assertEqual((rep_ok.header.rcode, rep_ok.header.ad), (RCODE.NOERROR, 1))
             self.assertTrue(all(rr.rtype != QTYPE.RRSIG for rr in rep_ok.rr))  # stripped when client did not set DO=1
-
-        bad_sig = raw_sig[:-1] + bytes([raw_sig[-1] ^ 0xFF])
-        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=make_upstream_reply(bad_sig)):
-            rep_bogus = r.resolve(DNSRecord.question('www.example.com', 'A'), h)
-            self.assertEqual(rep_bogus.header.rcode, RCODE.SERVFAIL)
+        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=pki.upstream(bad_sig=True)):
+            self.assertEqual(r.resolve(DNSRecord.question('www.example.com', 'A'), h).header.rcode, RCODE.SERVFAIL)
             q_cd = DNSRecord.question('www.example.com', 'A')
             q_cd.header.cd = 1
-            rep_cd = r.resolve(q_cd, h)
-            self.assertEqual(rep_cd.header.rcode, RCODE.NOERROR)
+            self.assertEqual(r.resolve(q_cd, h).header.rcode, RCODE.NOERROR)
+
+    def test_dnssec_needs_the_chain_of_trust(self):
+        import time
+        from dnslib import A, RR
+        from .dnsd import dnssec
+        now = int(time.time())
+        pki = DnssecPki(now)
+        v = dnssec.Validator(pki.ask, anchors=[pki.root_ds])
+        self.assertEqual(dnssec.validate_reply(pki.answer(), v, now=now), 'secure')
+        # a forged answer signed with a key of its own (also put in the answer): the key does not match the DS of the parent
+        forged = DnssecPki(now, root=pki)
+        v2 = dnssec.Validator(forged.ask_forged_keys(pki), anchors=[pki.root_ds])
+        self.assertEqual(dnssec.validate_reply(forged.answer(with_key=True), v2, now=now), 'bogus')
+        # a zone signing a name outside itself
+        other = pki.answer(owner='www.victim.net.')
+        self.assertEqual(dnssec.validate_reply(other, v, now=now), 'bogus')
+        # an unsigned RRset next to a signed one: not secure
+        rep = pki.answer()
+        rep.add_answer(RR('www.example.com.', QTYPE.AAAA, rdata=__import__('dnslib').AAAA('2001:db8::1'), ttl=300))
+        self.assertEqual(dnssec.validate_reply(rep, v, now=now), 'insecure')
+        # a delegation without DS: insecure, not bogus
+        v3 = dnssec.Validator(pki.ask_without_ds(), anchors=[pki.root_ds])
+        self.assertEqual(dnssec.validate_reply(pki.answer(), v3, now=now), 'insecure')
+        # trusted keys are remembered: a second answer asks nothing
+        calls = []
+        v4 = dnssec.Validator(lambda n, t: calls.append((n, t)) or pki.ask(n, t), anchors=[pki.root_ds])
+        dnssec.validate_reply(pki.answer(), v4, now=now)
+        n = len(calls)
+        dnssec.validate_reply(pki.answer(), v4, now=now)
+        self.assertEqual(len(calls), n)
 
     def test_rfc2136_dynamic_dns_updates(self):
+        import base64
+        import hashlib
+        import hmac
+        import struct
+        import time
         from dnslib import A, CLASS, DNSHeader, DNSQuestion, OPCODE, RCODE, RR, TXT
-        from .dnsd import ddns
+        from .dnsd import ddns, tsig
         zone = Zone.objects.create(name='corp.lan')
         resolver._data = None
-        h = SimpleNamespace(client_address=('127.0.0.1', 0))
         r = Resolver('1.1.1.1')
+        secret = b'k' * 32
+        keys = f'upd-key:{base64.b64encode(secret).decode()}'
 
         def make_update(zname, prereqs=(), updates=()):
             pkt = DNSRecord(DNSHeader(opcode=OPCODE.UPDATE))
@@ -1444,30 +1479,67 @@ class SecurityAndProtocolHardeningTests(TestCase):
                 pkt.add_auth(rr)
             return pkt
 
-        # Refused when DNS_UPDATE_ALLOW does not match client IP
-        upd = make_update('corp.lan', updates=[RR('dyn.corp.lan', QTYPE.A, rclass=ddns.CLASS_IN, ttl=120, rdata=A('10.0.0.55'))])
-        with override_settings(DNS_UPDATE_ALLOW='192.168.99.0/24'):
-            rep = r.resolve(upd, h)
-            self.assertEqual(rep.header.rcode, RCODE.REFUSED)
+        def signed(pkt, key=secret, when=None):
+            """The message with a TSIG record (hmac-sha256), as nsupdate sends it."""
+            wire, now = bytes(pkt.pack()), int(when or time.time())
+            mac = hmac.new(key, wire + tsig._variables('upd-key', 'hmac-sha256', now, 300), hashlib.sha256).digest()
+            rdata = tsig.name_wire('hmac-sha256') + now.to_bytes(6, 'big') + struct.pack('!HH', 300, len(mac)) + mac + wire[:2] + b'\0\0\0\0'
+            rec = tsig.name_wire('upd-key') + struct.pack('!HHIH', 250, 255, 0, len(rdata)) + rdata
+            return wire[:10] + struct.pack('!H', struct.unpack('!H', wire[10:12])[0] + 1) + wire[12:] + rec
 
-        # Allowed when client IP is in DNS_UPDATE_ALLOW: adds record and bumps zone serial
+        def send(pkt, ip='10.9.9.7', wire=None):
+            wire = signed(pkt) if wire is None else wire
+            return r.resolve(DNSRecord.parse(wire), SimpleNamespace(client_address=(ip, 0), wire=wire))
+
+        add = lambda: make_update('corp.lan', updates=[RR('dyn.corp.lan', QTYPE.A, rclass=ddns.CLASS_IN, ttl=120, rdata=A('10.0.0.55'))])
+        # No key configured: UPDATE refused, whatever the address (an address alone can be forged)
+        with override_settings(DNS_UPDATE_KEYS='', DNS_UPDATE_ALLOW='127.0.0.0/8'):
+            self.assertEqual(send(add(), ip='127.0.0.1').header.rcode, RCODE.REFUSED)
+        with override_settings(DNS_UPDATE_KEYS=keys, DNS_UPDATE_ALLOW=''):
+            # unsigned, wrong key, too old: NOTAUTH, nothing changed
+            self.assertEqual(send(add(), wire=bytes(add().pack())).header.rcode, RCODE.NOTAUTH)
+            self.assertEqual(send(add(), wire=signed(add(), key=b'z' * 32)).header.rcode, RCODE.NOTAUTH)
+            self.assertEqual(send(add(), wire=signed(add(), when=time.time() - 3600)).header.rcode, RCODE.NOTAUTH)
+            self.assertFalse(Record.objects.filter(zone=zone, name='dyn').exists())
+            # an unknown zone is not revealed to an unsigned client
+            self.assertEqual(send(make_update('other.lan'), wire=bytes(make_update('other.lan').pack())).header.rcode, RCODE.NOTAUTH)
+        # The address list narrows down who may send, on top of the key
+        with override_settings(DNS_UPDATE_KEYS=keys, DNS_UPDATE_ALLOW='192.168.99.0/24'):
+            self.assertEqual(send(add()).header.rcode, RCODE.REFUSED)
+
         old_serial = zone.serial
-        with override_settings(DNS_UPDATE_ALLOW='127.0.0.0/8'):
-            rep = r.resolve(upd, h)
+        with override_settings(DNS_UPDATE_KEYS=keys, DNS_UPDATE_ALLOW='10.9.9.0/24'):
+            wire = signed(add())
+            rep = send(add(), wire=wire)
             self.assertEqual(rep.header.rcode, RCODE.NOERROR)
+            self.assertEqual(rep.wire[10:12], struct.pack('!H', 1))  # the answer carries its TSIG record
             self.assertTrue(Record.objects.filter(zone=zone, name='dyn', type='A', value='10.0.0.55', ttl=120).exists())
             zone.refresh_from_db()
             self.assertGreater(zone.serial, old_serial)
+            self.assertEqual(send(add(), wire=wire).header.rcode, RCODE.NOTAUTH)  # the same signed message again: a replay
 
-            # Prerequisite NXDOMAIN fails when 'dyn.corp.lan' already exists
-            pre_nx = RR('dyn.corp.lan', QTYPE.ANY, rclass=ddns.CLASS_NONE, ttl=0, rdata=TXT(''))
-            rep_nx = r.resolve(make_update('corp.lan', prereqs=[pre_nx]), h)
-            self.assertEqual(rep_nx.header.rcode, RCODE.NXDOMAIN)
+            # Prerequisite "name is not in use" fails with YXDOMAIN when 'dyn.corp.lan' exists (RFC 2136 §3.2.5)
+            pre = RR('dyn.corp.lan', QTYPE.ANY, rclass=ddns.CLASS_NONE, ttl=0, rdata=TXT(''))
+            self.assertEqual(send(make_update('corp.lan', prereqs=[pre])).header.rcode, RCODE.YXDOMAIN)
+            pre = RR('nope.corp.lan', QTYPE.ANY, rclass=ddns.CLASS_ANY, ttl=0, rdata=TXT(''))
+            self.assertEqual(send(make_update('corp.lan', prereqs=[pre])).header.rcode, RCODE.NXDOMAIN)
+
+            # all or nothing: a record outside the zone after a good one rolls the good one back
+            both = make_update('corp.lan', updates=[RR('p1.corp.lan', QTYPE.A, rclass=ddns.CLASS_IN, ttl=60, rdata=A('10.0.0.1')),
+                                                    RR('evil.other.lan', QTYPE.A, rclass=ddns.CLASS_IN, ttl=60, rdata=A('10.0.0.2'))])
+            self.assertEqual(send(both).header.rcode, RCODE.NOTZONE)
+            self.assertFalse(Record.objects.filter(zone=zone, name='p1').exists())
+
+            # Delete a whole RRset (CLASS_ANY, no data: dnslib used to refuse records with rdlength 0, so nsupdate's "delete name type" got no answer)
+            Record.objects.create(zone=zone, name='dyn', type='TXT', value='x')
+            from dnslib import RD
+            del_set = RR('dyn.corp.lan', QTYPE.TXT, rclass=ddns.CLASS_ANY, ttl=0, rdata=RD(b''))
+            self.assertEqual(send(make_update('corp.lan', updates=[del_set])).header.rcode, RCODE.NOERROR)
+            self.assertFalse(Record.objects.filter(zone=zone, name='dyn', type='TXT').exists())
 
             # Delete specific RR (CLASS_NONE)
             del_rr = RR('dyn.corp.lan', QTYPE.A, rclass=ddns.CLASS_NONE, ttl=0, rdata=A('10.0.0.55'))
-            rep_del = r.resolve(make_update('corp.lan', updates=[del_rr]), h)
-            self.assertEqual(rep_del.header.rcode, RCODE.NOERROR)
+            self.assertEqual(send(make_update('corp.lan', updates=[del_rr])).header.rcode, RCODE.NOERROR)
             self.assertFalse(Record.objects.filter(zone=zone, name='dyn').exists())
 
     def test_dhcpv4_leasequery_forcerenew_and_dhcpv6_ta_leasequery_reconfigure(self):
@@ -1671,21 +1743,6 @@ class HotPathTests(TestCase):
             resolver._remember_blocked('c', None)
         self.assertEqual(list(resolver._blocked), ['a', 'c'])
 
-    def test_dnskeys_are_fetched_once_per_ttl(self):
-        from unittest import mock
-        from dnslib import DNSKEY, RR
-        r = Resolver('127.0.0.1:9', log=None)
-        key = RR('example.com.', QTYPE.DNSKEY, rdata=DNSKEY(257, 3, 13, b'\x01' * 64), ttl=300)
-
-        def ask(q, validate_dnssec=True):
-            rep = q.reply()
-            rep.add_answer(key)
-            return rep, 'x'
-        with mock.patch.object(r, 'ask_upstream', side_effect=ask) as up:
-            self.assertEqual(len(r._fetch_dnskeys('example.com')), 1)
-            self.assertEqual(len(r._fetch_dnskeys('example.com')), 1)
-        self.assertEqual(up.call_count, 1)
-
     def test_grouped_by_name_from_counters(self):
         from django.contrib.auth import get_user_model
         from rest_framework.test import APIClient
@@ -1804,3 +1861,193 @@ class HotPathTests(TestCase):
         replies = [c for c in pack.call_args_list if c.args[0].header.qr]
         self.assertEqual(len(replies), 1)
         self.assertEqual(str(DNSRecord.parse(wire).rr[0].rdata), '10.0.0.1')
+
+
+class VulnerabilityFixTests(TestCase):
+    """Regressions for the security review of 1.1.0."""
+
+    def test_doh_refuses_anything_but_queries(self):
+        from unittest import mock
+        from django.test import Client
+        from dnslib import DNSHeader, OPCODE
+        upd = DNSRecord(DNSHeader(opcode=OPCODE.UPDATE))
+        upd.add_question(DNSQuestion('corp.lan', QTYPE.SOA))
+        with override_settings(DNS_DOH=True), mock.patch('zones.views.doh._exchange') as ex:
+            r = Client().post('/dns-query', bytes(upd.pack()), content_type='application/dns-message')
+        self.assertEqual(r.status_code, 400)
+        ex.assert_not_called()  # an UPDATE never reaches the daemon, where it would come from 127.0.0.1
+
+    def test_only_allowed_clients_are_answered(self):
+        from dnslib import RCODE
+        Zone.objects.create(name='acl.lan')
+        resolver._data = None
+        r = Resolver('1.1.1.1')
+        q = DNSRecord.question('acl.lan', 'SOA')
+        self.assertEqual(r.resolve(q, SimpleNamespace(client_address=('203.0.113.9', 0))).header.rcode, RCODE.REFUSED)  # default: private networks only
+        self.assertNotEqual(r.resolve(q, SimpleNamespace(client_address=('192.168.1.20', 0))).header.rcode, RCODE.REFUSED)
+        self.assertNotEqual(r.resolve(q, SimpleNamespace(client_address=('::ffff:10.1.2.3', 0))).header.rcode, RCODE.REFUSED)
+        with override_settings(DNS_ALLOW_QUERY='*'):
+            self.assertNotEqual(r.resolve(q, SimpleNamespace(client_address=('203.0.113.9', 0))).header.rcode, RCODE.REFUSED)
+
+    def test_rate_limit_table_drops_the_oldest_client_not_everyone(self):
+        from .dnsd import ratelimit
+        ratelimit.reset()
+        with override_settings(DNS_RATE_LIMIT=2, DNS_RATE_WINDOW=3600), mock_max(ratelimit, 3):
+            for _ in range(3):
+                ratelimit.exceeded('10.0.0.1')
+            self.assertTrue(ratelimit.exceeded('10.0.0.1'))
+            for i in range(2, 6):  # a flood of other addresses
+                ratelimit.exceeded(f'10.0.0.{i}')
+                ratelimit.exceeded('10.0.0.1')  # still seen, so never the oldest
+            self.assertTrue(ratelimit.exceeded('10.0.0.1'))  # its count survived the flood
+        ratelimit.reset()
+
+    def test_dhcp_names_cannot_be_reserved_or_taken_over(self):
+        from datetime import timedelta
+        from django.conf import settings
+        from django.utils import timezone
+        from .dhcp import v4 as dhcp
+        from .models import DhcpLease
+        with override_settings(DHCP=True, DHCP_SERVER='192.168.1.2', DHCP_RANGE='192.168.1.100-192.168.1.110', DHCP_DOMAIN='home.lan', DHCP_NAMES=True):
+            srv, now = dhcp.Server(dhcp.scopes(settings), probe=lambda ip: False), timezone.now()
+            srv._hold('aa:aa:aa:aa:aa:01', '192.168.1.100', 3600, now, 'nas', 'aa:aa:aa:aa:aa:01')
+            srv._hold('aa:aa:aa:aa:aa:02', '192.168.1.101', 3600, now, 'nas', 'aa:aa:aa:aa:aa:02')  # someone else claims the name
+            srv._hold('aa:aa:aa:aa:aa:03', '192.168.1.102', 3600, now, 'wpad', 'aa:aa:aa:aa:aa:03')
+            self.assertEqual(dict(DhcpLease.objects.values_list('client', 'hostname')),
+                             {'aa:aa:aa:aa:aa:01': 'nas', 'aa:aa:aa:aa:aa:02': '', 'aa:aa:aa:aa:aa:03': ''})
+            self.assertEqual(dhcp.lease_hosts('nas.home.lan', (True, 'home.lan')), [('192.168.1.100', 60)])
+            DhcpLease.objects.create(client='old', ip='192.168.1.103', mac='', hostname='wpad', expires=now + timedelta(hours=1))  # saved before the fix
+            self.assertIsNone(dhcp.lease_hosts('wpad.home.lan', (True, 'home.lan')))
+
+    def test_changing_factors_needs_a_step_up_grant(self):
+        import time
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        from .models import Passkey, TotpDevice
+        from .security import mfa
+        user = get_user_model().objects.create_user('f', password='x', is_staff=True)
+        dev = TotpDevice.objects.create(user=user, secret=mfa.new_secret(), confirmed=True)
+        Passkey.objects.create(user=user, credential_id='c1', public_key='k', sign_count=0, name='p')
+        api = APIClient()
+        api.force_authenticate(user)
+        with override_settings(LOGIN_ENCRYPTION='off'):
+            self.assertEqual(api.delete('/api/mfa/totp/remove/').status_code, 403)  # a stolen session alone cannot remove it
+            self.assertTrue(TotpDevice.objects.filter(user=user).exists())
+            g = api.post('/api/mfa/stepup/totp/', {'code': mfa.totp_code(dev.secret, int(time.time() // 30)), 'scope': 'mfa-change'}, format='json').json()['grant']
+            self.assertEqual(api.delete('/api/mfa/totp/remove/', HTTP_X_MFA_GRANT=g).status_code, 204)
+            # adding a factor while one exists: the setup ends with 400 without a grant
+            api.post('/api/mfa/totp/setup/', {}, format='json')
+            secret = __import__('django.core.cache', fromlist=['cache']).cache.get(f'totp-new:{user.pk}')
+            r = api.post('/api/mfa/totp/confirm/', {'code': mfa.totp_code(secret, int(time.time() // 30))}, format='json')
+            self.assertEqual(r.status_code, 400)
+            self.assertFalse(TotpDevice.objects.filter(user=user, confirmed=True).exists())
+
+    def test_a_wrong_password_from_elsewhere_does_not_lock_the_owner_out(self):
+        from django.contrib.auth import get_user_model
+        from django.core.cache import cache
+        from rest_framework.test import APIClient
+        cache.clear()
+        get_user_model().objects.create_user('admin', password='right', is_staff=True)
+        api = APIClient()
+        with override_settings(LOGIN_ENCRYPTION='off', MFA_REQUIRED=False):
+            for _ in range(12):
+                api.post('/api/token/', {'username': 'admin', 'password': 'bad'}, format='json', REMOTE_ADDR='198.51.100.7')
+            self.assertEqual(api.post('/api/token/', {'username': 'admin', 'password': 'right'}, format='json', REMOTE_ADDR='198.51.100.7').status_code, 429)
+            self.assertEqual(api.post('/api/token/', {'username': 'admin', 'password': 'right'}, format='json', REMOTE_ADDR='192.168.1.5').status_code, 200)
+        cache.clear()
+
+    def test_slow_patterns_are_refused_in_the_api_and_the_admin(self):
+        from .admin.blocked_domain import PersonalBlockForm
+        from .serializers.blocked_domain import pattern_error
+        self.assertIsNotNone(pattern_error('(a|aa)+$'))
+        self.assertIsNone(pattern_error(r'^(ads|track)\.'))
+        f = PersonalBlockForm(data={'name': '(x|xx)+y', 'regex': True, 'enabled': True})
+        self.assertFalse(f.is_valid())
+        self.assertIn('name', f.errors)
+
+    def test_api_docs_are_not_public(self):
+        from django.test import Client
+        self.assertIn(Client().get('/api/schema/').status_code, (401, 403))
+
+
+def mock_max(module, n):
+    from unittest import mock
+    return mock.patch.object(module, '_MAX_CLIENTS', n)
+
+
+class DnssecPki:
+    """A test root and example.com, signed with ECDSA P-256 keys, and an upstream that answers DNSKEY, DS and www.example.com A."""
+
+    def __init__(self, now, root=None):
+        import hashlib
+        import struct
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from dnslib import DNSKEY, RR
+        from .dnsd import dnssec
+        self.now, self.ec = now, ec
+        self.root_priv, self.root_key = root.root_priv if root else ec.generate_private_key(ec.SECP256R1()), None
+        self.zone_priv = ec.generate_private_key(ec.SECP256R1())
+        keyrr = lambda name, priv: RR(name, QTYPE.DNSKEY, rdata=DNSKEY(257, 3, 13, self._pub(priv)), ttl=300)
+        self.root_key, self.zone_key = keyrr('.', self.root_priv), keyrr('example.com.', self.zone_priv)
+        tag = lambda priv: dnssec.key_tag(257, 3, 13, self._pub(priv))
+        self.root_tag, self.zone_tag = tag(self.root_priv), tag(self.zone_priv)
+        digest = lambda owner, priv: hashlib.sha256(owner + struct.pack('!HBB', 257, 3, 13) + self._pub(priv)).hexdigest()
+        self.root_ds = (self.root_tag, 13, 2, digest(b'\0', self.root_priv))
+        self.zone_ds_digest = bytes.fromhex(digest(b'\x07example\x03com\0', self.zone_priv))
+
+    @staticmethod
+    def _pub(priv):
+        n = priv.public_key().public_numbers()
+        return n.x.to_bytes(32, 'big') + n.y.to_bytes(32, 'big')
+
+    def sign(self, rrset, priv, tag, signer, bad=False):
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric.utils import decode_dss_signature
+        from dnslib import RR, RRSIG
+        from .dnsd import dnssec
+        labels = len([l for l in str(rrset[0].rname).rstrip('.').split('.') if l])
+        mk = lambda sig: RRSIG(rrset[0].rtype, 13, labels, 300, self.now + 3600, self.now - 60, tag, signer, sig)
+        r_, s_ = decode_dss_signature(priv.sign(dnssec._rrset_wire(rrset, mk(b'\0' * 64)), self.ec.ECDSA(hashes.SHA256())))
+        raw = r_.to_bytes(32, 'big') + s_.to_bytes(32, 'big')
+        if bad:
+            raw = raw[:-1] + bytes([raw[-1] ^ 0xFF])
+        return RR(rrset[0].rname, QTYPE.RRSIG, rdata=mk(raw), ttl=300)
+
+    def answer(self, owner='www.example.com.', bad_sig=False, with_key=False, q=None):
+        from dnslib import A, RR
+        rep = (q or DNSRecord.question(owner, 'A')).reply()
+        a = RR(owner, QTYPE.A, rdata=A('93.184.216.34'), ttl=300)
+        rep.add_answer(a, self.sign([a], self.zone_priv, self.zone_tag, 'example.com.', bad=bad_sig))
+        if with_key:
+            rep.add_auth(self.zone_key)
+        return rep
+
+    def ask(self, name, qtype, ds=True):
+        from dnslib import DS, RR
+        rep = DNSRecord.question(name, qtype).reply()
+        if (name, qtype) == ('.', 'DNSKEY'):
+            rep.add_answer(self.root_key, self.sign([self.root_key], self.root_priv, self.root_tag, '.'))
+        elif (name, qtype) == ('example.com', 'DNSKEY'):
+            rep.add_answer(self.zone_key, self.sign([self.zone_key], self.zone_priv, self.zone_tag, 'example.com.'))
+        elif (name, qtype) == ('example.com', 'DS') and ds:
+            d = RR('example.com.', QTYPE.DS, rdata=DS(self.zone_tag, 13, 2, self.zone_ds_digest), ttl=300)
+            rep.add_answer(d, self.sign([d], self.root_priv, self.root_tag, '.'))
+        return rep
+
+    def ask_without_ds(self):
+        return lambda name, qtype: self.ask(name, qtype, ds=False)
+
+    def ask_forged_keys(self, real):
+        """The real root and DS, but this (forged) zone key for example.com."""
+        return lambda name, qtype: self.ask(name, qtype) if qtype == 'DNSKEY' and name == 'example.com' else real.ask(name, qtype)
+
+    def upstream(self, bad_sig=False):
+        pki = self
+
+        def _send(pkt, host, port, tcp=False, timeout=2, ipv6=False):
+            q = pkt.q
+            name, qtype = str(q.qname).rstrip('.') or '.', QTYPE[q.qtype]
+            rep = pki.answer(q=pkt, bad_sig=bad_sig) if (name, qtype) == ('www.example.com', 'A') else pki.ask(name, qtype)
+            rep.header.id = pkt.header.id
+            return rep.pack()
+        return _send

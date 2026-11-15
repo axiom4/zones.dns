@@ -991,7 +991,14 @@ paths:
     delete:
       operationId: mfa_passkey_remove_destroy
       description: Remove a passkey (not if it is the last factor and MFA is required).
+        Needs a step-up grant (scope mfa-change).
       parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/... with scope
+          mfa-change). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -1213,7 +1220,14 @@ paths:
     delete:
       operationId: mfa_totp_remove_destroy
       description: Remove the authenticator app (not if it is the last factor and
-        MFA is required).
+        MFA is required). Needs a step-up grant (scope mfa-change).
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/... with scope
+          mfa-change). Required when the user has a second factor.
       tags:
       - mfa
       security:
@@ -2576,6 +2590,10 @@ components:
         ticket:
           type: string
           description: Login ticket; not needed when already logged in
+        grant:
+          type: string
+          description: 'Signed in and adding a factor while one exists: the step-up
+            grant of scope mfa-change'
         code:
           type: string
           minLength: 1
@@ -2588,6 +2606,10 @@ components:
         ticket:
           type: string
           description: Login ticket; not needed when already logged in
+        grant:
+          type: string
+          description: 'Signed in and adding a factor while one exists: the step-up
+            grant of scope mfa-change'
         credential:
           description: PublicKeyCredential.toJSON() from the browser
         name:
@@ -2631,6 +2653,10 @@ components:
         ticket:
           type: string
           description: Login ticket; not needed when already logged in
+        grant:
+          type: string
+          description: 'Signed in and adding a factor while one exists: the step-up
+            grant of scope mfa-change'
     MtaSts:
       type: object
       properties:
@@ -3482,6 +3508,10 @@ components:
         ticket:
           type: string
           description: Login ticket; not needed when already logged in
+        grant:
+          type: string
+          description: 'Signed in and adding a factor while one exists: the step-up
+            grant of scope mfa-change'
         scope:
           type: string
           minLength: 1
@@ -3499,6 +3529,10 @@ components:
         ticket:
           type: string
           description: Login ticket; not needed when already logged in
+        grant:
+          type: string
+          description: 'Signed in and adding a factor while one exists: the step-up
+            grant of scope mfa-change'
         scope:
           type: string
           minLength: 1
@@ -3523,6 +3557,10 @@ components:
         ticket:
           type: string
           description: Login ticket; not needed when already logged in
+        grant:
+          type: string
+          description: 'Signed in and adding a factor while one exists: the step-up
+            grant of scope mfa-change'
         scope:
           type: string
           minLength: 1

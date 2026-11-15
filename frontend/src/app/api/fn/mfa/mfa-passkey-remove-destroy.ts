@@ -9,12 +9,18 @@ import { RequestBuilder } from '../../request-builder';
 
 
 export interface MfaPasskeyRemoveDestroy$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
   id: number;
 }
 
 export function mfaPasskeyRemoveDestroy(http: HttpClient, rootUrl: string, params: MfaPasskeyRemoveDestroy$Params, context?: HttpContext): Observable<StrictHttpResponse<void>> {
   const rb = new RequestBuilder(rootUrl, mfaPasskeyRemoveDestroy.PATH, 'delete');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.path('id', params.id, {});
   }
 

@@ -316,6 +316,10 @@ def ping(ip):
         return False  # no ping program: no probe
 
 
+# names a client may not take: proxy auto-discovery (a client called wpad would hand every browser its proxy), ISATAP, and the usual special names
+RESERVED_NAMES = {'wpad', 'isatap', 'localhost', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback'}
+
+
 def clean_hostname(raw):
     """A client's host name as one DNS label: lower case letters, digits and "-" (it will be answered by the DNS server)."""
     return re.sub(r'[^a-z0-9-]', '', raw.decode(errors='ignore').lower().split('.')[0]).strip('-')[:63]
@@ -548,6 +552,8 @@ class Server:
         DhcpLease.objects.filter(ip=str(ip)).exclude(client=key).delete()  # an expired lease of someone else (_ok said it is free)
         cur = DhcpLease.objects.filter(client=key, ip=str(ip), expires__gt=now).first()
         expires = max(cur.expires, now + timedelta(seconds=seconds)) if cur else now + timedelta(seconds=seconds)
+        if host and (host in RESERVED_NAMES or DhcpLease.objects.filter(hostname=host, expires__gt=now).exclude(client=key).exists()):
+            host = ''  # reserved, or the name of another client with a live lease: the first one keeps it (no taking over "nas" from the LAN)
         hostname = (cur.hostname if cur and seconds <= OFFER_HOLD and cur.expires > expires - timedelta(seconds=1) else host) or (cur.hostname if cur else '')
         DhcpLease.objects.update_or_create(client=key, defaults={'ip': str(ip), 'mac': mac, 'hostname': hostname, 'expires': expires})
 
@@ -573,7 +579,9 @@ def lease_hosts(qname, cfg=None):
     label = qname[:-len(domain) - 1]
     if not label or '.' in label:
         return None
-    row = DhcpLease.objects.filter(hostname=label, expires__gt=timezone.now()).order_by('-updated').first()
+    if label in RESERVED_NAMES:
+        return None  # also for leases saved before the names were reserved
+    row = DhcpLease.objects.filter(hostname=label, expires__gt=timezone.now()).order_by('updated').first()  # the oldest holder, not the latest claimant
     return [(row.ip, 60)] if row else None
 
 

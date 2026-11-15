@@ -88,7 +88,7 @@ def _rdata_canonical_wire(rr):
 
 def _rrset_wire(rrset, rrsig_rdata):
     """Build the RFC 4034 §3.1.8.1 signed data buffer: RRSIG_RDATA_prefix || canonical sorted RRset."""
-    signer_wire = _canonical_name_wire(getattr(rrsig_rdata, 'name', None) or getattr(rrsig_rdata, 'signer', None))
+    signer_wire = _canonical_name_wire(rrsig_rdata.name)  # not `name or ...`: the root ('.') is an empty, so false, DNSLabel
     prefix = struct.pack(
         '!HBBIIIH',
         rrsig_rdata.covered,
@@ -195,39 +195,112 @@ def verify_rrsig(rrset, rrsig_rr, dnskey_rrs, now=None):
     return False
 
 
-def validate_reply(reply, fetch_dnskeys=None, now=None):
-    """Validate RRSIGs present in `reply.rr` (or `reply.auth` on negative responses).
+def _name(label):
+    """A name as text, lower case, without the final dot ('' = the root)."""
+    return str(label).rstrip('.').lower()
+
+
+def _within(name, zone):
+    return zone == '' or name == zone or name.endswith('.' + zone)
+
+
+def _signed_by(rrset, rrsigs, keys, now):
+    """True if one of rrsigs (RRSIG records over rrset) verifies with one of keys."""
+    return any(verify_rrsig(rrset, sig, keys, now=now) for sig in rrsigs)
+
+
+class Validator:
+    """The chain of trust (RFC 4035 §5): the keys of a zone are trusted only when its DNSKEY RRset is signed by a key that matches a DS
+    record of the parent, itself signed by the parent's trusted keys, up to the root trust anchors. Keys found in an answer are never
+    trusted by themselves (anyone forging an answer can add a key of their own).
+
+    ask(name, qtype) -> DNSRecord or None: asks the upstream with DO=1. A zone without DS at its parent is 'insecure': its data is
+    passed on without AD. shortcut: the absence of the DS is not proven (no NSEC/NSEC3 check), so a forged "no DS" makes a signed zone
+    look unsigned (AD=0) instead of bogus; upgrade with NSEC/NSEC3 denial proofs if downgrade protection is needed.
+    """
+    MAX_DEPTH = 16
+
+    def __init__(self, ask, anchors=ROOT_TRUST_ANCHORS):
+        self.ask, self.anchors, self.cache = ask, anchors, {}  # zone -> (monotonic expiry, state, keys)
+
+    def keys(self, zone, now=None, depth=0):
+        """(state, trusted DNSKEY records) of zone ('' = root): 'secure', 'insecure' or 'bogus'."""
+        mono = time.monotonic()
+        hit = self.cache.get(zone)
+        if hit and hit[0] > mono:
+            return hit[1], hit[2]
+        state, keys, ttl = self._keys(zone, now, depth)
+        if state != 'bogus' or keys is not None:  # a failure to ask (None keys) is asked again next time
+            if len(self.cache) > 1000:
+                self.cache.clear()
+            self.cache[zone] = (mono + min(3600, max(30, ttl)), state, keys or [])
+        return state, keys or []
+
+    def _keys(self, zone, now, depth):
+        if depth > self.MAX_DEPTH:
+            return 'bogus', None, 0
+        rep = self.ask(zone or '.', 'DNSKEY')
+        if rep is None:
+            return 'bogus', None, 0
+        dnskeys = [rr for rr in rep.rr if rr.rtype == QTYPE.DNSKEY and _name(rr.rname) == zone]
+        sigs = [rr for rr in rep.rr if rr.rtype == QTYPE.RRSIG and rr.rdata.covered == QTYPE.DNSKEY and _name(rr.rname) == zone]
+        if zone == '':
+            ds = self.anchors
+            ttl = 3600
+        else:
+            drep = self.ask(zone, 'DS')
+            if drep is None:
+                return 'bogus', None, 0
+            ds_rrs = [rr for rr in drep.rr if rr.rtype == QTYPE.DS and _name(rr.rname) == zone]
+            if not ds_rrs:
+                return 'insecure', [], 300  # no DS at the parent: an unsigned delegation (not proven, see the class docstring)
+            ds_sigs = [rr for rr in drep.rr if rr.rtype == QTYPE.RRSIG and rr.rdata.covered == QTYPE.DS and _name(rr.rname) == zone]
+            parents = {_name(sig.rdata.name) for sig in ds_sigs}
+            for parent in parents:
+                if parent == zone or not _within(zone, parent):
+                    continue  # the DS is signed by the parent, a zone above this one
+                pstate, pkeys = self.keys(parent, now, depth + 1)
+                if pstate == 'insecure':
+                    return 'insecure', [], 300
+                if pstate == 'secure' and _signed_by(ds_rrs, [s for s in ds_sigs if _name(s.rdata.name) == parent], pkeys, now):
+                    break
+            else:
+                return 'bogus', [], 60
+            ds = [(rr.rdata.key_tag, rr.rdata.algorithm, rr.rdata.digest_type, bytes(rr.rdata.digest).hex()) for rr in ds_rrs]
+            ttl = min(rr.ttl for rr in ds_rrs)
+        ksk = [k for k in dnskeys if any(verify_ds(zone + '.' if zone else '.', k.rdata.flags, k.rdata.protocol, k.rdata.algorithm, bytes(k.rdata.key), *d)
+                                         for d in ds)]
+        if not ksk or not _signed_by(dnskeys, sigs, ksk, now):
+            return 'bogus', [], 60
+        return 'secure', dnskeys, min([ttl] + [rr.ttl for rr in dnskeys])
+
+
+def validate_reply(reply, validator, now=None):
+    """Validate the RRSIGs in `reply.rr` (or `reply.auth` on negative responses) through the chain of trust.
 
     Returns:
-      - 'secure'   if at least one RRset is signed and every signed RRset validates.
-      - 'insecure' if no RRSIGs are present.
-      - 'bogus'    if an RRSIG is present but fails validation.
+      - 'secure'   if every RRset of the section is signed by trusted keys of a zone that contains it.
+      - 'insecure' if there are no RRSIGs, a signer zone is an unsigned delegation, or some RRset is not signed.
+      - 'bogus'    if an RRSIG fails, the signer does not contain the name, or the signer's keys do not chain to the root.
     """
     section = reply.rr if any(rr.rtype == QTYPE.RRSIG for rr in reply.rr) else reply.auth
     rrsigs = [rr for rr in section if rr.rtype == QTYPE.RRSIG]
     if not rrsigs:
         return 'insecure'
-
-    # Collect DNSKEYs already included in the reply (or fetch via callback for signer zone)
-    dnskeys_by_zone = {}
-    for rr in list(reply.rr) + list(reply.auth) + list(reply.ar):
-        if rr.rtype == QTYPE.DNSKEY:
-            zone = str(rr.rname).rstrip('.').lower()
-            dnskeys_by_zone.setdefault(zone, []).append(rr)
-
+    covered, insecure = set(), False
     for rrsig in rrsigs:
-        covered = rrsig.rdata.covered
-        owner = rrsig.rname
-        rrset = [rr for rr in section if rr.rname == owner and rr.rtype == covered]
-        if not rrset:
+        owner, signer = _name(rrsig.rname), _name(rrsig.rdata.name)
+        rrset = [rr for rr in section if rr.rname == rrsig.rname and rr.rtype == rrsig.rdata.covered]
+        if not rrset or not _within(owner, signer):
+            return 'bogus'  # a signature with nothing under it, or a zone signing names that are not its own
+        state, keys = validator.keys(signer, now)
+        if state == 'bogus':
             return 'bogus'
-        signer_lbl = getattr(rrsig.rdata, 'name', None) or getattr(rrsig.rdata, 'signer', None)
-        signer = str(signer_lbl).rstrip('.').lower()
-        keys = dnskeys_by_zone.get(signer)
-        if not keys and fetch_dnskeys is not None:
-            keys = fetch_dnskeys(signer) or []
-            dnskeys_by_zone[signer] = keys
-        if not keys or not verify_rrsig(rrset, rrsig, keys, now=now):
+        if state == 'insecure':
+            insecure = True
+            continue
+        if not verify_rrsig(rrset, rrsig, keys, now=now):
             return 'bogus'
-
-    return 'secure'
+        covered.add((owner, rrsig.rdata.covered))
+    rrsets = {(_name(rr.rname), rr.rtype) for rr in section if rr.rtype not in (QTYPE.RRSIG, QTYPE.OPT)}
+    return 'insecure' if insecure or not rrsets <= covered else 'secure'

@@ -15,6 +15,7 @@ class TokenResultSerializer(serializers.Serializer):
 
 class MfaTicketSerializer(serializers.Serializer):
     ticket = serializers.CharField(required=False, allow_blank=True, help_text='Login ticket; not needed when already logged in')
+    grant = serializers.CharField(required=False, allow_blank=True, help_text='Signed in and adding a factor while one exists: the step-up grant of scope mfa-change')
 
 
 class MfaCodeSerializer(MfaTicketSerializer):

@@ -7,6 +7,11 @@ export interface MfaCredentialRequest {
    * PublicKeyCredential.toJSON() from the browser
    */
   credential: any;
+
+  /**
+   * Signed in and adding a factor while one exists: the step-up grant of scope mfa-change
+   */
+  grant?: string;
   name?: string;
 
   /**

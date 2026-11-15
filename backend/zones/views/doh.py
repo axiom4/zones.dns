@@ -64,7 +64,7 @@ class DohView(APIView):
             return HttpResponse(status=400)
         try:
             q = DNSRecord.parse(wire)  # not a DNS message: refused here, the daemon never sees it
-            if q.header.qr:
+            if q.header.qr or q.header.opcode != 0:  # only queries: DoH clients reach the daemon from 127.0.0.1, so an UPDATE would look local
                 return HttpResponse(status=400)
             out = _exchange(wire)
         except OSError:

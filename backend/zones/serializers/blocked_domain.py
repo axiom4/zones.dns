@@ -13,26 +13,46 @@ _REDOS_RE = re.compile(r'\\[1-9]|(?:\.\*|\.\+){3,}')
 def _has_redos(pat):
     if _REDOS_RE.search(pat):
         return True
-    stack = []  # each open group stores whether it (or a nested group inside it) contains a quantifier
-    i = 0
+    stack = []  # each open group: [it (or a group inside it) has a quantifier, it has an alternation]
+    i, in_class = 0, False
     while i < len(pat):
         ch = pat[i]
         if ch == '\\':
             i += 2
             continue
-        if ch == '(':
-            stack.append(False)
+        if in_class:
+            in_class = ch != ']'
+        elif ch == '[':
+            in_class = True
+        elif ch == '(':
+            stack.append([False, False])
         elif ch == ')' and stack:
-            had_q = stack.pop()
+            had_q, had_alt = stack.pop()
             rest = pat[i + 1:].lstrip()
-            if had_q and rest and rest[0] in '+*?{':
-                return True
+            repeated = bool(rest) and rest[0] in '+*{'
+            if (had_q and rest and rest[0] in '+*?{') or (had_alt and repeated):
+                return True  # (a+)+ nested repeats, or (a|aa)+ a repeated alternation whose branches can overlap
             if stack and (had_q or (rest and rest[0] in '+*?{')):
-                stack[-1] = True
+                stack[-1][0] = True
+        elif ch == '|' and stack:
+            stack[-1][1] = True
         elif ch in '+*?{' and stack:
-            stack[-1] = True
+            stack[-1][0] = True
         i += 1
     return False
+
+
+def pattern_error(name):
+    """Why a blacklist pattern is refused, or None. Also used by the Django admin, which saved patterns without these checks."""
+    try:
+        re.compile(name)
+    except re.error as e:
+        return f'Not a valid pattern: {e}'
+    if len(name) > 200:
+        return 'Pattern too long (200 characters at most).'
+    if _has_redos(name):
+        return 'Pattern contains nested repeats, repeated alternations or backreferences that could slow DNS resolution.'
+    return None
 
 
 class BlockedDomainSerializer(serializers.ModelSerializer):
@@ -51,14 +71,8 @@ class BlockedDomainSerializer(serializers.ModelSerializer):
         if re.search(r'[\x00-\x1f\x7f]', name):
             raise serializers.ValidationError({'name': 'Control characters are not allowed.'})
         if regex:
-            try:
-                re.compile(name)
-            except re.error as e:
-                raise serializers.ValidationError({'name': f'Not a valid pattern: {e}'})
-            if len(name) > 200:
-                raise serializers.ValidationError({'name': 'Pattern too long (200 characters at most).'})
-            if _has_redos(name):
-                raise serializers.ValidationError({'name': 'Pattern contains nested repeats or backreferences that could slow DNS resolution.'})
+            if why := pattern_error(name):
+                raise serializers.ValidationError({'name': why})
         elif not HOST_RE.match(name):
             raise serializers.ValidationError({'name': 'Not a valid domain name (letters, digits, - and _ in labels separated by dots).'})
         if BlockedDomain.objects.filter(name=name, source='manual').exclude(pk=getattr(self.instance, 'pk', None)).exists():

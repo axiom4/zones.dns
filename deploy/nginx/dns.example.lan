@@ -61,7 +61,7 @@ server {
     add_header Alt-Svc 'h3=":443"; ma=86400' always;
     add_header Cross-Origin-Opener-Policy "same-origin" always;
     # The app is same-origin only. 'unsafe-inline' is needed by the inline critical CSS and the small inline script of the Angular build.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
     # Note: a location with its own add_header does not inherit the ones above, so HSTS and Alt-Svc are repeated there.
 
     server_tokens off;
@@ -140,7 +140,7 @@ server {
         add_header Strict-Transport-Security "max-age=31536000" always;
         add_header Alt-Svc 'h3=":443"; ma=86400' always;
         add_header Cross-Origin-Opener-Policy "same-origin" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'" always;
     }
 
     # Icons, logo, map data and robots.txt: no hash in the name, so a day (not forever).

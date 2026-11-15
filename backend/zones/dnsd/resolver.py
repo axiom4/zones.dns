@@ -395,15 +395,19 @@ class Resolver(BaseResolver):
         self.down = {}  # upstream -> monotonic time until which it is skipped
         self._prefetch_pool = ThreadPoolExecutor(max_workers=settings.DNS_PREFETCH_WORKERS, thread_name_prefix='dns-prefetch')
         self._prefetch_room = threading.BoundedSemaphore(settings.DNS_PREFETCH_WORKERS * 8)
-        self._dnskeys = {}  # signer zone -> (monotonic expiry, [DNSKEY rr])
+        self._validator = dnssec.Validator(self._ask_dnssec)  # trusted keys per zone, kept for their TTL (at most an hour)
 
     def resolve(self, request, handler):
         if (bad := early_error(request)) is not None:
             return bad
+        if not ratelimit.allowed(handler.client_address[0]):  # DNS_ALLOW_QUERY: not one of our clients; not logged, a flood would fill the log
+            reply = request.reply(aa=0)
+            reply.header.rcode = RCODE.REFUSED
+            return reply
         _db_check()  # a connection the database dropped while idle is replaced before use
         if request.header.opcode == OPCODE.UPDATE:
             try:
-                return ddns.handle_update(request, handler.client_address[0])
+                return ddns.handle_update(request, handler.client_address[0], getattr(handler, 'wire', None))
             finally:
                 connection.close_if_unusable_or_obsolete()
         t0 = time.monotonic()
@@ -591,21 +595,12 @@ class Resolver(BaseResolver):
         host = server.strip('[]')
         return host, 53, ':' in host
 
-    def _fetch_dnskeys(self, zone_name):
-        """DNSKEYs of a signer zone, kept for their TTL (at most an hour): without this every validated answer cost a second upstream query."""
-        now = time.monotonic()
-        hit = self._dnskeys.get(zone_name)
-        if hit and hit[0] > now:
-            return hit[1]
-        q = DNSRecord.question(zone_name, 'DNSKEY')
+    def _ask_dnssec(self, name, qtype):
+        """A DNSKEY / DS question for the chain of trust (dnssec.Validator), asked upstream with DO=1; None when no upstream answered."""
+        q = DNSRecord.question(name, qtype)
         q.add_ar(EDNS0(flags='do', udp_len=1232))
-        rep, _ = self.ask_upstream(q, validate_dnssec=False)
-        keys = [rr for rr in rep.rr if rr.rtype == QTYPE.DNSKEY]
-        if keys:  # no keys (upstream failed): not remembered, asked again next time
-            if len(self._dnskeys) > 1000:
-                self._dnskeys.clear()
-            self._dnskeys[zone_name] = (now + min(3600, max(30, min(rr.ttl for rr in keys))), keys)
-        return keys
+        rep, server = self.ask_upstream(q, validate_dnssec=False)
+        return rep if server else None
 
     def ask_upstream(self, request, validate_dnssec=True):
         """(reply, upstream that answered) or (SERVFAIL reply, None). Tries the upstreams in order; one that failed is skipped for
@@ -634,7 +629,7 @@ class Resolver(BaseResolver):
                 reply.header.id = orig_id
                 if reply.header.rcode != RCODE.SERVFAIL:
                     if want_dnssec and not request.header.cd:
-                        state = dnssec.validate_reply(reply, fetch_dnskeys=self._fetch_dnskeys)
+                        state = dnssec.validate_reply(reply, self._validator)
                         if state == 'bogus':
                             bad = request.reply()
                             bad.header.rcode = RCODE.SERVFAIL
