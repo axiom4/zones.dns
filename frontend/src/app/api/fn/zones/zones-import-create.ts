@@ -13,6 +13,11 @@ import { ZoneImportResult } from '../../models/zone-import-result';
 export interface ZonesImportCreate$Params {
 
 /**
+ * Proof of a second factor for emptying or deleting this zone (POST /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
+
+/**
  * A unique integer value identifying this zone.
  */
   id: number;
@@ -22,6 +27,7 @@ export interface ZonesImportCreate$Params {
 export function zonesImportCreate(http: HttpClient, rootUrl: string, params: ZonesImportCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<ZoneImportResult>> {
   const rb = new RequestBuilder(rootUrl, zonesImportCreate.PATH, 'post');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.path('id', params.id, {});
     rb.body(params.body, 'application/json');
   }

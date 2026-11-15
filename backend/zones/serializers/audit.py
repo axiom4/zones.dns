@@ -10,7 +10,7 @@ class AuditRequestSerializer(serializers.Serializer):
     def validate_domain(self, v):
         d = clean_domain(v)
         if not d:
-            raise serializers.ValidationError('Nome di dominio non valido.')
+            raise serializers.ValidationError('Not a valid domain name.')
         return d
 
 

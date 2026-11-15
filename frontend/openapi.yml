@@ -6,8 +6,17 @@ paths:
   /api/admin-ticket/:
     post:
       operationId: admin_ticket_create
-      description: 'One-use ticket (60 s) that opens the Django admin: the GUI posts
-        it to /admin/sso/.'
+      description: |-
+        One-use ticket (60 s) that opens the Django admin: the GUI posts it to /admin/sso/. Needs a step-up grant (scope admin): the admin
+        can delete anybody's second factor, so a stolen token alone must not open it.
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/... with scope
+          mfa-change, or admin for the admin ticket). Required when the user has a
+          second factor.
       tags:
       - admin-ticket
       security:
@@ -998,7 +1007,8 @@ paths:
         schema:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/... with scope
-          mfa-change). Required when the user has a second factor.
+          mfa-change, or admin for the admin ticket). Required when the user has a
+          second factor.
       - in: path
         name: id
         schema:
@@ -1227,7 +1237,8 @@ paths:
         schema:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/... with scope
-          mfa-change). Required when the user has a second factor.
+          mfa-change, or admin for the admin ticket). Required when the user has a
+          second factor.
       tags:
       - mfa
       security:
@@ -1389,6 +1400,14 @@ paths:
   /api/records/bulk/:
     post:
       operationId: records_bulk_create
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor for emptying or deleting this zone (POST
+          /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has
+          a second factor.
       tags:
       - records
       requestBody:
@@ -1590,8 +1609,9 @@ paths:
         name: X-MFA-Grant
         schema:
           type: string
-        description: Proof of a second factor for this deletion (POST /api/mfa/stepup/...).
-          Required when the user has a second factor.
+        description: Proof of a second factor for emptying or deleting this zone (POST
+          /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has
+          a second factor.
       - in: path
         name: id
         schema:
@@ -1630,6 +1650,13 @@ paths:
     post:
       operationId: zones_import_create
       parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor for emptying or deleting this zone (POST
+          /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has
+          a second factor.
       - in: path
         name: id
         schema:

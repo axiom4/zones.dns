@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+- **Upgrading:** no migration. Restart `rundns` and gunicorn, publish the new GUI build. `INSTALL.md` changed how port 53 is given to Python (see Security).
+- **Fixed**
+  - DNS over HTTPS answered `406` to clients that send `Accept: application/dns-message` (Firefox, Chrome): `/dns-query` is now a plain Django view.
+  - `rundns`: a database error during the hourly log purge ended the whole daemon; it is now reported and retried an hour later. `SIGTERM` (supervisor stop) saves the log rows still waiting, like Ctrl-C.
+  - With the database away, a name whose blacklist answer was not in memory got no answer at all: it is now answered unblocked until the database is back.
+  - DNS over TCP answered only the first query of a connection and dropped the others (DNS over TLS clients reuse the connection). A connection now serves up to 100 queries, is closed after 2 s of silence or 30 s in all, and a client outside `DNS_ALLOW_QUERY` is closed before anything is read.
+  - Suspicious queries: a flood of random subdomains from one client made every query scan a growing table under a lock (20,000 names: seconds). The table stops at `SUSPICIOUS_MAX_UNIQUE`.
+  - Query log: `hours` with a huge or non-ASCII number gave error 500; `hours=0` listed nothing while counting everything (now: the whole log).
+  - DNS UPDATE: records are checked like the API's (a record the daemon could not build is refused with `FORMERR`), a TTL of 0 takes the default instead of failing.
+  - A blacklist answer worked out while the data was being reloaded could be remembered after the reload (an unblocked name stayed blocked up to `DNS_DATA_TTL`).
+  - Records: the API refuses a duplicate and a CNAME that shares its name with other records.
+- **Security**
+  - Emptying a zone asks for the second factor like deleting it: *Import* with *Replace* and a bulk delete of every record of a zone need the `zone-delete:<id>` grant (`X-MFA-Grant`).
+  - Opening the Django admin asks for the second factor (step-up scope `admin`): with a stolen token alone the admin could delete the owner's authenticator.
+  - `DNS_PROXY_PROTOCOL` (off by default): DoH and DoT clients keep their own address for `DNS_ALLOW_QUERY`, the rate limit, the suspicious-query count and the log, instead of sharing 127.0.0.1. Needs `proxy_protocol on;` in `dns-dot.conf` and `X-Real-IP` in the `/dns-query` location (both in `deploy/nginx`).
+  - `INSTALL.md`: `setcap` goes on a private copy of the interpreter, not on `/usr/bin/python3.x`, where it gave every local user the right to bind low ports (and raw sockets with DHCP).
+
 ## 1.1.0 — 2026-11-14
 - **Upgrading from 1.0.1:** run `manage.py migrate` (0018 to 0031; on SQLite 0029 rebuilds the log table, on PostgreSQL 0031 needs the `pg_trgm` extension and, on a partitioned log, locks writes while the index is built: pick a quiet time), then `manage.py rebuild_stats` once, then restart `rundns` and gunicorn. Before restarting: clients outside the private networks (global IPv6 addresses, a VPS) must be listed in `DNS_ALLOW_QUERY` or they get `REFUSED`; copy `deploy/nginx/dns.example.lan` again and reload nginx.
 - **Security** (changes from 1.0.1):

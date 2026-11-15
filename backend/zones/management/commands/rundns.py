@@ -1,3 +1,4 @@
+import signal
 import time
 from datetime import timedelta
 
@@ -23,6 +24,21 @@ class Command(BaseCommand):
         p.add_argument('--port', type=int, default=5353)  # 53 needs root
         p.add_argument('--upstream', default=settings.UPSTREAM_DNS, help='one or more resolvers, comma separated, tried in order')
 
+    def housekeeping(self):
+        """The hourly clean-up. Nothing here may end the process: the servers run on daemon threads, so an error (the database away for a
+        moment) would stop the DNS service."""
+        close_old_connections()  # this thread sleeps for an hour: do not reuse a connection the database has closed meanwhile
+        try:
+            partitions.maintain()  # MySQL partitioned log: drops old days instantly, creates the next ones
+        except Exception as e:
+            self.stderr.write(f'Log partitions: {e}')
+        try:
+            cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
+            QueryLog.objects.filter(time__lt=cutoff).delete()
+            rollup.purge(cutoff)
+        except Exception as e:
+            self.stderr.write(f'Log purge: {e} (retried in an hour)')
+
     def handle(self, *a, address, port, upstream, **o):
         if settings.REDIS_URL:
             from django.core.cache import cache
@@ -47,16 +63,12 @@ class Command(BaseCommand):
         for s in servers:
             s.start_thread()
         self.stdout.write(f'DNS on {address}:{port} (udp+tcp), upstream {upstream}')
+        def stop(*_):
+            raise KeyboardInterrupt
+        signal.signal(signal.SIGTERM, stop)  # supervisor / systemd stop: leave like Ctrl-C, saving the log rows still waiting
         try:
             while True:
-                close_old_connections()  # this thread sleeps for an hour: do not reuse a connection the database has closed meanwhile
-                try:
-                    partitions.maintain()  # MySQL partitioned log: drops old days instantly, creates the next ones
-                except Exception as e:
-                    self.stderr.write(f'Log partitions: {e}')
-                cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
-                QueryLog.objects.filter(time__lt=cutoff).delete()
-                rollup.purge(cutoff)
+                self.housekeeping()
                 time.sleep(3600)
         except KeyboardInterrupt:
             for s in servers:

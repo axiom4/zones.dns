@@ -5,6 +5,7 @@ import { recordsBulkCreate, recordsDestroy, recordsList, zonesExportRetrieve, zo
 import { ActionEnum, Record, Zone, ZoneImportResult } from '../api/models';
 import { RecordForm } from '../record-form/record-form';
 import { ptrToIp } from '../lib/reverse';
+import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 import { ZonesStore } from '../services/zones-store';
 
@@ -23,6 +24,7 @@ export class ZonePage {
   empty = new Set<number>();
   zone = computed(() => this.store.zones().find(z => z.id === +this.id()));
   off = computed(() => this.zone()?.enabled === false); // zone switched off: its records show as disabled and cannot be changed
+  private stepUp = inject(StepUp);
   records = signal<Record[]>([]);
   filter = signal('');
   selected = signal(this.empty);
@@ -108,11 +110,19 @@ export class ZonePage {
   toggleOne(r: Record) { return this.bulkOn([r.id], r.enabled === false ? 'enable' : 'disable'); }
   bulk(action: ActionEnum) { return this.bulkOn([...this.selected()], action); }
   private bulkOn(ids: number[], action: ActionEnum) {
-    return this.ui.run(async () => { await this.api.invoke(recordsBulkCreate, { body: { ids, action } }); await this.load(); });
+    return this.ui.run(async () => {
+      // deleting every record of the zone is confirmed with a second factor, like deleting the zone
+      const all = action === 'delete' && this.records().every(r => ids.includes(r.id));
+      const grant = all ? await this.stepUp.request(`zone-delete:${this.id()}`) : ''; // '' = nothing to prove, null = cancelled
+      if (grant === null) return;
+      await this.api.invoke(recordsBulkCreate, { body: { ids, action }, 'X-MFA-Grant': grant || undefined });
+      if (action === 'delete') this.selected.set(new Set());
+      await this.load();
+    });
   }
   bulkDelete() {
     const n = this.selected().size;
-    this.ui.ask(`Delete ${n} records?`, 'This cannot be undone.', () => { this.bulk('delete'); this.selected.set(new Set()); });
+    this.ui.ask(`Delete ${n} records?`, 'This cannot be undone.', () => { this.bulk('delete'); });
   }
 
   // --- zone file import / export ---
@@ -133,7 +143,9 @@ export class ZonePage {
   }
   runImport(dry_run: boolean) {
     return this.ui.run(async () => {
-      const r = await this.api.invoke(zonesImportCreate, { id: +this.id(), body: { text: this.importText, replace: this.importReplace, dry_run } });
+      const grant = this.importReplace && !dry_run ? await this.stepUp.request(`zone-delete:${this.id()}`) : ''; // replacing deletes every record first
+      if (grant === null) return;
+      const r = await this.api.invoke(zonesImportCreate, { id: +this.id(), body: { text: this.importText, replace: this.importReplace, dry_run }, 'X-MFA-Grant': grant || undefined });
       this.importResult.set(r);
       if (!dry_run) { await this.load(); if (!r.errors.length) this.imp()!.nativeElement.close(); }
     });

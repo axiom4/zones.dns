@@ -41,6 +41,12 @@ class RecordSerializer(serializers.ModelSerializer):
             build_rr(get('zone').name, get('name'), get('type'), get('value'), get('ttl') or 0)
         except Exception:
             raise serializers.ValidationError({'value': f"Invalid RDATA for a {get('type')} record: check the format of the value."})
+        same_name = Record.objects.filter(zone=get('zone'), name=get('name')).exclude(pk=getattr(self.instance, 'pk', None))
+        if same_name.filter(type=get('type'), value=get('value')).exists():
+            raise serializers.ValidationError({'value': 'This record already exists.'})
+        # RFC 1034 §3.6.2: a name that is an alias has nothing else (the daemon would answer only one of the two)
+        if (same_name.exclude(type='CNAME') if get('type') == 'CNAME' else same_name.filter(type='CNAME')).exists():
+            raise serializers.ValidationError({'type': 'A CNAME cannot share its name with other records: remove them (or the CNAME) first.'})
         return d
 
     def create(self, d):

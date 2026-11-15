@@ -11,7 +11,7 @@ import { RequestBuilder } from '../../request-builder';
 export interface ZonesDestroy$Params {
 
 /**
- * Proof of a second factor for this deletion (POST /api/mfa/stepup/...). Required when the user has a second factor.
+ * Proof of a second factor for emptying or deleting this zone (POST /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has a second factor.
  */
   'X-MFA-Grant'?: string;
 

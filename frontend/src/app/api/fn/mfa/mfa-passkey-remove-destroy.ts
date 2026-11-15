@@ -11,7 +11,7 @@ import { RequestBuilder } from '../../request-builder';
 export interface MfaPasskeyRemoveDestroy$Params {
 
 /**
- * Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change). Required when the user has a second factor.
+ * Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change, or admin for the admin ticket). Required when the user has a second factor.
  */
   'X-MFA-Grant'?: string;
   id: number;

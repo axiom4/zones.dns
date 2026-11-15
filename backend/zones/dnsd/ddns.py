@@ -10,11 +10,10 @@ from django.conf import settings
 from django.db import transaction
 from dnslib import QTYPE, RCODE
 
-from ..models import DataVersion, Record, Zone
+from ..models import RECORD_TYPES, DataVersion, Record, Zone, build_rr
 from . import tsig
 
 CLASS_IN, CLASS_NONE, CLASS_ANY = 1, 254, 255
-_SUPPORTED_TYPES = {'A', 'AAAA', 'CNAME', 'MX', 'NS', 'TXT', 'SRV', 'NAPTR', 'PTR', 'CAA', 'SVCB', 'HTTPS', 'TLSA', 'SSHFP'}
 
 
 def _client_allowed(client_ip):
@@ -148,10 +147,16 @@ def _apply(request, zone):
         rtype = QTYPE.get(upd.rtype, '')
         if upd.rclass == CLASS_IN:
             # Add to an RRset
-            if rtype not in _SUPPORTED_TYPES:
+            if rtype not in RECORD_TYPES:
                 raise _Abort(RCODE.FORMERR)
             val = _rdata_to_value(upd)
-            ttl = int(upd.ttl) if upd.ttl else None
+            ttl = int(upd.ttl) or 300  # the column has no NULL: a TTL of 0 took the default
+            try:  # the same check as the API: a record the daemon cannot build would fail every query for its name
+                if len(rel) > 253 or len(val) > 1024:
+                    raise ValueError('too long')
+                build_rr(zone.name, rel, rtype, val, ttl or 0)
+            except Exception:
+                raise _Abort(RCODE.FORMERR)
             if rtype == 'CNAME':
                 Record.objects.filter(zone=zone, name=rel, type='CNAME').delete()
             rec, created = Record.objects.get_or_create(zone=zone, name=rel, type=rtype, value=val, defaults={'ttl': ttl})

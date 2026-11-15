@@ -55,7 +55,9 @@ export class Shell implements AfterViewInit {
   /** The admin has no password form of its own: a one-use ticket, issued only to a logged-in GUI session, starts it. */
   openAdmin() {
     return this.ui.run(async () => {
-      const { ticket } = await this.api.invoke(adminTicketCreate);
+      const grant = await this.stepUp.request('admin'); // the admin can remove anybody's second factor: prove yours first
+      if (grant === null) return;
+      const { ticket } = await this.api.invoke(adminTicketCreate, { 'X-MFA-Grant': grant || undefined });
       const f = Object.assign(document.createElement('form'), { method: 'post', action: '/admin/sso/', target: '_blank' });
       f.append(Object.assign(document.createElement('input'), { type: 'hidden', name: 'ticket', value: ticket }));
       document.body.append(f); f.submit(); f.remove();

@@ -53,6 +53,13 @@ class LogPagination(LimitOffsetPagination):
 
 
 COUNT_TTL = 30
+MAX_HOURS = 24 * 3660  # ten years: more made timedelta overflow (error 500)
+
+
+def hours_of(p):
+    """The hours filter as a number; 0 = not given, 0 or not a number: the whole log."""
+    h = p.get('hours', '')
+    return min(int(h), MAX_HOURS) if h.isascii() and h.isdigit() else 0
 
 
 def after_row(qs, before):
@@ -79,8 +86,8 @@ def stat_count(p):
     if not LogTotal.objects.exists():
         return None  # counters not built yet (manage.py rebuild_stats)
     logs = QueryLog.objects.filter(**{dim: val} if val else {})
-    if p.get('hours', '').isdigit() and int(p['hours']):
-        cutoff = timezone.now() - timedelta(hours=int(p['hours']))
+    if hours_of(p):
+        cutoff = timezone.now() - timedelta(hours=hours_of(p))
         first = floor_hour(cutoff)
         if first < cutoff:
             first += timedelta(hours=1)
@@ -127,13 +134,13 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
                 qs = qs.filter(**{f: val})  # '.' is how the root (an empty name) is shown
         if p.get('answer'):
             qs = qs.annotate(answers_text=Cast('answers', TextField())).filter(answers_text__icontains=p['answer'].strip())
-        if p.get('hours', '').isdigit():
-            qs = qs.filter(time__gte=timezone.now() - timedelta(hours=int(p['hours'])))
+        if hours_of(p):
+            qs = qs.filter(time__gte=timezone.now() - timedelta(hours=hours_of(p)))
         if p.get('country'):
-            hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24  # the counters have no 'all time': 24 h is the page default
+            hours = hours_of(p) or 24  # the counters have no 'all time': 24 h is the page default
             qs = qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
         if p.get('asn'):
-            hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
+            hours = hours_of(p) or 24
             qs = qs.filter(domain__in=geo.network_domains(p['asn'].strip().upper(), min(hours, 720)))
         return qs
 
@@ -156,18 +163,18 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             if p.get('domain'):
                 val = p['domain'].strip()
                 d_qs = d_qs.filter(domain='' if val == '.' else val.rstrip('.').lower())
-            if p.get('hours', '').isdigit():
-                d_qs = d_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(p['hours']))))
+            if hours_of(p):
+                d_qs = d_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours_of(p))))
             if p.get('country'):
-                hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
+                hours = hours_of(p) or 24
                 d_qs = d_qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
             if p.get('asn'):
-                hours = int(p['hours']) if p.get('hours', '').isdigit() and int(p['hours']) else 24
+                hours = hours_of(p) or 24
                 d_qs = d_qs.filter(domain__in=geo.network_domains(p['asn'].strip().upper(), min(hours, 720)))
             outcome = p.get('outcome', '').strip().lower()
             if outcome in ('local', 'forwarded', 'blocked', 'error'):
                 d_qs = d_qs.filter(**{f'{outcome}__gt': 0})
-            if (by_count or (p.get('hours', '').isdigit() and int(p['hours']) >= 24)) and d_qs.exists():
+            if (by_count or hours_of(p) >= 24) and d_qs.exists():
                 sort_agg = (Sum(outcome) if outcome in ('local', 'forwarded', 'blocked', 'error') else Sum('n')) if by_count else Max('hour')
                 ranked = d_qs.values('domain').annotate(sort_val=sort_agg).order_by('-sort_val', 'domain')
                 page_keys = [r['domain'] for r in self.paginate_queryset(ranked)]
@@ -187,8 +194,8 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             if p.get('name'):
                 val = p['name'].strip()
                 s_qs = s_qs.filter(key='' if val == '.' else val.rstrip('.').lower())
-            if p.get('hours', '').isdigit():
-                s_qs = s_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(p['hours']))))
+            if hours_of(p):
+                s_qs = s_qs.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours_of(p))))
             if s_qs.exists():
                 ranked = s_qs.values('key').annotate(sort_val=Sum('n')).order_by('-sort_val', 'key')
                 page_keys = [r['key'] for r in self.paginate_queryset(ranked)]
@@ -225,9 +232,8 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         """Distinct client IPs, most active first (at most 500), with the FQDN of the default zone that points to each.
         Read from the hourly counters (a few rows), not by scanning the log."""
         rows = StatCount.objects.filter(dim='client')
-        hours = request.query_params.get('hours', '')
-        if hours.isdigit() and int(hours):
-            rows = rows.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=int(hours))))
+        if hours := hours_of(request.query_params):
+            rows = rows.filter(hour__gte=floor_hour(timezone.now() - timedelta(hours=hours)))
         found = list(rows.values('key').annotate(count=Sum('n')).order_by('-count', 'key')[:500])
         zone, names = settings.DEFAULT_ZONE, {}
         if zone:

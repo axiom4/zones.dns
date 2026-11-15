@@ -12,19 +12,29 @@ from ..serializers import (ReverseZoneRequestSerializer, SyncPtrResultSerializer
                            ZoneImportSerializer, ZoneSerializer)
 
 
+GRANT = OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
+                         description='Proof of a second factor for emptying or deleting this zone (POST /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has a second factor.')
+
+
+def need_grant(request, zone_id):
+    """None, or the 403 answer when the user has a second factor and did not prove it for this zone (scope zone-delete:<id>)."""
+    if not mfa.methods(request.user):  # someone who has no second factor cannot be asked for one
+        return None
+    try:
+        mfa.use_grant(request.user, f'zone-delete:{zone_id}', request.headers.get('X-MFA-Grant'))
+    except mfa.MfaError as e:
+        return Response({'detail': e.text, 'mfa_required': True}, status=status.HTTP_403_FORBIDDEN)
+    return None
+
+
 class ZoneViewSet(viewsets.ModelViewSet):
     queryset = Zone.objects.order_by('name')
     serializer_class = ZoneSerializer
 
-    @extend_schema(parameters=[OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
-                                                description='Proof of a second factor for this deletion (POST /api/mfa/stepup/...). Required when the user has a second factor.')])
+    @extend_schema(parameters=[GRANT])
     def destroy(self, request, *args, **kwargs):
-        zone = self.get_object()
-        if mfa.methods(request.user):  # someone who has no second factor cannot be asked for one
-            try:
-                mfa.use_grant(request.user, f'zone-delete:{zone.pk}', request.headers.get('X-MFA-Grant'))
-            except mfa.MfaError as e:
-                return Response({'detail': e.text, 'mfa_required': True}, status=status.HTTP_403_FORBIDDEN)
+        if (denied := need_grant(request, self.get_object().pk)) is not None:
+            return denied
         return super().destroy(request, *args, **kwargs)
 
     @extend_schema(responses={(200, 'text/plain'): OpenApiTypes.STR})
@@ -35,12 +45,16 @@ class ZoneViewSet(viewsets.ModelViewSet):
         res['Content-Disposition'] = f'attachment; filename="{zone.name}.zone"'
         return res
 
-    @extend_schema(request=ZoneImportSerializer, responses=ZoneImportResultSerializer)
+    @extend_schema(request=ZoneImportSerializer, responses=ZoneImportResultSerializer, parameters=[GRANT])
     @action(detail=True, methods=['post'], url_path='import')
     def import_(self, request, pk=None):
         s = ZoneImportSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        return Response(zonefile.import_zone(self.get_object(), **s.validated_data))
+        zone = self.get_object()
+        # replace deletes every record first: the same proof as deleting the zone
+        if s.validated_data['replace'] and not s.validated_data['dry_run'] and (denied := need_grant(request, zone.pk)) is not None:
+            return denied
+        return Response(zonefile.import_zone(zone, **s.validated_data))
 
     @extend_schema(request=ReverseZoneRequestSerializer, responses={201: ZoneSerializer})
     @action(detail=False, methods=['post'])

@@ -14,4 +14,4 @@ Open work, from the CHANGELOG "not done" notes and what needs a physical network
 ## Security (operational)
 
 - **`DEBUG=false` in production.** Verified in `.env.prod`; ensure `/opt/dns/app/backend/.env` on the server also has `DEBUG=false` and a fresh `DATABASE_URL` password (`chmod 600`).
-- **DoH (`/dns-query`) and DoT have no login.** Keep them to your own network (nginx `allow` / `deny`, firewall). The daemon logs DoH clients as 127.0.0.1.
+- **DoH (`/dns-query`) and DoT have no login.** Keep them to your own network (nginx `allow` / `deny`, firewall). The daemon sees their clients as 127.0.0.1 unless `DNS_PROXY_PROTOCOL=true` (and `proxy_protocol on;` in `dns-dot.conf`); check it with a real nginx before relying on it.

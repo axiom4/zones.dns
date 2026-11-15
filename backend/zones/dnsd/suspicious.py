@@ -45,9 +45,11 @@ def check(qname, qtype, client):
                 if len(_seen) > 10000:
                     _seen.clear()
             seen = _seen[(client, domain)]
-            seen[qname] = now
             for k in [k for k, t in seen.items() if now - t > win]:
                 del seen[k]
+            # past the limit no new name is kept: a flood of random subdomains made this table, and the scan above under the lock, grow with every query
+            if qname in seen or len(seen) <= settings.SUSPICIOUS_MAX_UNIQUE:
+                seen[qname] = now
             if not seen:
                 del _seen[(client, domain)]
             elif len(seen) > settings.SUSPICIOUS_MAX_UNIQUE:

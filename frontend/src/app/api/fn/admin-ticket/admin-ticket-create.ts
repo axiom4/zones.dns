@@ -10,11 +10,17 @@ import { RequestBuilder } from '../../request-builder';
 import { AdminTicket } from '../../models/admin-ticket';
 
 export interface AdminTicketCreate$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change, or admin for the admin ticket). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
 }
 
 export function adminTicketCreate(http: HttpClient, rootUrl: string, params?: AdminTicketCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<AdminTicket>> {
   const rb = new RequestBuilder(rootUrl, adminTicketCreate.PATH, 'post');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
   }
 
   return http.request(

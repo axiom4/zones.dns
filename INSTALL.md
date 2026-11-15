@@ -256,11 +256,15 @@ sudo supervisorctl reread && sudo supervisorctl update
 sudo supervisorctl status
 ```
 
-**Port 53 without root.** `rundns` should not run as root. Give the Python binary the permission to bind low ports (it must be the real file, not the venv symlink, and the permission is lost when Python is upgraded):
+**Port 53 without root.** `rundns` should not run as root. Give a Python binary of its own the permission to bind low ports. Not the system interpreter the venv links to (`/usr/bin/python3.x`): a capability set there belongs to every user of the machine. Replace the venv symlink with a copy that only `dns` can run, and set the capability on the copy (again after a Python upgrade):
 
 ```sh
-sudo setcap cap_net_bind_service=+ep "$(readlink -f /opt/dns/.venv/bin/python)"
+sudo cp --remove-destination "$(readlink -f /opt/dns/.venv/bin/python)" /opt/dns/.venv/bin/python
+sudo chown root:dns /opt/dns/.venv/bin/python && sudo chmod 750 /opt/dns/.venv/bin/python
+sudo setcap cap_net_bind_service=+ep /opt/dns/.venv/bin/python
 ```
+
+If an earlier install set it on the system interpreter, remove it: `sudo setcap -r "$(readlink -f /usr/bin/python3)"`.
 
 Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or iptables.
 
@@ -275,7 +279,7 @@ Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or 
 It binds UDP ports 67 and 547: the same `setcap` as port 53 (next section) is enough. `DHCP_UNICAST` and `DHCP_RA` also need `CAP_NET_RAW`, and `DHCP_PROBE` needs the `ping` program (package `iputils-ping`):
 
 ```sh
-sudo setcap 'cap_net_bind_service,cap_net_raw=+ep' "$(readlink -f /opt/dns/.venv/bin/python)"
+sudo setcap 'cap_net_bind_service,cap_net_raw=+ep' /opt/dns/.venv/bin/python   # the private copy made for port 53, never the system interpreter
 ```
 
 Add to the supervisor file and start it:

@@ -79,7 +79,7 @@ def _stepup(d, auth):
     if not (auth and auth.is_authenticated and auth.is_staff):
         raise mfa.MfaError('forbidden')
     scope = str(d.get('scope', ''))
-    if not re.fullmatch(r'zone-delete:\d+|mfa-change', scope):
+    if not re.fullmatch(r'zone-delete:\d+|mfa-change|admin', scope):
         raise mfa.MfaError('forbidden')
     return auth, scope
 
@@ -216,15 +216,15 @@ class MfaStatusView(APIView):
 
 
 GRANT = OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
-                         description='Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change). Required when the user has a second factor.')
+                         description='Proof of a second factor (POST /api/mfa/stepup/... with scope mfa-change, or admin for the admin ticket). Required when the user has a second factor.')
 
 
-def _need_grant(request):
-    """None if the request carries a valid mfa-change grant (or the user has no factor to prove), else the 403 answer."""
+def _need_grant(request, scope='mfa-change'):
+    """None if the request carries a valid grant of this scope (or the user has no factor to prove), else the 403 answer."""
     if not mfa.methods(request.user):
         return None
     try:
-        mfa.use_grant(request.user, 'mfa-change', request.headers.get('X-MFA-Grant'))
+        mfa.use_grant(request.user, scope, request.headers.get('X-MFA-Grant'))
     except mfa.MfaError as e:
         return Response({'detail': e.text, 'mfa_required': True}, status=403)
     return None
@@ -281,8 +281,11 @@ class MeView(APIView):
 class AdminTicketView(APIView):
     permission_classes = [IsSuperuser]  # the Django admin is for superusers only
 
-    @extend_schema(request=None, responses=AdminTicketSerializer)
+    @extend_schema(request=None, responses=AdminTicketSerializer, parameters=[GRANT])
     def post(self, request):
-        """One-use ticket (60 s) that opens the Django admin: the GUI posts it to /admin/sso/."""
+        """One-use ticket (60 s) that opens the Django admin: the GUI posts it to /admin/sso/. Needs a step-up grant (scope admin): the admin
+        can delete anybody's second factor, so a stolen token alone must not open it."""
+        if (denied := _need_grant(request, 'admin')) is not None:
+            return denied
         from ..security import admin_sso
         return Response({'ticket': admin_sso.make_ticket(request.user)})

@@ -11,12 +11,18 @@ import { BulkActionRequest } from '../../models/bulk-action-request';
 import { BulkResult } from '../../models/bulk-result';
 
 export interface RecordsBulkCreate$Params {
+
+/**
+ * Proof of a second factor for emptying or deleting this zone (POST /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
       body: BulkActionRequest
 }
 
 export function recordsBulkCreate(http: HttpClient, rootUrl: string, params: RecordsBulkCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<BulkResult>> {
   const rb = new RequestBuilder(rootUrl, recordsBulkCreate.PATH, 'post');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.body(params.body, 'application/json');
   }
 

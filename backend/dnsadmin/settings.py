@@ -227,6 +227,9 @@ DNS_AUTHORITATIVE = os.environ.get('DNS_AUTHORITATIVE', 'true').lower() in ('1',
 # true: reverse lookups of private addresses (10/8, 172.16/12, 192.168/16, fc00::/7 ...) that no zone answers get NXDOMAIN here (RFC 6303) instead of going upstream
 DNS_DDR = os.environ.get('DNS_DDR', '').strip()  # encrypted resolvers announced to clients (RFC 9462), see zones/dnsd/ddr.py
 DNS_DOH = os.environ.get('DNS_DOH', 'false').lower() in ('1', 'true', 'yes', 'on')  # serve DNS over HTTPS at /dns-query (views/doh.py)
+# true: the daemon reads the real client address from a PROXY protocol line sent by nginx (DNS over TLS: `proxy_protocol on;`) and by the DoH view,
+# so those clients are not all 127.0.0.1 in the log, the rate limit and the suspicious-query count. Only connections from this machine are believed.
+DNS_PROXY_PROTOCOL = os.environ.get('DNS_PROXY_PROTOCOL', 'false').lower() in ('1', 'true', 'yes', 'on')
 DNS_DOH_BACKEND = os.environ.get('DNS_DOH_BACKEND', '127.0.0.1:5353')  # the DNS daemon (TCP) that DoH queries are passed to
 DNS_LOCAL_REVERSE = os.environ.get('DNS_LOCAL_REVERSE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_PREFETCH = os.environ.get('DNS_PREFETCH', 'true').lower() in ('1', 'true', 'yes', 'on')  # renew cached answers that are about to expire while still asked for

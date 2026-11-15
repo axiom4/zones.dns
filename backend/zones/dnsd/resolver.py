@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
 from django.core.cache import cache
-from django.db import connection
+from django.db import DatabaseError, connection
 from django.db.models import Q
 from django.utils import timezone
 from dnslib import AAAA, EDNS0, OPCODE, PTR, QTYPE, RCODE, RR, SOA, A, DNSHeader, DNSRecord
@@ -250,6 +250,7 @@ def blocked_entry(qname):
     an allow entry (exception) beats a block. A pattern entry is tried last for a block, first for an allow. Remembered per name until the data changes."""
     qname = qname.rstrip('.').lower()
     _snapshot()  # notices a change and empties _blocked
+    gen = _data_at  # an answer worked out on a copy that was replaced meanwhile is not remembered
     with _blocked_lock:
         if qname in _blocked:
             _blocked.move_to_end(qname)
@@ -260,7 +261,7 @@ def blocked_entry(qname):
             parts = stored.split('\t', 1) if stored else []
             if stored is not None and (not stored or len(parts) == 2):  # an entry without the tab is the old name-only format: ask the database
                 hit = tuple(parts) or None
-                _remember_blocked(qname, hit)
+                _remember_blocked(qname, hit, gen)
                 return hit
         except Exception:
             pass
@@ -269,7 +270,10 @@ def blocked_entry(qname):
     found = _live(BlockedDomain.objects.filter(enabled=True, regex=False, name__in=suffixes))
     if _off_sources:
         found = found.exclude(source__in=_off_sources)  # a feature that is switched off blocks nothing
-    top = max(found, key=lambda b: len(b.name), default=None)  # the most specific entry wins: an allowed host inside a blocked domain, and the reverse
+    try:
+        top = max(found, key=lambda b: len(b.name), default=None)  # the most specific entry wins: an allowed host inside a blocked domain, and the reverse
+    except DatabaseError:
+        return None  # database away: the name is answered unblocked (not remembered) rather than not at all
     pats = [(p, allow) for rx, p, allow in _regexes if rx.search(qname)]
     if any(allow for _, allow in pats) or (top and top.allow):
         hit = None
@@ -279,7 +283,7 @@ def blocked_entry(qname):
         hit = (qname, f'pattern {pats[0][0]}')  # the name asked for, not the pattern: it becomes the owner of the SOA of the answer
     else:
         hit = None
-    _remember_blocked(qname, hit)
+    _remember_blocked(qname, hit, gen)
     if _shared():
         try:
             cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit) if hit else _NONE, settings.DNS_DATA_TTL)
@@ -288,8 +292,10 @@ def blocked_entry(qname):
     return hit
 
 
-def _remember_blocked(qname, hit):
+def _remember_blocked(qname, hit, gen=None):
     with _blocked_lock:
+        if gen is not None and gen != _data_at:
+            return  # the data was reloaded while this was looked up: it may be the old answer
         _blocked[qname] = hit
         if len(_blocked) > _BLOCKED_MAX:  # bounded LRU: names asked once are the bulk and go first, the frequent ones stay
             _blocked.popitem(last=False)
