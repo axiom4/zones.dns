@@ -7,6 +7,7 @@ import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { Ui } from '../services/ui';
 
+type Host = { mac: string; vendor: string; hostname: string; addrs: DhcpNeighbor[] };
 const KIND: Record<string, string> = { dhcpv6: 'DHCPv6 lease', slaac: 'SLAAC', other: 'privacy / fixed', 'link-local': 'link-local' };
 
 @Component({
@@ -22,16 +23,26 @@ export class DhcpNeighbors {
   items = signal<DhcpNeighbor[]>([]);
   filter = signal('');
   loaded = signal(false);
-  shown = computed(() => {
+  /** One row per host (MAC address): the same host has a DHCPv6 address, a SLAAC one, privacy ones and a link-local one. */
+  hosts = computed(() => {
     const q = this.filter().trim().toLowerCase();
-    return q ? this.items().filter(n => `${n.address} ${n.mac} ${n.vendor} ${n.hostname} ${KIND[n.kind]}`.toLowerCase().includes(q)) : this.items();
+    const by = new Map<string, Host>();
+    for (const n of this.items()) {
+      const h = by.get(n.mac) ?? { mac: n.mac, vendor: n.vendor, hostname: n.hostname, addrs: [] };
+      h.addrs.push(n);
+      by.set(n.mac, h);
+    }
+    const all = [...by.values()];
+    return q ? all.filter(h => `${h.mac} ${h.vendor} ${h.hostname} ${h.addrs.map(a => `${a.address} ${KIND[a.kind]}`).join(' ')}`.toLowerCase().includes(q)) : all;
   });
+  /** The addresses worth pinging: not link-local (those answer only on the link, and from here that proves little). */
+  global = (h: Host) => h.addrs.filter(a => a.kind !== 'link-local');
   kind = (n: DhcpNeighbor) => KIND[n.kind] ?? n.kind;
 
   constructor() { this.load(); }
 
   load() { return this.ui.run(async () => { this.items.set(await this.api.invoke(dhcpNeighborsList)); this.loaded.set(true); }); }
-  watch(n: DhcpNeighbor) { this.live().open(n.address); }
-  pingOne(n: DhcpNeighbor) { return this.ui.run(() => this.ping.once(n.address)); }
+  watch(a: DhcpNeighbor) { this.live().open(a.address); }
+  pingOne(a: DhcpNeighbor) { return this.ui.run(() => this.ping.once(a.address)); }
   pingAll() { return this.ui.run(() => this.ping.run(this.items().filter(n => n.kind !== 'link-local').map(n => n.address))); }
 }

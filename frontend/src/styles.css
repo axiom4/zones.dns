@@ -631,6 +631,15 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 .records.leases .rname { width: 21rem; flex: none; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .records.leases .ttlv { width: auto; white-space: nowrap; }
 @media (max-width: 1100px) { .records.leases .rname { width: auto; flex: 1 1 14rem; } }
+/* neighbours: one row per host, its addresses stacked */
+.records.nbr li { align-items: flex-start; }
+.records.nbr .rname { width: 15rem; flex: none; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.records.nbr .addrs { flex: 1; display: grid; gap: .35rem; min-width: 0; }
+.records.nbr .addr { display: flex; align-items: center; flex-wrap: wrap; gap: .25rem .75rem; }
+.records.nbr .addr code { font: 13.5px var(--mono); overflow-wrap: anywhere; }
+.records.nbr .addr .note-t { display: inline; }
+.records.nbr .addr.ll { opacity: .55; }
+@media (max-width: 1100px) { .records.nbr li { flex-wrap: wrap; } .records.nbr .rname { width: auto; flex: 1 1 12rem; } .records.nbr .addrs { flex-basis: 100%; } }
 .pingr { font-size: .8rem; font-weight: 700; color: #b3261e; white-space: nowrap; } .pingr.up { color: #1b7f3b; }
 .vendor-hint { align-self: center; }
 

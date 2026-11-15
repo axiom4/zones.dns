@@ -1,25 +1,30 @@
 <header>
   <div>
     <h2>IPv6 neighbours</h2>
-    <p class="soft">{{ items().length }} IPv6 {{ items().length === 1 ? 'host' : 'hosts' }} seen by this server on the network (the kernel's neighbour table). Hosts that configure themselves with SLAAC have no DHCP lease and appear only here; the name is the one the same MAC has in DHCPv4. Entries expire when a host has been silent for a while.</p>
+    <p class="soft">{{ hosts().length }} {{ hosts().length === 1 ? 'host' : 'hosts' }} with {{ items().length }} IPv6 {{ items().length === 1 ? 'address' : 'addresses' }}, seen by this server on the network (the kernel's neighbour table). Hosts that configure themselves with SLAAC have no DHCP lease and appear only here; the name is the one the same MAC has in DHCPv4. Entries expire when a host has been silent for a while.</p>
   </div>
   <div class="actions">
-    @if (items().length > 5) {
+    @if (hosts().length > 5) {
       <input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search" aria-label="Search neighbours" autocomplete="off">
     }
     <button class="ghost" type="button" (click)="load()">Refresh</button>
     <button class="ghost" type="button" (click)="pingAll()" [disabled]="ping.busy() || !items().length">{{ ping.busy() ? 'Pinging…' : 'Ping all' }}</button>
   </div>
 </header>
-<ul class="records leases">
-  @for (n of shown(); track n.address) {
-    <li [class.off]="n.state === 'STALE' || n.kind === 'link-local'">
+<ul class="records nbr">
+  @for (h of hosts(); track h.mac) {
+    <li>
       <span class="type" data-t="AAAA">v6</span>
-      <span class="rname">{{ n.address }}@if (n.hostname) {<small class="note-t">{{ n.hostname }}</small>}</span>
-      <span class="rvalue">{{ n.mac }}@if (n.vendor) {<small class="note-t">{{ n.vendor }}</small>}</span>
-      <span class="ttlv">{{ kind(n) }} · {{ n.state.toLowerCase() }}</span>
-      @if (ping.label(n.address); as p) { <span class="pingr" [class.up]="ping.results()[n.address]?.up">{{ p }}</span> }
-      @if (n.kind !== 'link-local') { <button class="mini" type="button" (click)="pingOne(n)" (dblclick)="watch(n)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + n.address">Ping</button> }
+      <span class="rname">{{ h.hostname || h.mac }}@if (h.hostname) {<small class="note-t">{{ h.mac }}</small>}@if (h.vendor) {<small class="note-t">{{ h.vendor }}</small>}</span>
+      <span class="addrs">
+        @for (a of h.addrs; track a.address) {
+          <span class="addr" [class.ll]="a.kind === 'link-local'">
+            <code>{{ a.address }}</code><small class="note-t">{{ kind(a) }} · {{ a.state.toLowerCase() }}</small>
+            @if (ping.label(a.address); as p) { <span class="pingr" [class.up]="ping.results()[a.address]?.up">{{ p }}</span> }
+            @if (a.kind !== 'link-local') { <button class="mini" type="button" (click)="pingOne(a)" (dblclick)="watch(a)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + a.address">Ping</button> }
+          </span>
+        }
+      </span>
     </li>
   } @empty {
     <li class="empty">{{ !loaded() ? 'Loading…' : items().length ? 'No results for your search.' : 'No IPv6 neighbours. This needs Linux with the ip command, and hosts that have talked on the network recently.' }}</li>
