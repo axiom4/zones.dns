@@ -248,6 +248,34 @@ class Dns6OnlyLeaseTests(TestCase):
         self.assertEqual(a.header.rcode, 2)  # SERVFAIL: it was forwarded to the (unreachable) upstream, not answered empty
 
 
+class ZoneAndLeaseMergeTests(TestCase):
+    def ask(self, name, qtype):
+        from types import SimpleNamespace
+
+        from dnslib import DNSRecord
+
+        from .dnsd.resolver import Resolver
+        return [str(r.rdata) for r in Resolver('127.0.0.1:9', log=None).resolve(DNSRecord.question(name, qtype), SimpleNamespace(client_address=('127.0.0.1', 0))).rr]
+
+    @override_settings(DHCP=True, DHCP_DOMAIN='lan', DHCP_NAMES=True, DNS_AUTHORITATIVE=True)
+    def test_zone_gives_a_and_dhcp6_fills_in_aaaa(self):
+        from django.utils import timezone
+
+        from .dnsd import resolver
+        from .models import Dhcp6Lease, Record, Zone
+        z = Zone.objects.create(name='lan')
+        Record.objects.create(zone=z, name='ha', type='A', value='192.168.1.20')
+        Record.objects.create(zone=z, name='router', type='A', value='192.168.1.1')
+        later = timezone.now() + timezone.timedelta(hours=1)
+        Dhcp6Lease.objects.create(duid='0004aa', iaid=1, kind='na', value='fd00::100', hostname='ha', expires=later)
+        resolver._data = None
+        resolver._dhcp_names = (True, 'lan')
+        self.assertEqual(self.ask('ha.lan', 'A'), ['192.168.1.20'])  # the zone wins for what it has
+        self.assertEqual(self.ask('ha.lan', 'AAAA'), ['fd00::100'])  # the lease completes it
+        DhcpLease.objects.create(client='e', mac='aa:bb:cc:dd:ee:99', ip='192.168.1.199', hostname='router', expires=later)
+        self.assertEqual(self.ask('router.lan', 'A'), ['192.168.1.1'])  # a client cannot take over the A of a zone record
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone

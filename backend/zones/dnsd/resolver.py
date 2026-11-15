@@ -466,9 +466,14 @@ class Resolver(BaseResolver):
             else:
                 hosts = static_hosts(qname)
                 found = None if hosts else lookup(qname, qtype)
-                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and _lease(dhcp_leases.lease_hosts, qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
+                if qtype in ('A', 'AAAA'):  # merge: the zone or static host wins for the family it has, the DHCP leases fill in the other one (A from the zone, AAAA from DHCPv6)
+                    want6 = qtype == 'AAAA'
+                    free = (not hosts or not any((':' in a) == want6 for a, _ in hosts)) and (not found or found[1])
+                else:
+                    free = not hosts and (not found or found[1]) and not has_zone_node(qname)
+                leased = free and _lease(dhcp_leases.lease_hosts, qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
                 if leased and qtype in ('A', 'AAAA') and not any((':' in a) == (qtype == 'AAAA') for a, _ in leased):
-                    leased = None  # the client has leases of the other family only (v6 over DHCP, an IPv4 it holds statically): the upstream may know this one
+                    leased = None  # the client has leases of the other family only: the upstream may know this one
                 if leased:
                     hosts, found = leased, None
                 if hosts:
