@@ -13,6 +13,22 @@ def _name_cfg():
     return bool(s.DHCP and s.DHCP_NAMES and s.DHCP_DOMAIN.strip('.')), s.DHCP_DOMAIN.strip('.').lower()
 
 
+def _wpad_cfg():
+    s = dhcp_settings()
+    domain = s.DHCP_DOMAIN.strip('.').lower()
+    server = s.DHCP_SERVER.strip()
+    on = bool((s.DHCP_WPAD or s.PROXY) and domain and server)
+    return on, domain, server
+
+
+def wpad_hosts(qname, cfg=None):
+    """[(DHCP_SERVER, 60)] when qname is wpad.<DHCP_DOMAIN> and WPAD / Proxy is enabled, else None."""
+    on, domain, server = cfg or _wpad_cfg()
+    if on and qname.rstrip('.').lower() == f'wpad.{domain}':
+        return [(server, 60)]
+    return None
+
+
 def lease_hosts(qname, cfg=None):
     """[(address, ttl)] of the client that called itself <label>.<DHCP_DOMAIN> and has a live lease, or None (the DNS server answers these names).
     cfg: _name_cfg() already read (the DNS daemon keeps it with its data copy), else read now."""

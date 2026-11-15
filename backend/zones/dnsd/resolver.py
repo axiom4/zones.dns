@@ -39,6 +39,7 @@ _blocked_lock = threading.Lock()
 _blocked = OrderedDict()  # name -> (blacklist entry, where it came from) or None; least recently used first; emptied when the data changes
 _BLOCKED_MAX = 20000
 _dhcp_names = (False, '')  # dhcp_leases._name_cfg() read at every reload: Setting rows raise DataVersion too, so no query per DNS query
+_wpad_cfg = (False, '', '')  # dhcp_leases._wpad_cfg() read at every reload for wpad.<DHCP_DOMAIN>
 _SHARED_CHECK = 0.2  # with Redis: seconds between looks at the counter (one query asks _snapshot() several times)
 _db_tls = threading.local()
 _DB_IDLE_CHECK = 30  # seconds a worker's connection may sit idle before it is pinged again
@@ -83,7 +84,7 @@ def _build():
 
 
 def _load():
-    global _data, _data_at, _data_version, _ents, _off_sources, _regexes, _dhcp_names
+    global _data, _data_at, _data_version, _ents, _off_sources, _regexes, _dhcp_names, _wpad_cfg
     version = DataVersion.version()  # read before the data: a change during the load makes the next check reload again
     plain = None
     if _shared():
@@ -106,6 +107,7 @@ def _load():
     _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if st.get(key) == 'false')
     _regexes = () if 'manual' in _off_sources else _load_regexes()
     _dhcp_names = dhcp_leases._name_cfg()
+    _wpad_cfg = dhcp_leases._wpad_cfg()
     with _blocked_lock:
         _blocked.clear()
 
@@ -474,10 +476,13 @@ class Resolver(BaseResolver):
                 leased = free and _lease(dhcp_leases.lease_hosts, qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
                 if leased and qtype in ('A', 'AAAA') and not any((':' in a) == (qtype == 'AAAA') for a, _ in leased):
                     leased = None  # the client has leases of the other family only: the upstream may know this one
+                wpad = not leased and free and dhcp_leases.wpad_hosts(qname, _wpad_cfg)
                 if leased:
                     hosts, found = leased, None
+                elif wpad:
+                    hosts, found = wpad, None
                 if hosts:
-                    outcome, reply, via = 'local', static_reply(request, qtype, hosts), 'DHCP lease' if leased else 'static host'
+                    outcome, reply, via = 'local', static_reply(request, qtype, hosts), 'DHCP lease' if leased else ('WPAD (DHCP)' if wpad else 'static host')
                 elif found is not None:
                     recs, wild = found
                     outcome, reply = 'local', request.reply()

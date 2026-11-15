@@ -301,6 +301,33 @@ sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl sta
 
 Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving the whole network. Open the **DHCP** page in the GUI to check that the lease appears with its IP/prefix, MAC or DUID, client host name and expiry time (tick **include ended** to see expired leases, or click **✕** to end a lease). With `DHCP_NAMES=true` and `DHCP_DOMAIN=lan`, check forward and reverse resolution with `dig @192.0.2.10 <hostname>.lan` and `dig @192.0.2.10 -x <leased-ip>`. Router Advertisements: this host announces itself as *not* a default router (`DHCP_RA_ROUTER_LIFETIME=0`), so your real router keeps that role.
 
+### Optional: HTTP/HTTPS Ad-blocking & Popup-blocking Proxy (`runproxy`)
+
+`runproxy` is an HTTP and HTTPS forward proxy integrated with the Zones.dns Blacklist (Personal blocks and Public lists), configurable in the GUI under **DHCP > Proxy**:
+
+- **DHCP WPAD auto-assignment (`DHCP_WPAD=true`):** DHCPv4 automatically sends Option 252 (`http://<DHCP_SERVER>:<PROXY_PORT>/wpad.dat`) and the DNS daemon answers `wpad.<DHCP_DOMAIN>` with `DHCP_SERVER`. Clients with automatic proxy discovery enabled configure themselves without manual setup.
+- **HTTP & HTTPS filtering:**
+  - Blocks all domains in the Blacklist (both HTTP requests and HTTPS `CONNECT` tunnels), plus ad and popup URL patterns.
+  - Filters HTML pages (`PROXY_BLOCK_ADS=true`, `PROXY_BLOCK_POPUPS=true`) by stripping ad/popup `<script>` and `<iframe>` tags, injecting cosmetic CSS rules (`##selector`), and injecting an early `window.open` / click-hijack popup blocker.
+  - **HTTPS modes:** With `PROXY_HTTPS_MITM=false` (default), HTTPS connections use standard `CONNECT` and block ad/popup domains without needing any certificate on clients. With `PROXY_HTTPS_MITM=true`, the proxy intercepts HTTPS traffic using a local Proxy Root CA (downloadable from **DHCP > Proxy** or `http://<server>:8080/ca.crt` / `/proxy-ca.crt`) to filter HTML and block popups inside HTTPS pages as well.
+
+Add to `/etc/supervisor/conf.d/dns.conf`:
+
+```ini
+[program:dns-proxy]
+directory=/opt/dns/app/backend
+command=/opt/dns/.venv/bin/python manage.py runproxy
+user=dns
+autostart=false
+autorestart=true
+stdout_logfile=/var/log/supervisor/dns-proxy.log
+stderr_logfile=/var/log/supervisor/dns-proxy.err.log
+```
+
+```sh
+sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl start dns-proxy
+```
+
 ## 9. Firewall
 
 Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). Keep `8000`, the database and Redis closed to the outside. The daemon also refuses the clients outside `DNS_ALLOW_QUERY` (private networks by default): if your clients use public addresses (IPv6 global addresses, a VPS), list their networks there.

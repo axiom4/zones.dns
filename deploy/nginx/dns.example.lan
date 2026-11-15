@@ -32,8 +32,22 @@ upstream dns_backend {
 server {
     listen 80;
     listen [::]:80;
-    server_name dns.example.lan;
-    return 301 https://$host$request_uri;
+    server_name dns.example.lan wpad.*;
+
+    # WPAD (Proxy Auto-Discovery) and Proxy Root CA download work over plain HTTP on port 80 (required by OS WPAD clients).
+    location ~ ^/(wpad\.dat|proxy\.pac|proxy-ca\.crt)$ {
+        proxy_pass http://dns_backend;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
 }
 
 server {
@@ -76,8 +90,8 @@ server {
     # Never serve hidden files (.env, .git...).
     location ~ /\. { deny all; }
 
-    # ---- API and Django admin -> Django
-    location ~ ^/(api|admin)/ {
+    # ---- API, Django admin, WPAD PAC and Proxy Root CA -> Django
+    location ~ ^/(api/|admin/|wpad\.dat$|proxy\.pac$|proxy-ca\.crt$) {
         limit_req zone=dns_login burst=15 nodelay;
         limit_req_status 429;
 

@@ -319,3 +319,12 @@ DHCP_UNICAST = False  # Linux, root or CAP_NET_RAW, needs DHCP_INTERFACE: reply 
 DHCP_DNR = True  # announce the DNS_DDR resolvers (RFC 9463, option 162) to clients that ask
 DHCP_FAILOVER_SECS = 0  # standby failover delay: answer DISCOVER only when client secs >= this value (0 = primary)
 DHCP6_PREFERENCE = 0  # RFC 8415 §21.8 server preference option (0 = not sent; 255 = immediate selection, lower = backup)
+DHCP_WPAD = False  # announce the proxy via DHCPv4 option 252 (WPAD) and DNS wpad.<DHCP_DOMAIN>
+DHCP_WPAD_URL = ''  # custom PAC URL for DHCP option 252; empty = http://<DHCP_SERVER>:<PROXY_PORT>/wpad.dat
+PROXY = False  # HTTP/HTTPS ad-blocking and popup-blocking proxy server (manage.py runproxy)
+PROXY_PORT = 8080  # TCP port of the proxy server
+PROXY_ADDRESS = ''  # bind address of the proxy server; empty = 0.0.0.0
+PROXY_BLOCK_ADS = True  # block ad/tracker domains (from Blacklist), ad URLs, and strip ad elements/CSS in HTML pages
+PROXY_BLOCK_POPUPS = True  # block popup/popunder scripts and inject window.open / overlay popup protection in HTML pages
+PROXY_HTTPS_MITM = False  # intercept HTTPS traffic with the local Proxy Root CA to filter HTML and block popups inside HTTPS pages
+PROXY_CUSTOM_RULES = ''  # extra rules (one per line): URL substrings/regexes, ##.css-selector cosmetic rules, @@domain exceptions

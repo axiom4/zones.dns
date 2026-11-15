@@ -378,7 +378,7 @@ paths:
       operationId: dhcp_neighbors_list
       description: 'The IPv6 hosts on the network that this machine knows (kernel
         neighbour table, Linux): also the ones that configured themselves with SLAAC
-        and so have no lease. Empty where `ip` is missing.'
+        and so have no lease. 503 where `ip` is missing or fails.'
       tags:
       - dhcp
       security:
@@ -415,6 +415,58 @@ paths:
                 type: array
                 items:
                   $ref: '#/components/schemas/DhcpPingResult'
+          description: ''
+  /api/dhcp/proxy/info/:
+    get:
+      operationId: dhcp_proxy_info_retrieve
+      description: Return Proxy Root CA certificate info, active WPAD URL, and generated
+        PAC script.
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyInfo'
+          description: ''
+    post:
+      operationId: dhcp_proxy_info_create
+      description: Regenerate the local Proxy Root CA certificate and private key.
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyInfo'
+          description: ''
+  /api/dhcp/proxy/test/:
+    post:
+      operationId: dhcp_proxy_test_create
+      description: Test whether a URL or domain would be blocked by the proxy (Blacklist,
+        ad URL rules, popup rules, or custom rules).
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyTestRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyTestResult'
           description: ''
   /api/dhcp/reservations/:
     get:
@@ -2951,6 +3003,29 @@ components:
           minimum: 0
         DHCP_RA_SLAAC:
           type: boolean
+        DHCP_WPAD:
+          type: boolean
+        DHCP_WPAD_URL:
+          type: string
+          maxLength: 255
+        PROXY:
+          type: boolean
+        PROXY_PORT:
+          type: integer
+          maximum: 65535
+          minimum: 1
+        PROXY_ADDRESS:
+          type: string
+          maxLength: 64
+        PROXY_BLOCK_ADS:
+          type: boolean
+        PROXY_BLOCK_POPUPS:
+          type: boolean
+        PROXY_HTTPS_MITM:
+          type: boolean
+        PROXY_CUSTOM_RULES:
+          type: string
+          maxLength: 8000
     Dmarc:
       type: object
       properties:
@@ -3714,6 +3789,29 @@ components:
           minimum: 0
         DHCP_RA_SLAAC:
           type: boolean
+        DHCP_WPAD:
+          type: boolean
+        DHCP_WPAD_URL:
+          type: string
+          maxLength: 255
+        PROXY:
+          type: boolean
+        PROXY_PORT:
+          type: integer
+          maximum: 65535
+          minimum: 1
+        PROXY_ADDRESS:
+          type: string
+          maxLength: 64
+        PROXY_BLOCK_ADS:
+          type: boolean
+        PROXY_BLOCK_POPUPS:
+          type: boolean
+        PROXY_HTTPS_MITM:
+          type: boolean
+        PROXY_CUSTOM_RULES:
+          type: string
+          maxLength: 8000
     PatchedPersonalSwitchRequest:
       type: object
       properties:
@@ -3785,6 +3883,57 @@ components:
           type: boolean
       required:
       - enabled
+    ProxyInfo:
+      type: object
+      properties:
+        subject:
+          type: string
+        fingerprint:
+          type: string
+        expires:
+          type: string
+          format: date-time
+        pem:
+          type: string
+        wpad_url:
+          type: string
+        pac:
+          type: string
+      required:
+      - expires
+      - fingerprint
+      - pac
+      - pem
+      - subject
+      - wpad_url
+    ProxyTestRequestRequest:
+      type: object
+      properties:
+        url:
+          type: string
+          minLength: 1
+          maxLength: 2000
+      required:
+      - url
+    ProxyTestResult:
+      type: object
+      properties:
+        url:
+          type: string
+        host:
+          type: string
+        blocked:
+          type: boolean
+        reason:
+          type: string
+        detail:
+          type: string
+      required:
+      - blocked
+      - detail
+      - host
+      - reason
+      - url
     PublicList:
       type: object
       properties:

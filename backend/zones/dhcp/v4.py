@@ -21,6 +21,7 @@ from django.utils import timezone
 
 from ..dnsd import ddr
 from ..models import DataVersion, DhcpLease, DhcpReservation, Setting
+from ..proxy import pac
 
 MAGIC = b'\x63\x82\x53\x63'
 DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK, RELEASE, INFORM, FORCERENEW = 1, 2, 3, 4, 5, 6, 7, 8, 9
@@ -66,6 +67,15 @@ DHCP_SETTING_SPEC = (
     ('DHCP_RA_INTERVAL', int),
     ('DHCP_RA_ROUTER_LIFETIME', int),
     ('DHCP_RA_SLAAC', bool),
+    ('DHCP_WPAD', bool),
+    ('DHCP_WPAD_URL', str),
+    ('PROXY', bool),
+    ('PROXY_PORT', int),
+    ('PROXY_ADDRESS', str),
+    ('PROXY_BLOCK_ADS', bool),
+    ('PROXY_BLOCK_POPUPS', bool),
+    ('PROXY_HTTPS_MITM', bool),
+    ('PROXY_CUSTOM_RULES', str),
 )
 
 
@@ -130,6 +140,7 @@ class Config:
     boot_file: str = ''
     probe: bool = False
     failover_secs: int = 0
+    wpad_url: str = ''
 
     @classmethod
     def from_settings(cls, s, extra=None):
@@ -172,9 +183,12 @@ class Config:
         boot_server, boot_file, domain = str(g('DHCP_BOOT_SERVER', 'boot_server')), str(g('DHCP_BOOT_FILE', 'boot_file')), str(g('DHCP_DOMAIN', 'domain')).strip()
         if len(boot_server) > 255 or len(boot_file) > 128:
             raise ValueError('DHCP settings: DHCP_BOOT_SERVER / DHCP_BOOT_FILE too long')
+        wpad_url = pac.wpad_url_for(s, server_ip=server, extra_url=extra.get('wpad_url') if extra else None)
+        if wpad_url and (len(wpad_url) > 255 or not wpad_url.startswith(('http://', 'https://'))):
+            raise ValueError('DHCP settings: DHCP_WPAD_URL must be an http:// or https:// URL of at most 255 characters')
         dnr = ddr.dnr_v4(ddr.parse(s.DNS_DDR)) if s.DHCP_DNR and s.DNS_DDR else b''
         search = _names(str(g('DHCP_SEARCH', 'search'))) or ([domain.strip('.').lower()] if domain.strip('.') else [])
-        return cls(server, network, first, last, router, dns, domain, lease, res, dnr, ntp, search, routes, mtu, boot_server, boot_file, s.DHCP_PROBE, failover_secs)
+        return cls(server, network, first, last, router, dns, domain, lease, res, dnr, ntp, search, routes, mtu, boot_server, boot_file, s.DHCP_PROBE, failover_secs, wpad_url)
 
 
 def scopes(s):
@@ -519,6 +533,8 @@ class Server:
             out.append((67, cfg.boot_file.encode()))
         if cfg.dnr and 162 in prl:
             out.append((162, cfg.dnr))
+        if cfg.wpad_url:
+            out.append((252, cfg.wpad_url.encode()))
         host = self._hostname(req)
         if len(req['opts'].get(81, b'')) >= 4 and host and cfg.domain:  # client FQDN (RFC 4702): N=1, S=0: nobody updates the DNS, this server answers the name from the lease itself
             wire = bool(req['opts'][81][0] & 4)

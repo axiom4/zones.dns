@@ -39,6 +39,12 @@ export type { DhcpNeighborsList$Params as DhcpNeighborsList$Params } from './fn/
 export { dhcpNeighborsList as dhcpNeighborsList } from './fn/dhcp/dhcp-neighbors-list';
 export type { DhcpPingCreate$Params as DhcpPingCreate$Params } from './fn/dhcp/dhcp-ping-create';
 export { dhcpPingCreate as dhcpPingCreate } from './fn/dhcp/dhcp-ping-create';
+export type { DhcpProxyInfoRetrieve$Params as DhcpProxyInfoRetrieve$Params } from './fn/dhcp/dhcp-proxy-info-retrieve';
+export { dhcpProxyInfoRetrieve as dhcpProxyInfoRetrieve } from './fn/dhcp/dhcp-proxy-info-retrieve';
+export type { DhcpProxyInfoCreate$Params as DhcpProxyInfoCreate$Params } from './fn/dhcp/dhcp-proxy-info-create';
+export { dhcpProxyInfoCreate as dhcpProxyInfoCreate } from './fn/dhcp/dhcp-proxy-info-create';
+export type { DhcpProxyTestCreate$Params as DhcpProxyTestCreate$Params } from './fn/dhcp/dhcp-proxy-test-create';
+export { dhcpProxyTestCreate as dhcpProxyTestCreate } from './fn/dhcp/dhcp-proxy-test-create';
 export type { DhcpReservationsList$Params as DhcpReservationsList$Params } from './fn/dhcp/dhcp-reservations-list';
 export { dhcpReservationsList as dhcpReservationsList } from './fn/dhcp/dhcp-reservations-list';
 export type { DhcpReservationsCreate$Params as DhcpReservationsCreate$Params } from './fn/dhcp/dhcp-reservations-create';

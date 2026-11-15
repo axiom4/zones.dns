@@ -61,6 +61,36 @@ class DhcpSettingsSerializer(serializers.Serializer):
     DHCP_RA_INTERVAL = serializers.IntegerField(required=False, min_value=4, max_value=1800)
     DHCP_RA_ROUTER_LIFETIME = serializers.IntegerField(required=False, min_value=0, max_value=9000)
     DHCP_RA_SLAAC = serializers.BooleanField(required=False)
+    DHCP_WPAD = serializers.BooleanField(required=False)
+    DHCP_WPAD_URL = serializers.CharField(required=False, allow_blank=True, max_length=255)
+    PROXY = serializers.BooleanField(required=False)
+    PROXY_PORT = serializers.IntegerField(required=False, min_value=1, max_value=65535)
+    PROXY_ADDRESS = serializers.CharField(required=False, allow_blank=True, max_length=64)
+    PROXY_BLOCK_ADS = serializers.BooleanField(required=False)
+    PROXY_BLOCK_POPUPS = serializers.BooleanField(required=False)
+    PROXY_HTTPS_MITM = serializers.BooleanField(required=False)
+    PROXY_CUSTOM_RULES = serializers.CharField(required=False, allow_blank=True, max_length=8000)
+
+
+class ProxyInfoSerializer(serializers.Serializer):
+    subject = serializers.CharField()
+    fingerprint = serializers.CharField()
+    expires = serializers.DateTimeField()
+    pem = serializers.CharField()
+    wpad_url = serializers.CharField(allow_blank=True)
+    pac = serializers.CharField()
+
+
+class ProxyTestRequestSerializer(serializers.Serializer):
+    url = serializers.CharField(max_length=2000)
+
+
+class ProxyTestResultSerializer(serializers.Serializer):
+    url = serializers.CharField()
+    host = serializers.CharField()
+    blocked = serializers.BooleanField()
+    reason = serializers.CharField(allow_blank=True)
+    detail = serializers.CharField(allow_blank=True)
 
 
 class DhcpPingRequestSerializer(serializers.Serializer):

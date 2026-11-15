@@ -1,0 +1,99 @@
+<header>
+  <div>
+    <h2>HTTP / HTTPS Ad &amp; Popup Proxy</h2>
+    <p class="soft">Built-in filtering proxy (<code>manage.py runproxy</code>) assigned automatically to clients via DHCP WPAD (option 252 + <code>wpad.&lt;domain&gt;</code>). Blocks ad and tracker domains from the Blacklist, strips ad banners and popup scripts, and supports both standard HTTPS <code>CONNECT</code> and optional HTTPS MITM page inspection.</p>
+  </div>
+  <div class="actions">
+    @if (info()?.pem) {
+      <button class="ghost" type="button" (click)="downloadCa()">Download Root CA (.crt)</button>
+      <button class="ghost" type="button" (click)="regenerateCa()">Regenerate CA</button>
+    }
+    <button class="ghost" type="button" (click)="load()">Refresh</button>
+  </div>
+</header>
+
+<form class="settings" (ngSubmit)="save()">
+  <fieldset class="group">
+    <legend>Proxy server &amp; DHCP auto-discovery (WPAD)</legend>
+    <p class="soft">When enabled, DHCPv4 sends option 252 (WPAD) and the DNS daemon resolves <code>wpad.&lt;domain&gt;</code> to the server IP so clients configure the proxy automatically.</p>
+    <div class="grid">
+      <label class="check">
+        <input type="checkbox" name="PROXY" [(ngModel)]="cfg().PROXY">
+        <span>Proxy enabled<small class="hint">Master switch of <code>manage.py runproxy</code>. Saved changes apply automatically within 2 seconds.</small></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="DHCP_WPAD" [(ngModel)]="cfg().DHCP_WPAD">
+        <span>Announce proxy via DHCP (WPAD)<small class="hint">Send DHCPv4 option 252 and answer <code>wpad.&lt;DHCP_DOMAIN&gt;</code> in DNS with the server IP.</small></span>
+      </label>
+      <label class="f">
+        <span>Proxy port</span>
+        <input type="number" name="PROXY_PORT" [(ngModel)]="cfg().PROXY_PORT" placeholder="8080" autocomplete="off">
+        <small class="hint">TCP port the proxy listens on (default 8080). Also used in the generated <code>wpad.dat</code> file.</small>
+      </label>
+      <label class="f">
+        <span>Bind address</span>
+        <input name="PROXY_ADDRESS" [(ngModel)]="cfg().PROXY_ADDRESS" placeholder="0.0.0.0 (all interfaces)" autocomplete="off">
+        <small class="hint">IP address the proxy binds to. Leave empty to listen on all interfaces (restricted to <code>DNS_ALLOW_QUERY</code>).</small>
+      </label>
+      <label class="f wide">
+        <span>Custom WPAD PAC URL (optional)</span>
+        <input name="DHCP_WPAD_URL" [(ngModel)]="cfg().DHCP_WPAD_URL" placeholder="empty = http://&lt;Server IP&gt;:&lt;Proxy port&gt;/wpad.dat" autocomplete="off">
+        <small class="hint">Override the URL sent in DHCP option 252. Leave empty to use the built-in <code>/wpad.dat</code> endpoint automatically.</small>
+      </label>
+    </div>
+  </fieldset>
+
+  <fieldset class="group">
+    <legend>Ad filtering, popup blocking &amp; HTTPS inspection</legend>
+    <div class="grid">
+      <label class="check">
+        <input type="checkbox" name="PROXY_BLOCK_ADS" [(ngModel)]="cfg().PROXY_BLOCK_ADS">
+        <span>Block ads, banners &amp; trackers<small class="hint">Blocks all domains in Blacklist (Personal blocks + Public lists), ad URLs, and injects cosmetic CSS into HTML pages to hide ad slots and iframes.</small></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="PROXY_BLOCK_POPUPS" [(ngModel)]="cfg().PROXY_BLOCK_POPUPS">
+        <span>Block popups &amp; popunders<small class="hint">Blocks popup/popunder scripts and injects protection into HTML pages against unsolicited <code>window.open()</code> and transparent click-hijacking overlays.</small></span>
+      </label>
+      <label class="check">
+        <input type="checkbox" name="PROXY_HTTPS_MITM" [(ngModel)]="cfg().PROXY_HTTPS_MITM">
+        <span>HTTPS page inspection (MITM)<small class="hint">Off = standard <code>CONNECT</code> tunnel (blocks ad/popup domains on HTTPS without client certificates). On = decrypts HTTPS traffic with the Proxy Root CA to filter HTML and inject popup blockers inside HTTPS pages (install Root CA on clients).</small></span>
+      </label>
+      <label class="f wide">
+        <span>Custom rules (one per line: URL pattern, <code>##.css-selector</code>, or <code>&#64;&#64;domain.com</code> exception)</span>
+        <textarea name="PROXY_CUSTOM_RULES" [(ngModel)]="cfg().PROXY_CUSTOM_RULES" rows="4" placeholder="##.sponsored-box&#10;example.com##.promo-modal&#10;/custom-ad-banner/&#10;&#64;&#64;bank.example.com"></textarea>
+        <small class="hint">Use <code>##selector</code> (or <code>domain.com##selector</code>) to hide page elements, plain text or <code>/regex/</code> to block URLs, and <code>&#64;&#64;domain.com</code> to bypass filtering and HTTPS MITM for trusted domains.</small>
+      </label>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    @if (saved()) { <span class="soft">Saved and applied.</span> }
+    <button class="primary" type="submit">Save proxy settings</button>
+  </div>
+</form>
+
+<form class="composer" (ngSubmit)="runTest()">
+  <input class="grow" name="testUrl" [(ngModel)]="testUrl" placeholder="Test a URL or domain, e.g. https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js" autocomplete="off" aria-label="Test URL against proxy filter">
+  <button class="primary">Test filter</button>
+</form>
+
+@if (testResult(); as res) {
+  <ul class="records">
+    <li>
+      <span class="type" [attr.data-t]="res.blocked ? 'TXT' : 'A'">{{ res.blocked ? 'BLOCK' : 'ALLOW' }}</span>
+      <span class="rname">{{ res.url }}<small class="note-t">{{ res.host }}</small></span>
+      <span class="rvalue">{{ res.blocked ? 'Blocked by ' + res.reason + ': ' + res.detail : 'Allowed through proxy' }}</span>
+    </li>
+  </ul>
+}
+
+@if (info(); as i) {
+  <fieldset class="group">
+    <legend>WPAD PAC preview &amp; Root CA details</legend>
+    <p class="soft">
+      WPAD URL: <code>{{ i.wpad_url || 'http://' + (cfg().DHCP_SERVER || 'server-ip') + ':' + (cfg().PROXY_PORT || 8080) + '/wpad.dat' }}</code> ·
+      Root CA: <b>{{ i.subject }}</b> (valid until {{ when(i.expires) }}, SHA-256: <code>{{ i.fingerprint }}</code>)
+    </p>
+    <pre class="code-box">{{ i.pac }}</pre>
+  </fieldset>
+}
