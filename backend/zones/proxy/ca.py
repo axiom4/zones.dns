@@ -167,11 +167,11 @@ def build_leaf_pem(host):
 def leaf_context(host):
     """Return a cached server-side ssl.SSLContext for `host` signed by the Proxy Root CA."""
     host = host.strip().lower().rstrip('.')
-    ensure_ca()
     with _lock:
         if host in _leaf_contexts:
             _leaf_contexts.move_to_end(host)
             return _leaf_contexts[host]
+    ensure_ca()
     leaf_pem, key_pem = build_leaf_pem(host)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2

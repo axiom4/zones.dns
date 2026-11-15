@@ -1,12 +1,37 @@
 """Content, URL, and domain filtering for the HTTP/HTTPS proxy: ad blocking, cosmetic CSS, and popup/popunder blocking."""
+from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import re
-import threading
+import time
 from urllib.parse import urlparse
+
+from django.db import connection
 
 from ..dnsd import resolver
 
-_db_sem = threading.BoundedSemaphore(2)
+_db_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='proxy-db')
+
+
+def run_on_db_pool(fn, *args, **kwargs):
+    """Execute a DB-touching function on the dedicated 2-worker pool so persistent DB connections are reused and tunnel threads never touch PostgreSQL."""
+    if connection.in_atomic_block:
+        return fn(*args, **kwargs)
+
+    def _task():
+        resolver._db_check()
+        return fn(*args, **kwargs)
+
+    return _db_pool.submit(_task).result(timeout=10)
+
+
+def _check_domain_blocked(h):
+    """Fast in-memory check against `resolver._blocked` when fresh; falls back to `run_on_db_pool(resolver.blocked_entry, h)` on cache miss."""
+    if resolver._data is not None and (time.monotonic() - resolver._data_checked) < 1.0:
+        with resolver._blocked_lock:
+            if h in resolver._blocked:
+                resolver._blocked.move_to_end(h)
+                return resolver._blocked[h]
+    return run_on_db_pool(resolver.blocked_entry, h)
 
 # Common ad-serving URL paths and query patterns
 AD_URL_RX = re.compile(
@@ -157,8 +182,7 @@ def check_request(host, url='', s=None):
     if is_domain_allowed(h, allow_domains):
         return None
     if block_ads and h:
-        with _db_sem:
-            hit = resolver.blocked_entry(h)
+        hit = _check_domain_blocked(h)
         if hit:
             return ('blacklist', f'{hit[0]} ({hit[1]})')
     full_url = url or h

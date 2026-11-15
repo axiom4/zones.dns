@@ -6,8 +6,9 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import DatabaseError, close_old_connections, connections
 
+from zones.dnsd import resolver
 from zones.models import DataVersion
-from zones.proxy import ca
+from zones.proxy import ca, filter as pfilter
 from zones.proxy.server import ProxyServer, cached_proxy_settings
 
 BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
@@ -43,8 +44,10 @@ class Command(BaseCommand):
         except OSError as e:
             raise CommandError(f'Cannot bind TCP {bind_addr}:{bind_port} ({e}).')
         srv.timeout = 2
+        pfilter.run_on_db_pool(resolver._snapshot)
         self.snap = {k: getattr(s, k) for k in BIND_KEYS}
         self.seen = DataVersion.version()
+        connections.close_all()
         self.stdout.write(
             f'Proxy listening on {bind_addr}:{bind_port} '
             f'(ads={"on" if s.PROXY_BLOCK_ADS else "off"}, '
@@ -52,16 +55,19 @@ class Command(BaseCommand):
             f'https={"MITM" if s.PROXY_HTTPS_MITM else "CONNECT"})'
         )
         self.stdout.flush()
+        last_check = time.monotonic()
         while True:
             srv.handle_request()
-            close_old_connections()
-            try:
-                self.reload_if_changed(srv)
-            except DatabaseError as e:
-                self.stderr.write(f'Proxy: cannot check settings: {e!r}')
+            now = time.monotonic()
+            if now - last_check >= 2.0:
+                last_check = now
+                try:
+                    self.reload_if_changed(srv)
+                except DatabaseError as e:
+                    self.stderr.write(f'Proxy: cannot check settings: {e!r}')
 
     def reload_if_changed(self, srv):
-        ver = DataVersion.version()
+        ver = pfilter.run_on_db_pool(DataVersion.version)
         if ver == self.seen:
             return
         self.seen = ver

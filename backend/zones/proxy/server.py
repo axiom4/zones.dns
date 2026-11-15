@@ -1,4 +1,5 @@
 """Multi-threaded HTTP and HTTPS ad/popup-filtering forward proxy server."""
+from collections import OrderedDict
 import gzip
 from http.client import HTTPConnection, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -26,9 +27,28 @@ _cfg_checked = 0.0
 _cfg_version = None
 _CFG_CHECK_INTERVAL = 1.0
 
+_dns_lock = threading.Lock()
+_dns_cache = OrderedDict()  # (host, port, allow_loopback) -> (expires_at, family, addr)
+_DNS_TTL = 120.0
+_DNS_MAX = 4096
+
+
+def _set_nodelay(sock):
+    try:
+        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+    except OSError:
+        pass
+
+
+def _load_cfg_from_db(base, force, prev_ver):
+    ver = DataVersion.version()
+    if force or prev_ver is None or ver != prev_ver:
+        return ver, dhcp.dhcp_settings(base)
+    return ver, None
+
 
 def cached_proxy_settings(base=None, force=False):
-    """Return cached `dhcp_settings` in memory, checking `DataVersion` at most once per second so proxy worker threads do not query the DB per request."""
+    """Return cached `dhcp_settings` in memory, checking `DataVersion` at most once per second on the persistent DB worker pool."""
     global _cfg_data, _cfg_checked, _cfg_version
     now = time.monotonic()
     if not force and _cfg_data is not None and (now - _cfg_checked) < _CFG_CHECK_INTERVAL:
@@ -40,10 +60,10 @@ def cached_proxy_settings(base=None, force=False):
                 return _cfg_data
             _cfg_checked = now
             try:
-                ver = DataVersion.version()
-                if force or _cfg_data is None or ver != _cfg_version:
-                    _cfg_data = dhcp.dhcp_settings(base or settings)
-                    _cfg_version = ver
+                ver, fresh = pfilter.run_on_db_pool(_load_cfg_from_db, base or settings, force or _cfg_data is None, _cfg_version)
+                if fresh is not None:
+                    _cfg_data = fresh
+                _cfg_version = ver
             except DatabaseError:
                 if _cfg_data is None:
                     b = base or settings
@@ -79,7 +99,16 @@ def _is_forbidden_target_ip(ip_str, allow_loopback=False):
 
 
 def _resolve_target(host, port, allow_loopback=False):
-    """Resolve `host` and verify none of its addresses are forbidden internal/loopback targets."""
+    """Resolve `host` (with an in-memory TTL cache) and verify none of its addresses are forbidden internal/loopback targets."""
+    key = (host, int(port), bool(allow_loopback))
+    now = time.monotonic()
+    with _dns_lock:
+        cached = _dns_cache.get(key)
+        if cached is not None:
+            if cached[0] > now:
+                _dns_cache.move_to_end(key)
+                return cached[1], cached[2]
+            del _dns_cache[key]
     infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
     if not infos:
         raise OSError(f'Cannot resolve {host}')
@@ -87,7 +116,12 @@ def _resolve_target(host, port, allow_loopback=False):
         ip_str = sockaddr[0]
         if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback):
             raise PermissionError(f'Target address {ip_str} is not allowed through the proxy')
-    return infos[0][0], infos[0][4][:2]
+    res_family, res_addr = infos[0][0], infos[0][4][:2]
+    with _dns_lock:
+        _dns_cache[key] = (now + _DNS_TTL, res_family, res_addr)
+        if len(_dns_cache) > _DNS_MAX:
+            _dns_cache.popitem(last=False)
+    return res_family, res_addr
 
 
 def _decompress(data, encoding):
@@ -105,7 +139,8 @@ def _decompress(data, encoding):
 class ProxyServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
-    max_threads = 256
+    request_queue_size = 256
+    max_threads = 512
 
     def __init__(self, server_address, RequestHandlerClass=None, settings_getter=None, allow_loopback=False, upstream_ssl_context=None):
         if ':' in server_address[0]:
@@ -137,6 +172,10 @@ class ProxyServer(ThreadingMixIn, HTTPServer):
 class ProxyHandler(BaseHTTPRequestHandler):
     protocol_version = 'HTTP/1.1'
     timeout = 30
+
+    def setup(self):
+        _set_nodelay(self.request)
+        super().setup()
 
     def log_message(self, fmt, *args):
         pass  # keep stdout quiet per request unless debugging
@@ -233,16 +272,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_bytes(400, 'text/plain; charset=utf-8', b'Missing target host')
             return
 
-        try:
-            hit = pfilter.check_request(host, full_url, s=s)
-        finally:
-            connections.close_all()
-        if hit:
+        if hit := pfilter.check_request(host, full_url, s=s):
             self._send_blocked(hit[0], hit[1], path=parts.path)
             return
 
         try:
-            _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
+            _, resolved_addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
         except PermissionError:
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
             return
@@ -277,13 +312,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     ctx = self.server.upstream_ssl_context or ssl.create_default_context()
                     conn = HTTPSConnection(host, port, timeout=20, context=ctx)
                 else:
-                    conn = HTTPConnection(host, port, timeout=20)
+                    conn = HTTPConnection(resolved_addr[0], resolved_addr[1], timeout=20)
                 conn.request(self.command, path_query, body=req_body, headers=fwd_headers)
+                if conn.sock is not None:
+                    _set_nodelay(conn.sock)
                 resp = conn.getresponse()
-                raw_body = resp.read()
                 status_code, reason = resp.status, resp.reason
                 ctype = resp.getheader('Content-Type', '') or ''
                 cenc = resp.getheader('Content-Encoding', '') or ''
+                clen_hdr = resp.getheader('Content-Length')
+                if 'text/html' not in ctype.lower() and clen_hdr and clen_hdr.isdigit():
+                    # Stream non-HTML responses with known Content-Length directly without buffering in RAM
+                    self.send_response(status_code, reason)
+                    for k, v in resp.getheaders():
+                        if k.lower() not in HOP_BY_HOP:
+                            self.send_header(k, v)
+                    self.send_header('Connection', 'close')
+                    self.end_headers()
+                    if self.command != 'HEAD':
+                        while chunk := resp.read(65536):
+                            self.wfile.write(chunk)
+                    self.close_connection = True
+                    return
+                raw_body = resp.read()
                 out_headers = [
                     (k, v) for k, v in resp.getheaders()
                     if k.lower() not in HOP_BY_HOP and k.lower() not in ('content-length', 'content-encoding')
@@ -302,8 +353,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 cenc = ''
             except Exception:
                 pass
-            finally:
-                connections.close_all()
 
         self.send_response(status_code, reason)
         for k, v in out_headers:
@@ -355,11 +404,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             else:
                 host, port = host_port.lower(), 443
 
-        try:
-            hit = pfilter.check_request(host, f'https://{host}:{port}/', s=s)
-        finally:
-            connections.close_all()
-        if hit:
+        if hit := pfilter.check_request(host, f'https://{host}:{port}/', s=s):
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Blocked by Zones.dns', {'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
             return
 
@@ -399,6 +444,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 upstream = tunnel_factory(host, port)
             else:
                 upstream = socket.socket(family, socket.SOCK_STREAM)
+                _set_nodelay(upstream)
                 upstream.settimeout(15)
                 upstream.connect(addr)
         except OSError:
@@ -416,17 +462,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     @staticmethod
     def _tunnel(client_sock, upstream_sock):
+        _set_nodelay(client_sock)
+        _set_nodelay(upstream_sock)
+        client_sock.settimeout(60)
+        upstream_sock.settimeout(60)
         sockets = [client_sock, upstream_sock]
-        client_sock.setblocking(False)
-        upstream_sock.setblocking(False)
         while True:
-            r, _, e = select.select(sockets, [], sockets, 30)
+            try:
+                r, _, e = select.select(sockets, [], sockets, 120)
+            except OSError:
+                break
             if e or not r:
                 break
             for sock in r:
                 other = upstream_sock if sock is client_sock else client_sock
                 try:
-                    data = sock.recv(32768)
+                    data = sock.recv(65536)
                 except OSError:
                     return
                 if not data:
