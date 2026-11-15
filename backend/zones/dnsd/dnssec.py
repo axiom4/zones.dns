@@ -13,7 +13,6 @@ Supported DS digest types:
 - 2: SHA-256
 - 4: SHA-384
 """
-import base64
 import hashlib
 import struct
 import time
@@ -22,7 +21,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.asymmetric import ec, ed25519, padding, rsa
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
-from dnslib import DNSBuffer, DNSLabel, DNSRecord, QTYPE, RCODE
+from dnslib import DNSBuffer, DNSLabel, QTYPE
 
 # IANA root KSK-2017 (key tag 20326) and KSK-2024 (key tag 38696) DS digests
 ROOT_TRUST_ANCHORS = [

@@ -81,7 +81,6 @@ def _convert_pg():
     q, t, old, seq = connection.ops.quote_name, connection.ops.quote_name(table), connection.ops.quote_name(table + '_old'), connection.ops.quote_name(table + '_id_seq_p')
     today, first = _today_cutoff()
     _, days = plan([('pold', _num(first))], today, first)
-    done = []
     with transaction.atomic(), connection.cursor() as c:
         c.execute(f'LOCK TABLE {t} IN ACCESS EXCLUSIVE MODE')  # writers wait here until the end; the log writer keeps its rows queued
         c.execute('SELECT i.relname, pg_get_indexdef(i.oid), x.indisprimary FROM pg_index x JOIN pg_class i ON i.oid = x.indexrelid WHERE x.indrelid = to_regclass(%s)', [table])

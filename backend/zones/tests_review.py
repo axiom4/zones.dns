@@ -106,8 +106,7 @@ class TcpConnectionTests(SimpleTestCase):
     def test_every_query_of_a_connection_is_answered(self):
         with socket.create_connection(self.addr, timeout=5) as s:
             s.sendall(_framed('a.example') + _framed('b.example'))  # two in one segment: the second was dropped
-            self.assertEqual(str(_read_answer(s).q.qname), 'a.example.')
-            self.assertEqual(str(_read_answer(s).q.qname), 'b.example.')
+            self.assertEqual(sorted(str(_read_answer(s).q.qname) for _ in range(2)), ['a.example.', 'b.example.'])  # in any order (RFC 7766 §7)
             s.sendall(_framed('c.example'))  # and the connection stays open for more
             self.assertEqual(str(_read_answer(s).q.qname), 'c.example.')
 
@@ -118,7 +117,7 @@ class TcpConnectionTests(SimpleTestCase):
         with override_settings(DNS_PROXY_PROTOCOL=True), socket.create_connection(self.addr, timeout=5) as s:
             s.sendall(_framed('b.example'))  # a local client without the line still works
             self.assertIsNotNone(_read_answer(s))
-        with socket.create_connection(self.addr, timeout=5) as s:  # switched off: the line is not a DNS message, nothing is believed
+        with mock.patch('zones.dnsd.dnsserver.TCP_IDLE', 0.3), socket.create_connection(self.addr, timeout=5) as s:  # switched off: the line is not a DNS message, nothing is believed
             s.sendall(b'PROXY TCP4 192.168.1.8 127.0.0.1 51000 853\r\n' + _framed('c.example'))
             s.settimeout(5)
             try:
@@ -126,6 +125,17 @@ class TcpConnectionTests(SimpleTestCase):
             except OSError:
                 pass
         self.assertEqual(self.echo.clients, ['192.168.1.7', '127.0.0.1'])
+
+    def test_silent_connections_hold_no_worker(self):
+        idle = [socket.create_connection(self.addr, timeout=5) for _ in range(PooledTCPServer.workers * 3)]
+        self.addCleanup(lambda: [s.close() for s in idle])
+        idle[0].sendall(b'\x00')  # half a length: a query that never comes
+        with socket.create_connection(self.addr, timeout=2) as s:
+            s.sendall(_framed('a.example'))
+            self.assertEqual(str(_read_answer(s).q.qname), 'a.example.')
+        with mock.patch('zones.dnsd.dnsserver.TCP_IDLE', 0.2):
+            idle[1].settimeout(5)
+            self.assertEqual(idle[1].recv(1), b'')  # closed by the server after the idle time
 
     def test_a_client_outside_allow_query_is_closed_at_once(self):
         with override_settings(DNS_ALLOW_QUERY='10.0.0.0/8'), socket.create_connection(self.addr, timeout=5) as s:
@@ -333,3 +343,60 @@ class RateLimitTests(TestCase):
             codes = [r.resolve(DNSRecord.question('x.corp.lan', 'A'), h).header.rcode for _ in range(6)]
         self.assertEqual(codes, [RCODE.NXDOMAIN] + [RCODE.REFUSED] * 5)
         self.assertEqual(QueryLog.objects.filter(via='rate limit').count(), 1)
+
+
+class SlowPatternTests(SimpleTestCase):
+    def test_a_pattern_that_is_slow_without_nested_repeats_is_refused(self):
+        from .serializers.blocked_domain import _has_redos, pattern_error
+        slow = 'a*a*a*a*a*a*b'
+        self.assertFalse(_has_redos(slow))  # nothing the reading of the pattern objects to
+        self.assertIsNotNone(pattern_error(slow))
+        for fine in (r'^ads?\d+\.', r'(^|\.)track(er|ing)?\.', r'^[a-z0-9-]{20,}\.example\.com$'):
+            self.assertIsNone(pattern_error(fine), fine)
+
+
+class DhcpReviewTests(TestCase):
+    def _cfg(self, failover):
+        import ipaddress
+        from .dhcp.v4 import Config
+        ip = ipaddress.IPv4Address
+        return Config(ip('192.168.1.2'), ipaddress.IPv4Network('192.168.1.0/24'), ip('192.168.1.100'), ip('192.168.1.102'), ip('192.168.1.1'), [ip('192.168.1.2')],
+                      'lan', 3600, {}, b'', failover_secs=failover)
+
+    def test_a_standby_server_does_not_refuse_the_address_the_primary_gave(self):
+        from .dhcp.v4 import Server
+        from .tests import DhcpTests
+        req = DhcpTests().packet('aa:aa:aa:aa:aa:70', 3, o50=bytes([192, 168, 1, 20]))  # INIT-REBOOT: an address of the primary's range, no server id
+        self.assertIsNone(Server(self._cfg(failover=5)).handle(req))
+        self.assertEqual(Server(self._cfg(failover=0)).handle(req).data[240:243], bytes([53, 1, 6]))  # the only server on the network says NAK
+
+    def test_a_release_with_thousands_of_ias_is_bounded(self):
+        import ipaddress
+        from .dhcp.v6 import IA_NA, MAX_IA, Config6, Server6
+        from .tests import Dhcp6Tests
+        s6 = Server6(Config6([ipaddress.IPv6Address('2001:db8::53')], ['lan'], [], 1200, ipaddress.IPv6Network('2001:db8:1::/64'),
+                             ipaddress.IPv6Address('2001:db8:1::100'), ipaddress.IPv6Address('2001:db8:1::1ff'), name='test6'))
+        h6 = Dhcp6Tests()
+        msg = h6.msg(8, cid=b'\x00\x03flood', sid=s6.duid, ias=[h6.ia(IA_NA, i, b'') for i in range(2000)])
+        with self.assertNumQueries(MAX_IA):  # one DELETE per IA looked at, not 2000
+            self.assertIsNotNone(s6.handle(msg))
+
+
+class AuditReviewTests(SimpleTestCase):
+    def test_upstream_with_a_port_is_asked_on_that_port(self):
+        from .stats import audit
+        reply = DNSRecord.question('example.com').reply()
+        for upstream, want in (('127.0.0.1:5335', ('127.0.0.1', 5335, False)), ('[::1]:5335', ('::1', 5335, True)), ('9.9.9.9', ('9.9.9.9', 53, False))):
+            with override_settings(UPSTREAMS=[upstream]), mock.patch.object(DNSRecord, 'send', return_value=reply.pack()) as send:
+                self.assertIsNotNone(audit.dns_query('example.com', 'A'))
+            self.assertEqual((send.call_args.args[0], send.call_args.args[1], send.call_args.kwargs['ipv6']), want)
+
+    def test_a_dripping_server_does_not_hold_the_request(self):
+        from .stats import audit
+
+        class Drip:
+            def recv(self, n):
+                return b'x'
+        with mock.patch.object(audit, 'TIMEOUT', 0.05):
+            status, headers, cookies, body = audit._read_response(Drip(), body_limit=10 ** 9)
+        self.assertIsNone(status)  # it returned

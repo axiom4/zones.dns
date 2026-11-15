@@ -1,4 +1,4 @@
-import { TypeEnum } from '../api/models';
+import type { TypeEnum } from '../api/models';
 
 export interface Field {
   key: string;

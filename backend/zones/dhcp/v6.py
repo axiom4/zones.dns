@@ -8,7 +8,7 @@ import struct
 import subprocess
 import time
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import timedelta
 
 from django.conf import settings
@@ -431,7 +431,7 @@ class Server6:
         if check is not None:
             return not Dhcp6Lease.objects.filter(value=check, expires__gt=now).exclude(duid=duid, iaid=iaid, kind=kind).exists()
         for code, k in ((IA_NA, 'na'), (IA_TA, 'ta'), (IA_PD, 'pd')):
-            for ia in o.get(code, []):
+            for ia in o.get(code, [])[:MAX_IA]:  # like _bind: a packet with thousands of IAs is thousands of queries
                 if len(ia) >= 4:
                     qs = Dhcp6Lease.objects.filter(duid=duid, iaid=struct.unpack('!I', ia[:4])[0], kind=k)
                     if k == 'pd':
@@ -442,8 +442,8 @@ class Server6:
     def _decline(self, o, duid, now):
         max_declined = max(1, (int(self.cfg.na_last) - int(self.cfg.na_first) + 1) // 2) if self.cfg.na_first and self.cfg.na_last else 0
         for code, hdr_len in ((IA_NA, 12), (IA_TA, 4)):
-            for ia in o.get(code, []):
-                for v in (options(ia[hdr_len:]) or {}).get(IAADDR, []):
+            for ia in o.get(code, [])[:MAX_IA]:
+                for v in (options(ia[hdr_len:]) or {}).get(IAADDR, [])[:MAX_IA]:
                     addr = self._hint('na', v)
                     if addr and self._in_pool('na', addr) and not Dhcp6Lease.objects.filter(value=addr, expires__gt=now).exclude(duid=duid).exists():
                         Dhcp6Lease.objects.filter(value=addr).delete()

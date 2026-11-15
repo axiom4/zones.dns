@@ -222,7 +222,7 @@ Summary: gunicorn (**one worker only**, the sign-in key lives in process memory)
 
 ## Tests
 
-Run `python manage.py test zones` in `backend/` (resolver: CNAME chasing, NXDOMAIN/NODATA/SOA, `DNS_AUTHORITATIVE`). The rest was tried by hand (Django test client, `curl`, headless Chrome, also with a virtual authenticator for passkeys and phone and tablet emulation).
+Run `python manage.py test zones` and `ruff check .` in `backend/`, `npm test` in `frontend/` (the pure helpers). Backend tests: (resolver: CNAME chasing, NXDOMAIN/NODATA/SOA, `DNS_AUTHORITATIVE`). The rest was tried by hand (Django test client, `curl`, headless Chrome, also with a virtual authenticator for passkeys and phone and tablet emulation).
 
 ## Licence
 

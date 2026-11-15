@@ -50,9 +50,32 @@ def pattern_error(name):
         return f'Not a valid pattern: {e}'
     if len(name) > 200:
         return 'Pattern too long (200 characters at most).'
-    if _has_redos(name):
+    if _has_redos(name) or _too_slow(name):
         return 'Pattern contains nested repeats, repeated alternations or backreferences that could slow DNS resolution.'
     return None
+
+
+_PROBE = 'import re, sys\nrx = re.compile(sys.argv[1], re.IGNORECASE)\nfor s in sys.argv[2:]:\n    rx.search(s)\n'
+PROBE_SECONDS = 2  # the whole trial, start of the interpreter included: a sound pattern takes a few hundredths
+
+
+def _too_slow(pat):
+    """True when the pattern takes too long on names made to hurt it. The check above reads the pattern and misses what is slow without
+    nested repeats (a*a*a*a*a*b); this one tries it, in another process: Python cannot stop a search that has started, and in this one
+    it would hold every thread. The names: each character of the pattern (and each pair) repeated to the longest DNS name, ending with
+    a character that makes the match fail, which is when a pattern backtracks.
+    shortcut: a trial, not a proof; a guarantee needs a linear-time engine (the re2 package) in the daemon."""
+    import subprocess
+    import sys
+    chars = list(dict.fromkeys(c.lower() for c in pat if c.isalnum() or c in '-_.'))[:8] or ['a']
+    names = [c * 252 + '!' for c in chars] + [(a + b) * 126 + '!' for a in chars[:4] for b in chars[:4] if a != b]
+    try:
+        subprocess.run([sys.executable, '-I', '-c', _PROBE, pat, *names], timeout=PROBE_SECONDS, capture_output=True)
+    except subprocess.TimeoutExpired:
+        return True
+    except OSError:
+        return False  # no process could be started: the pattern is judged by the check above alone
+    return False
 
 
 class BlockedDomainSerializer(serializers.ModelSerializer):

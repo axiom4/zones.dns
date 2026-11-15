@@ -4,7 +4,7 @@ By default this host announces itself as NOT a default router (router lifetime 0
 when DHCP_RA=true; needs a raw ICMPv6 socket (root or CAP_NET_RAW) and DHCP_INTERFACE."""
 import ipaddress
 import struct
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from ..dnsd import ddr
 

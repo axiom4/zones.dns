@@ -6,7 +6,7 @@
     "start": "ng serve",
     "build": "ng build",
     "watch": "ng build --watch --configuration development",
-    "test": "ng test",
+    "test": "node --test --disable-warning=MODULE_TYPELESS_PACKAGE_JSON \"src/**/*.spec.ts\"",
     "api:gen": "../.venv/bin/python ../backend/manage.py spectacular --file openapi.yml && ng-openapi-gen"
   },
   "private": true,

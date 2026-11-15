@@ -1,0 +1,8 @@
+# Only the rules that find bugs (syntax errors, undefined names, unused imports and variables): the code style is not checked.
+exclude = ["zones/migrations"]
+
+[lint]
+select = ["E9", "F"]
+
+[lint.per-file-ignores]
+"zones/admin/__init__.py" = ["F401"]  # imported to register the admin classes

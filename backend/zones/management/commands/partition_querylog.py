@@ -1,5 +1,4 @@
 from django.core.management.base import BaseCommand, CommandError
-from django.db import connection
 
 from ...stats import partitions
 from ...models import QueryLog

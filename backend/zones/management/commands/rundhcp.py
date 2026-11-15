@@ -68,16 +68,23 @@ class Command(BaseCommand):
                           + (', DNR announced' if cfg.dnr else '') + (', ping probe' if server.probe else '') + (', unicast to the client' if l2 else '')
                           + (f', DHCPv6 ({"stateful" if cfg6.stateful else "stateless"})' if cfg6 else '') + (', Router Advertisements' if racfg else ''))
         sock.settimeout(3600)
+        cleaned = time.monotonic()
         while True:
             try:
                 data, peer = sock.recvfrom(1500)
-            except socket.timeout:  # an idle hour: forget the leases that ended long ago
-                close_old_connections()
-                server.cleanup()
-                if cfg6:
-                    Server6.cleanup()
-                continue
+            except socket.timeout:
+                data = None
             close_old_connections()
+            if data is None or time.monotonic() - cleaned >= 3600:  # every hour, busy or not (it waited for an hour without a packet, which a network in use never has)
+                cleaned = time.monotonic()
+                try:
+                    server.cleanup()  # forget the leases that ended long ago
+                    if cfg6:
+                        Server6.cleanup()
+                except Exception as e:
+                    self.stderr.write(f'DHCP: lease clean-up failed: {e!r}')
+                if data is None:
+                    continue
             try:
                 out = server.handle(data)
             except Exception as e:  # one bad packet or a database hiccup must not stop the server

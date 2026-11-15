@@ -403,6 +403,8 @@ class Server:
             if ip is None:
                 return None
             if not self._ok(cfg, ip, mac, key, now):
+                if cfg.failover_secs > 0 and not sid and mac not in cfg.reservations and not DhcpLease.objects.filter(client=key).exists():
+                    return None  # standby server, a client it has never seen asking for the address the primary gave it: silence, not a NAK (RFC 2131 4.3.2)
                 nak = [(53, bytes([NAK])), (54, cfg.server.packed)] + ([(61, opts[61])] if 61 in opts else []) + ([(82, opts[82])] if 82 in opts else [])
                 nak_req = {**req, 'flags': req['flags'] | 0x8000} if req['giaddr'] != ZERO else req  # RFC 2131 §4.3.2: set broadcast bit on relayed NAK
                 return self._send(nak_req, build(nak_req, ZERO, nak), BROADCAST, False)

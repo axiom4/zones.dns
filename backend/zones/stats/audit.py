@@ -77,9 +77,13 @@ def clean_domain(raw):
 
 # ---------- DNS ----------
 def dns_query(name, qtype, server=None, tcp=False):
-    server = server or settings.UPSTREAMS[0]
     try:
-        reply = DNSRecord.parse(DNSRecord.question(name, qtype).send(server, 53, tcp=tcp, timeout=TIMEOUT, ipv6=':' in server))
+        if server:
+            host, port, v6 = server, 53, ':' in server
+        else:  # the upstream may carry a port (127.0.0.1:5335, [::1]:5335): sent as the host name, every lookup of the audit and of the map failed
+            from ..dnsd.resolver import Resolver
+            host, port, v6 = Resolver._upstream_addr(settings.UPSTREAMS[0])
+        reply = DNSRecord.parse(DNSRecord.question(name, qtype).send(host, port, tcp=tcp, timeout=TIMEOUT, ipv6=v6))
         if reply.header.tc and not tcp:
             return dns_query(name, qtype, server, tcp=True)
         return reply
@@ -304,8 +308,8 @@ def parse_dmarc(record):
 
 # ---------- TLS / HTTP ----------
 def _read_response(sock, body_limit=0):
-    buf = b''
-    while b'\r\n\r\n' not in buf and len(buf) < 32768:
+    buf, deadline = b'', time.monotonic() + 3 * TIMEOUT  # in all: the timeout of the socket is per read, and a server that sends a byte now and then would hold the request for hours
+    while b'\r\n\r\n' not in buf and len(buf) < 32768 and time.monotonic() < deadline:
         chunk = sock.recv(4096)
         if not chunk:
             break
@@ -321,7 +325,7 @@ def _read_response(sock, body_limit=0):
         elif k:
             headers[k] = v.strip()
     body = rest
-    while body_limit and len(body) < body_limit:
+    while body_limit and len(body) < body_limit and time.monotonic() < deadline:
         chunk = sock.recv(4096)
         if not chunk:
             break

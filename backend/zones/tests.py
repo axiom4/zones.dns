@@ -828,7 +828,7 @@ class Dhcp6Tests(TestCase):
         import ipaddress
         import struct
 
-        from .dhcp.v6 import DNR, DNS, DOMAINS, IA_NA, REFRESH, option, parse
+        from .dhcp.v6 import DNR, DNS, DOMAINS, IA_NA, REFRESH, parse
         typ, txid, o = parse(self.s.handle(self.msg(11)))
         self.assertEqual((typ, txid), (7, b'\x01\x02\x03'))
         self.assertEqual((o[1][0], o[2][0], o[DNS][0], o[DOMAINS][0], o[DNR][0]), (b'\x00\x03abc', self.s.duid, ipaddress.IPv6Address('2001:db8::53').packed, b'\x03lan\x00', b'\x00\x01dnr'))
@@ -1233,11 +1233,8 @@ class SecurityAndProtocolHardeningTests(TestCase):
     def test_check_ddr_with_real_tls_certificate_and_dnr_options_formats(self):
         import datetime
         import io
-        import socket
         import ssl
-        import struct
         import tempfile
-        import threading
         from unittest import mock
         from cryptography import x509
         from cryptography.hazmat.primitives import hashes, serialization
@@ -1433,7 +1430,7 @@ class SecurityAndProtocolHardeningTests(TestCase):
 
     def test_dnssec_needs_the_chain_of_trust(self):
         import time
-        from dnslib import A, RR
+        from dnslib import RR
         from .dnsd import dnssec
         now = int(time.time())
         pki = DnssecPki(now)
