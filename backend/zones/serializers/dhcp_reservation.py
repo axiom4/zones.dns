@@ -3,6 +3,7 @@ import re
 
 from rest_framework import serializers
 
+from .. import oui
 from ..dhcp import v4 as dhcp
 from ..models import DhcpReservation
 
@@ -39,11 +40,17 @@ def check_row(mac, ip, hostname):
 
 
 class DhcpReservationSerializer(serializers.ModelSerializer):
+    vendor = serializers.SerializerMethodField(help_text='Maker of the network card, empty if unknown')
+
     class Meta:
         model = DhcpReservation
-        fields = ['id', 'mac', 'ip', 'hostname', 'note', 'enabled', 'created']
+        fields = ['id', 'mac', 'ip', 'hostname', 'note', 'enabled', 'created', 'vendor']
+        read_only_fields = ['vendor']
         validators = []  # uniqueness is checked in validate() with a readable message
         extra_kwargs = {'hostname': {'required': False}, 'note': {'required': False}}
+
+    def get_vendor(self, r) -> str:
+        return oui.vendor(r.mac)
 
     def validate(self, d):
         cur = self.instance

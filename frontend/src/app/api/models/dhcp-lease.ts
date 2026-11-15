@@ -23,4 +23,9 @@ export interface DhcpLease {
   hostname: string;
   id: number;
   kind: KindEnum;
+
+  /**
+   * Maker of the network card (from the MAC address), empty if unknown
+   */
+  vendor: string;
 }

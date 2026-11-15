@@ -1,9 +1,10 @@
 import { Component, ElementRef, computed, inject, input, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservationsExportRetrieve, dhcpReservationsImportCreate, dhcpReservationsList, dhcpReservationsPartialUpdate } from '../api/functions';
+import { dhcpVendorRetrieve, dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservationsExportRetrieve, dhcpReservationsImportCreate, dhcpReservationsList, dhcpReservationsPartialUpdate } from '../api/functions';
 import { DhcpReservation, DhcpReservationImportResult } from '../api/models';
 import { byIp } from '../lib/ip';
+import { Ping } from '../services/ping';
 import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 
@@ -19,6 +20,8 @@ export class DhcpReservations {
   private api = inject(Api);
   private ui = inject(Ui);
   private stepUp = inject(StepUp);
+  ping = inject(Ping);
+  vendorHint = signal('');
   /** A lease the user chose to make fixed: fills the form. */
   prefill = input<Partial<Draft> | null>(null);
   items = signal<DhcpReservation[]>([]);
@@ -46,6 +49,15 @@ export class DhcpReservations {
       this.draft = empty();
       await this.load();
     });
+  }
+  pingOne(r: DhcpReservation) { return this.ui.run(() => this.ping.run([r.ip])); }
+  pingAll() { return this.ui.run(() => this.ping.run(this.items().filter(r => r.enabled !== false).map(r => r.ip))); }
+  /** Who made the card, shown under the MAC field while the user fills in the form. */
+  async lookupVendor() {
+    const mac = this.draft.mac.trim();
+    if (mac.replace(/[^0-9a-f]/gi, '').length !== 12) { this.vendorHint.set(''); return; }
+    const v = await this.api.invoke(dhcpVendorRetrieve, { mac });
+    this.vendorHint.set(v.vendor ?? (v.private ? 'Private (random) address: no maker' : 'Unknown maker'));
   }
   startEdit(r: DhcpReservation) { this.edit = { mac: r.mac, ip: r.ip, hostname: r.hostname ?? '', note: r.note ?? '' }; this.editing.set(r.id); }
   save(r: DhcpReservation) {

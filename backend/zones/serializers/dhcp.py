@@ -8,6 +8,7 @@ class DhcpLeaseSerializer(serializers.Serializer):
     address = serializers.CharField(help_text='The address, or the delegated prefix')
     client = serializers.CharField(help_text='MAC address (DHCPv4) or DUID (DHCPv6)')
     hostname = serializers.CharField(allow_blank=True)
+    vendor = serializers.CharField(allow_blank=True, help_text='Maker of the network card (from the MAC address), empty if unknown')
     expires = serializers.DateTimeField()
     active = serializers.BooleanField()
 
@@ -49,3 +50,20 @@ class DhcpSettingsSerializer(serializers.Serializer):
     DHCP_RA_INTERVAL = serializers.IntegerField(required=False, min_value=4, max_value=1800)
     DHCP_RA_ROUTER_LIFETIME = serializers.IntegerField(required=False, min_value=0, max_value=9000)
     DHCP_RA_SLAAC = serializers.BooleanField(required=False)
+
+
+class DhcpPingRequestSerializer(serializers.Serializer):
+    addresses = serializers.ListField(child=serializers.CharField(max_length=64), max_length=64, help_text='IP addresses of the local network (at most 64)')
+
+
+class DhcpPingResultSerializer(serializers.Serializer):
+    address = serializers.CharField()
+    up = serializers.BooleanField()
+    ms = serializers.FloatField(allow_null=True, help_text='Round trip time')
+    error = serializers.CharField(allow_blank=True)
+
+
+class MacVendorSerializer(serializers.Serializer):
+    mac = serializers.CharField()
+    vendor = serializers.CharField(allow_null=True, help_text='Maker of the network card, null if the address is in no registry')
+    private = serializers.BooleanField(help_text='A locally administered (random) address: it has no maker')

@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .dhcp.v4 import Config, Server, dhcp_settings
-from .models import DataVersion, DhcpLease, DhcpReservation, Setting
+from .models import DataVersion, DhcpLease, DhcpReservation, MacVendor, Setting
 
 NET = dict(DHCP=True, DHCP_SERVER='192.168.1.2', DHCP_NETMASK='255.255.255.0', DHCP_RANGE='192.168.1.100-192.168.1.110')
 A = ipaddress.IPv4Address
@@ -135,3 +135,51 @@ class SettingsReloadTests(TestCase):
             DataVersion.bump()
             with self.assertRaises(SystemExit):
                 c.reload_if_changed()
+
+
+class VendorAndPingTests(TestCase):
+    def setUp(self):
+        self.api = APIClient()
+        self.api.force_authenticate(get_user_model().objects.create_user('staff', password='x', is_staff=True))
+
+    def test_vendor_lookup(self):
+        from . import oui
+        oui.replace_table([('F4F5D8', 'Google, Inc.'), ('F4F5D8000', 'Google Lab (36-bit)')])
+        self.assertEqual(oui.vendor('F4:F5:D8:00:00:01'), 'Google Lab (36-bit)')  # the longest block wins
+        self.assertEqual(oui.vendor('f4-f5-d8-aa-bb-cc'), 'Google, Inc.')
+        self.assertEqual(oui.vendor('02:00:00:00:00:01'), 'Private (random address)')
+        self.assertEqual(oui.vendor('nonsense'), '')
+        r = self.api.get('/api/dhcp/vendor/', {'mac': 'F4F5D8000001'}).json()
+        self.assertEqual((r['private'], 'Google' in r['vendor']), (False, True))
+        DhcpReservation.objects.create(mac='f4:f5:d8:00:00:01', ip='192.168.1.5')
+        self.assertIn('Google', self.api.get('/api/dhcp/reservations/').json()[0]['vendor'])
+
+    def test_ping_only_local_addresses(self):
+        with mock.patch('zones.netcheck.ping_one', side_effect=lambda ip: (str(ip) == '192.168.1.1', 1.5)) as p:
+            r = self.api.post('/api/dhcp/ping/', {'addresses': ['192.168.1.1', '192.168.1.2', '8.8.8.8', 'nas.lan', '-c5', 'fd00::1']}, format='json').json()
+        self.assertEqual([(x['address'], x['up'], bool(x['error'])) for x in r],
+                         [('192.168.1.1', True, False), ('192.168.1.2', False, False), ('8.8.8.8', False, True), ('nas.lan', False, True), ('-c5', False, True), ('fd00::1', False, False)])
+        self.assertEqual(p.call_count, 3)  # the refused ones never reach the ping program
+        self.assertEqual(self.api.post('/api/dhcp/ping/', {'addresses': ['10.0.0.1'] * 65}, format='json').status_code, 400)
+
+    def test_update_downloads_and_replaces_the_table_or_keeps_it(self):
+        import gzip
+        import io
+
+        from django.core.management import call_command
+        from django.core.management.base import CommandError
+        from . import oui
+        oui.replace_table([('AAAAAA', 'Old Vendor')])
+        manuf = '# comment\n00:1B:C5:00:10/36\tShort\tOpenRB.com, Direct SIA\nF4:F5:D8\tGoogle\tGoogle, Inc.\nbad line\n'
+        reply = lambda data: mock.MagicMock(__enter__=lambda s: io.BytesIO(data), __exit__=lambda *a: False)
+        with mock.patch('zones.management.commands.update_oui.urllib.request.urlopen', side_effect=OSError('offline')):
+            with self.assertRaises(CommandError):
+                call_command('update_oui')
+        self.assertEqual(MacVendor.objects.get().name, 'Old Vendor')  # the old table stays
+        with mock.patch('zones.management.commands.update_oui.urllib.request.urlopen', return_value=reply(gzip.compress(manuf.encode()))):
+            with self.assertRaises(CommandError):  # far too few lines: a broken file
+                call_command('update_oui')
+            self.assertEqual(MacVendor.objects.get().name, 'Old Vendor')
+            with mock.patch('zones.management.commands.update_oui.MIN_ROWS', 2):
+                call_command('update_oui', stdout=mock.Mock())
+        self.assertEqual(dict(MacVendor.objects.values_list('prefix', 'name')), {'001BC5001': 'OpenRB.com, Direct SIA', 'F4F5D8': 'Google, Inc.'})

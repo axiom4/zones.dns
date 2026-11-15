@@ -626,3 +626,6 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 .settings-dialog .settings { margin: 0; gap: .9rem; }
 .settings-dialog .settings .group { box-shadow: none; border: 1px solid var(--line); }
 .settings-dialog .actions { align-items: center; }
+
+.pingr { font-size: .8rem; font-weight: 700; color: #b3261e; white-space: nowrap; } .pingr.up { color: #1b7f3b; }
+.vendor-hint { align-self: center; }

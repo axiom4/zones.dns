@@ -35,6 +35,8 @@ export type { DhcpLeasesList$Params as DhcpLeasesList$Params } from './fn/dhcp/d
 export { dhcpLeasesList as dhcpLeasesList } from './fn/dhcp/dhcp-leases-list';
 export type { DhcpLeasesDestroy$Params as DhcpLeasesDestroy$Params } from './fn/dhcp/dhcp-leases-destroy';
 export { dhcpLeasesDestroy as dhcpLeasesDestroy } from './fn/dhcp/dhcp-leases-destroy';
+export type { DhcpPingCreate$Params as DhcpPingCreate$Params } from './fn/dhcp/dhcp-ping-create';
+export { dhcpPingCreate as dhcpPingCreate } from './fn/dhcp/dhcp-ping-create';
 export type { DhcpReservationsList$Params as DhcpReservationsList$Params } from './fn/dhcp/dhcp-reservations-list';
 export { dhcpReservationsList as dhcpReservationsList } from './fn/dhcp/dhcp-reservations-list';
 export type { DhcpReservationsCreate$Params as DhcpReservationsCreate$Params } from './fn/dhcp/dhcp-reservations-create';
@@ -55,6 +57,8 @@ export type { DhcpSettingsRetrieve$Params as DhcpSettingsRetrieve$Params } from 
 export { dhcpSettingsRetrieve as dhcpSettingsRetrieve } from './fn/dhcp/dhcp-settings-retrieve';
 export type { DhcpSettingsPartialUpdate$Params as DhcpSettingsPartialUpdate$Params } from './fn/dhcp/dhcp-settings-partial-update';
 export { dhcpSettingsPartialUpdate as dhcpSettingsPartialUpdate } from './fn/dhcp/dhcp-settings-partial-update';
+export type { DhcpVendorRetrieve$Params as DhcpVendorRetrieve$Params } from './fn/dhcp/dhcp-vendor-retrieve';
+export { dhcpVendorRetrieve as dhcpVendorRetrieve } from './fn/dhcp/dhcp-vendor-retrieve';
 export type { GeoDestinationsRetrieve$Params as GeoDestinationsRetrieve$Params } from './fn/geo/geo-destinations-retrieve';
 export { geoDestinationsRetrieve as geoDestinationsRetrieve } from './fn/geo/geo-destinations-retrieve';
 export type { GeoIpsRetrieve$Params as GeoIpsRetrieve$Params } from './fn/geo/geo-ips-retrieve';

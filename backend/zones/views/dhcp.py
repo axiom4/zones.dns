@@ -5,9 +5,10 @@ from rest_framework import serializers, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from .. import netcheck, oui
 from ..dhcp import v4 as dhcp, v6 as dhcp6, ra
 from ..models import DataVersion, Dhcp6Lease, DhcpLease, Setting
-from ..serializers import DhcpLeaseSerializer, DhcpSettingsSerializer
+from ..serializers import DhcpLeaseSerializer, DhcpPingRequestSerializer, DhcpPingResultSerializer, DhcpSettingsSerializer, MacVendorSerializer
 
 LIMIT = 1000
 
@@ -23,10 +24,13 @@ class DhcpLeasesView(APIView):
         qs6 = Dhcp6Lease.objects.exclude(duid__startswith='declined')
         if not every:
             qs4, qs6 = qs4.filter(expires__gt=now), qs6.filter(expires__gt=now)
-        rows = [{'id': r.id, 'family': 4, 'kind': 'address', 'address': r.ip, 'client': r.mac or r.client, 'hostname': r.hostname, 'expires': r.expires, 'active': r.expires > now}
+        rows = [{'id': r.id, 'family': 4, 'kind': 'address', 'address': r.ip, 'client': r.mac or r.client, 'hostname': r.hostname, 'vendor': '', 'expires': r.expires, 'active': r.expires > now}
                 for r in qs4]
-        rows += [{'id': r.id, 'family': 6, 'kind': 'address' if r.kind in ('na', 'ta') else 'prefix', 'address': r.value, 'client': r.duid, 'hostname': '', 'expires': r.expires, 'active': r.expires > now}
+        rows += [{'id': r.id, 'family': 6, 'kind': 'address' if r.kind in ('na', 'ta') else 'prefix', 'address': r.value, 'client': r.duid, 'hostname': '', 'vendor': '', 'expires': r.expires, 'active': r.expires > now}
                  for r in qs6]
+        found = oui.lookup_many({r['client'] for r in rows if r['family'] == 4})
+        for r in rows:
+            r['vendor'] = oui.label(found[r['client']]) if r['family'] == 4 else ''
         if q:
             rows = [r for r in rows if q in f"{r['address']} {r['client']} {r['hostname']}".lower()]
         rows.sort(key=lambda r: r['expires'], reverse=True)
@@ -79,3 +83,20 @@ class DhcpSettingsView(APIView):
         if ser.validated_data:
             DataVersion.bump()
         return Response(DhcpSettingsSerializer(self._serialize(cand)).data)
+
+
+class MacVendorView(APIView):
+    @extend_schema(parameters=[OpenApiParameter('mac', str, required=True, description='MAC address in any usual notation')], responses=MacVendorSerializer)
+    def get(self, request):
+        """Who made the network card with this MAC address (looked up in a local table, nothing is sent to the Internet)."""
+        mac = request.query_params.get('mac', '')
+        return Response(MacVendorSerializer({'mac': mac, **oui.lookup(mac)}).data)
+
+
+class PingView(APIView):
+    @extend_schema(request=DhcpPingRequestSerializer, responses=DhcpPingResultSerializer(many=True))
+    def post(self, request):
+        """Ping hosts of the local network from this server (one ICMP echo each, up to 64). Public addresses are refused."""
+        ser = DhcpPingRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        return Response(DhcpPingResultSerializer(netcheck.ping_many(ser.validated_data['addresses']), many=True).data)

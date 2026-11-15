@@ -9,4 +9,9 @@ export interface DhcpReservation {
   ip: string;
   mac: string;
   note?: string;
+
+  /**
+   * Maker of the network card, empty if unknown
+   */
+  vendor: string;
 }

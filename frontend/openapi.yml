@@ -373,6 +373,30 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/dhcp/ping/:
+    post:
+      operationId: dhcp_ping_create
+      description: Ping hosts of the local network from this server (one ICMP echo
+        each, up to 64). Public addresses are refused.
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DhcpPingRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DhcpPingResult'
+          description: ''
   /api/dhcp/reservations/:
     get:
       operationId: dhcp_reservations_list
@@ -582,6 +606,29 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DhcpSettings'
+          description: ''
+  /api/dhcp/vendor/:
+    get:
+      operationId: dhcp_vendor_retrieve
+      description: Who made the network card with this MAC address (looked up in a
+        local table, nothing is sent to the Internet).
+      parameters:
+      - in: query
+        name: mac
+        schema:
+          type: string
+        description: MAC address in any usual notation
+        required: true
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MacVendor'
           description: ''
   /api/geo/destinations/:
     get:
@@ -2311,6 +2358,10 @@ components:
           description: MAC address (DHCPv4) or DUID (DHCPv6)
         hostname:
           type: string
+        vendor:
+          type: string
+          description: Maker of the network card (from the MAC address), empty if
+            unknown
         expires:
           type: string
           format: date-time
@@ -2325,6 +2376,39 @@ components:
       - hostname
       - id
       - kind
+      - vendor
+    DhcpPingRequestRequest:
+      type: object
+      properties:
+        addresses:
+          type: array
+          items:
+            type: string
+            minLength: 1
+            maxLength: 64
+          description: IP addresses of the local network (at most 64)
+          maxItems: 64
+      required:
+      - addresses
+    DhcpPingResult:
+      type: object
+      properties:
+        address:
+          type: string
+        up:
+          type: boolean
+        ms:
+          type: number
+          format: double
+          nullable: true
+          description: Round trip time
+        error:
+          type: string
+      required:
+      - address
+      - error
+      - ms
+      - up
     DhcpReservation:
       type: object
       properties:
@@ -2349,11 +2433,16 @@ components:
           type: string
           format: date-time
           readOnly: true
+        vendor:
+          type: string
+          readOnly: true
+          description: Maker of the network card, empty if unknown
       required:
       - created
       - id
       - ip
       - mac
+      - vendor
     DhcpReservationImportRequest:
       type: object
       properties:
@@ -2841,6 +2930,22 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/MethodsEnum'
+    MacVendor:
+      type: object
+      properties:
+        mac:
+          type: string
+        vendor:
+          type: string
+          nullable: true
+          description: Maker of the network card, null if the address is in no registry
+        private:
+          type: boolean
+          description: 'A locally administered (random) address: it has no maker'
+      required:
+      - mac
+      - private
+      - vendor
     Mail:
       type: object
       properties:
