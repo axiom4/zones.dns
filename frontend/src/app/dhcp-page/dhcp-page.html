@@ -49,9 +49,8 @@
     </fieldset>
     <fieldset class="group">
       <legend>DHCPv4 · advanced</legend>
-      <p class="soft">Fixed addresses are managed in the Reservations tab; the field here is for a few fixed entries written as text.</p>
+      <p class="soft">Fixed addresses are managed in the Reservations tab.</p>
       <div class="grid">
-      <label class="f wide"><span>Reservations as text</span><input name="DHCP_RESERVATIONS" [(ngModel)]="cfg().DHCP_RESERVATIONS" placeholder="mac=ip mac=ip" autocomplete="off"></label>
       <label class="f wide"><span>Relayed subnets (JSON)</span><input name="DHCP_SUBNETS" [(ngModel)]="cfg().DHCP_SUBNETS" placeholder="[{&quot;network&quot;:&quot;10.1.0.0/24&quot;,&quot;range&quot;:&quot;10.1.0.10-10.1.0.99&quot;}]" autocomplete="off"></label>
       <label class="f"><span>PXE boot server</span><input name="DHCP_BOOT_SERVER" [(ngModel)]="cfg().DHCP_BOOT_SERVER" placeholder="" autocomplete="off"></label>
       <label class="f"><span>PXE boot file</span><input name="DHCP_BOOT_FILE" [(ngModel)]="cfg().DHCP_BOOT_FILE" placeholder="" autocomplete="off"></label>
