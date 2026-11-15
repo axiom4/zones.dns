@@ -55,11 +55,24 @@ def allowed(client_ip):
     return _allowed(getattr(settings, 'DNS_ALLOW_QUERY', '*'), client_ip or '')
 
 
+@lru_cache(maxsize=4096)
+def _bucket(client_ip):
+    """What is counted: an IPv4 address, or the /64 of an IPv6 one (a host picks any address inside its own /64, so each would start from zero)."""
+    try:
+        addr = ipaddress.ip_address(client_ip.split('%')[0])
+    except ValueError:
+        return client_ip
+    if addr.version == 6 and not addr.ipv4_mapped:
+        return str(ipaddress.ip_network((int(addr) >> 64 << 64, 64)))
+    return str(addr.ipv4_mapped or addr) if addr.version == 6 else client_ip
+
+
 def exceeded(client_ip):
-    """True if client_ip has sent more than DNS_RATE_LIMIT queries in the current DNS_RATE_WINDOW."""
+    """How many queries client_ip has sent beyond DNS_RATE_LIMIT in the current DNS_RATE_WINDOW: 0 = within the limit, 1 = the first one refused."""
     limit = getattr(settings, 'DNS_RATE_LIMIT', 0)
     if limit <= 0 or not client_ip:
-        return False
+        return 0
+    client_ip = _bucket(client_ip)
     window = max(int(getattr(settings, 'DNS_RATE_WINDOW', 1)), 1)
     win_id = int(time.monotonic() // window)
     with _lock:
@@ -70,4 +83,4 @@ def exceeded(client_ip):
                 _clients.popitem(last=False)
         _clients.move_to_end(client_ip)
         slot[1] += 1
-        return slot[1] > limit
+        return max(slot[1] - limit, 0)

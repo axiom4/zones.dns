@@ -572,6 +572,11 @@ class ImportBlocklistTests(TestCase):
         self.assertTrue(BlockedDomain.objects.filter(name='mine.example', source='manual').exists())
 
 
+def _udp_from(send):
+    """A fake DNSRecord.send as the resolver's UDP exchange (resolver._udp_exchange), so one fake upstream serves UDP and the TCP retry."""
+    return lambda wire, host, port, v6, timeout: send(DNSRecord.parse(wire), host, port, timeout=timeout, ipv6=v6)
+
+
 class DohTests(TestCase):
     def test_doh_needs_the_switch_and_a_dns_message(self):
         import base64
@@ -1416,11 +1421,11 @@ class SecurityAndProtocolHardeningTests(TestCase):
         # The resolver: AD=1 only through the chain of trust, SERVFAIL on a bogus answer (unless CD=1)
         pki = DnssecPki(now)
         r._validator.anchors = [pki.root_ds]
-        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=pki.upstream()):
+        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=pki.upstream()), mock.patch.object(resolver, '_udp_exchange', new=_udp_from(pki.upstream())):
             rep_ok = r.resolve(DNSRecord.question('www.example.com', 'A'), h)
             self.assertEqual((rep_ok.header.rcode, rep_ok.header.ad), (RCODE.NOERROR, 1))
             self.assertTrue(all(rr.rtype != QTYPE.RRSIG for rr in rep_ok.rr))  # stripped when client did not set DO=1
-        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=pki.upstream(bad_sig=True)):
+        with override_settings(DNS_DNSSEC=True, DNS_CACHE=False), mock.patch.object(DNSRecord, 'send', new=pki.upstream(bad_sig=True)), mock.patch.object(resolver, '_udp_exchange', new=_udp_from(pki.upstream(bad_sig=True))):
             self.assertEqual(r.resolve(DNSRecord.question('www.example.com', 'A'), h).header.rcode, RCODE.SERVFAIL)
             q_cd = DNSRecord.question('www.example.com', 'A')
             q_cd.header.cd = 1
@@ -1719,7 +1724,7 @@ class HotPathTests(TestCase):
         r = Resolver('127.0.0.1:9', log=SimpleNamespace(add=lambda e: None))
         h = SimpleNamespace(client_address=('127.0.0.1', 0))
         send = lambda pkt, *a, **k: pkt.reply().pack()
-        with mock.patch.object(DNSRecord, 'send', new=send):
+        with mock.patch.object(DNSRecord, 'send', new=send), mock.patch.object(resolver, '_udp_exchange', new=_udp_from(send)):
             r.resolve(DNSRecord.question('www.example.com', 'A'), h)  # loads the data, asks the blacklist once
             with self.assertNumQueries(0):  # no Setting read for the DHCP names, no ping, no blacklist query
                 r.resolve(DNSRecord.question('www.example.com', 'A'), h)

@@ -893,6 +893,14 @@ paths:
       operationId: logs_purge_create
       description: 'Delete old queries (not filtered by the list filters: it ages
         the whole log).'
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       tags:
       - logs
       requestBody:
@@ -1405,9 +1413,9 @@ paths:
         name: X-MFA-Grant
         schema:
           type: string
-        description: Proof of a second factor for emptying or deleting this zone (POST
-          /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has
-          a second factor.
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       tags:
       - records
       requestBody:
@@ -1553,7 +1561,16 @@ paths:
           description: ''
     put:
       operationId: zones_update
+      description: 'Switching a zone off stops serving it, like deleting it: the same
+        proof of a second factor (scope zone-delete:<id>).'
       parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -1580,6 +1597,13 @@ paths:
     patch:
       operationId: zones_partial_update
       parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -1609,9 +1633,9 @@ paths:
         name: X-MFA-Grant
         schema:
           type: string
-        description: Proof of a second factor for emptying or deleting this zone (POST
-          /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has
-          a second factor.
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -1654,9 +1678,9 @@ paths:
         name: X-MFA-Grant
         schema:
           type: string
-        description: Proof of a second factor for emptying or deleting this zone (POST
-          /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has
-          a second factor.
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       - in: path
         name: id
         schema:

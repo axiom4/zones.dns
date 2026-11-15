@@ -4,10 +4,14 @@ from rest_framework.decorators import action
 from rest_framework.response import Response
 
 from django.db import transaction
+from django.db.models import Count
 
 from ..models import DataVersion, Record
 from ..serializers import BulkActionSerializer, BulkResultSerializer, RecordSerializer
 from .zone import GRANT, need_grant
+
+
+BULK_MIN = 10
 
 
 @extend_schema_view(list=extend_schema(parameters=[OpenApiParameter('zone', int, description='Filter by zone id')]))
@@ -27,10 +31,15 @@ class RecordViewSet(viewsets.ModelViewSet):
         qs = Record.objects.filter(id__in=s.validated_data['ids'])
         act = s.validated_data['action']
         if act == 'delete':
-            # a delete that leaves a zone without records is the zone's deletion in all but name: the same proof of a second factor
-            emptied = [z for z in qs.values_list('zone', flat=True).distinct() if not Record.objects.filter(zone=z).exclude(id__in=s.validated_data['ids']).exists()]
+            # a delete that takes all the records of a zone, or most of them (BULK_MIN or more and over half), is the zone's deletion in all
+            # but name: the same proof of a second factor. The GUI asks under the same rule (zone-page.ts).
+            emptied = []
+            for z, n in qs.values_list('zone').annotate(n=Count('id')):
+                total = Record.objects.filter(zone=z).count()
+                if n == total or (n >= BULK_MIN and n * 2 > total):
+                    emptied.append(z)
             if len(emptied) > 1:
-                raise serializers.ValidationError({'ids': 'This deletes every record of more than one zone: do one zone at a time.'})
+                raise serializers.ValidationError({'ids': 'This deletes most records of more than one zone: do one zone at a time.'})
             if emptied and (denied := need_grant(request, emptied[0])) is not None:
                 return denied
             count = qs.count()

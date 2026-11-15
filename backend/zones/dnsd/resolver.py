@@ -1,5 +1,7 @@
+import logging
 import re
 import secrets
+import socket
 import threading
 import time
 from collections import OrderedDict, defaultdict
@@ -41,6 +43,27 @@ _SHARED_CHECK = 0.2  # with Redis: seconds between looks at the counter (one que
 _db_tls = threading.local()
 _DB_IDLE_CHECK = 30  # seconds a worker's connection may sit idle before it is pinged again
 _NONE = ''  # a name that is not blocked, as stored in Redis (a missing key means "not asked yet")
+
+
+log = logging.getLogger(__name__)
+_db_warned = 0.0
+
+
+def _db_away(what):
+    """The database did not answer and the query goes on without it: said once a minute, not once per query."""
+    global _db_warned
+    if time.monotonic() - _db_warned > 60:
+        _db_warned = time.monotonic()
+        log.warning('database not reachable: %s (DNS answers go on; repeated at most once a minute)', what)
+
+
+def _lease(find, qname):
+    """dhcp.lease_hosts / lease_ptr; None when the database is away: the name is answered as if no client had it."""
+    try:
+        return find(qname, _dhcp_names)
+    except DatabaseError:
+        _db_away('names of DHCP clients are not answered')
+        return None
 
 
 def _shared():
@@ -273,6 +296,7 @@ def blocked_entry(qname):
     try:
         top = max(found, key=lambda b: len(b.name), default=None)  # the most specific entry wins: an allowed host inside a blocked domain, and the reverse
     except DatabaseError:
+        _db_away('the blacklist is not applied to names it has not seen yet')
         return None  # database away: the name is answered unblocked (not remembered) rather than not at all
     pats = [(p, allow) for rx, p, allow in _regexes if rx.search(qname)]
     if any(allow for _, allow in pats) or (top and top.allow):
@@ -393,6 +417,21 @@ def summarize(reply):
     return RCODE[reply.header.rcode], answers
 
 
+def _udp_exchange(wire, host, port, v6, timeout):
+    """One question to an upstream over UDP. The socket is connected, so the kernel drops packets from any other address or port, and a packet
+    with another id is skipped instead of taken as the answer (dnslib's send() took the first packet that reached the port, whoever sent it)."""
+    with socket.socket(socket.AF_INET6 if v6 else socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.connect((host, port))
+        s.send(wire)
+        deadline = time.monotonic() + timeout
+        while (left := deadline - time.monotonic()) > 0:
+            s.settimeout(left)
+            data = s.recv(8192)
+            if data[:2] == wire[:2]:
+                return data
+    raise TimeoutError('no answer from the upstream')
+
+
 class Resolver(BaseResolver):
     def __init__(self, upstream, log=None):
         self.log = log  # a LogWriter; None = write each log row at once
@@ -419,13 +458,15 @@ class Resolver(BaseResolver):
         t0 = time.monotonic()
         qname, qtype = str(request.q.qname).rstrip('.').lower(), QTYPE[request.q.qtype]
         try:
-            if ratelimit.exceeded(handler.client_address[0]):
+            if over := ratelimit.exceeded(handler.client_address[0]):
                 outcome, reply, via = 'blocked', request.reply(aa=0), 'rate limit'
                 reply.header.rcode = RCODE.REFUSED
+                if over > 1:  # the first refusal of a window is logged, the rest of the flood is not: it filled the log queue and the table
+                    return finish(request, reply, handler)
             else:
                 hosts = static_hosts(qname)
                 found = None if hosts else lookup(qname, qtype)
-                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and dhcp.lease_hosts(qname, _dhcp_names)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
+                leased = not hosts and (not found or found[1]) and not has_zone_node(qname) and _lease(dhcp.lease_hosts, qname)  # a DHCP client that called itself <name>.<DHCP_DOMAIN>
                 if leased:
                     hosts, found = leased, None
                 if hosts:
@@ -474,7 +515,7 @@ class Resolver(BaseResolver):
                             reply.add_answer(rr)
                     else:
                         reply = negative(request, 'resolver.arpa' if qname.endswith('.resolver.arpa') else qname, False)
-                elif qtype == 'PTR' and (ptr := dhcp.lease_ptr(qname, _dhcp_names)):  # the reverse name of a DHCP client that has a name
+                elif qtype == 'PTR' and (ptr := _lease(dhcp.lease_ptr, qname)):  # the reverse name of a DHCP client that has a name
                     outcome, via, reply = 'local', 'DHCP lease', request.reply()
                     reply.header.aa = 1
                     reply.add_answer(RR(request.q.qname, QTYPE.PTR, rdata=PTR(ptr + '.'), ttl=60))
@@ -503,8 +544,11 @@ class Resolver(BaseResolver):
             if self.log:
                 self.log.add(entry)  # saved in a batch a moment later
             else:
-                entry.save()
-                rollup.add([entry])
+                try:
+                    entry.save()
+                    rollup.add([entry])
+                except DatabaseError:
+                    _db_away('queries are not logged')  # DNS_LOG_FLUSH=0: the log is written before answering, but never instead of answering
             return finish(request, reply, handler)
         finally:
             connection.close_if_unusable_or_obsolete()  # the worker thread keeps its connection for the next query, unless it broke or is older than CONN_MAX_AGE
@@ -625,7 +669,7 @@ class Resolver(BaseResolver):
                 if want_dnssec:
                     out_req.ar = [rr for rr in out_req.ar if rr.rtype != QTYPE.OPT]
                     out_req.add_ar(EDNS0(flags='do', udp_len=1232))
-                reply = DNSRecord.parse(out_req.send(host, port, timeout=settings.DNS_UPSTREAM_TIMEOUT, ipv6=v6))
+                reply = DNSRecord.parse(_udp_exchange(bytes(out_req.pack()), host, port, v6, settings.DNS_UPSTREAM_TIMEOUT))
                 if reply.header.tc:  # truncated: retry over TCP
                     txid = secrets.randbits(16)
                     out_req.header.id = txid

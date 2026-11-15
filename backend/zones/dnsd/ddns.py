@@ -10,7 +10,7 @@ from django.conf import settings
 from django.db import transaction
 from dnslib import QTYPE, RCODE
 
-from ..models import RECORD_TYPES, DataVersion, Record, Zone, build_rr
+from ..models import RECORD_TYPES, DataVersion, Record, Zone, build_rr, cname_conflict
 from . import tsig
 
 CLASS_IN, CLASS_NONE, CLASS_ANY = 1, 254, 255
@@ -157,6 +157,8 @@ def _apply(request, zone):
                 build_rr(zone.name, rel, rtype, val, ttl or 0)
             except Exception:
                 raise _Abort(RCODE.FORMERR)
+            if cname_conflict(zone, rel, rtype):
+                continue  # RFC 2136 §3.4.2.2: a CNAME next to other data, or data next to a CNAME, is silently ignored
             if rtype == 'CNAME':
                 Record.objects.filter(zone=zone, name=rel, type='CNAME').delete()
             rec, created = Record.objects.get_or_create(zone=zone, name=rel, type=rtype, value=val, defaults={'ttl': ttl})

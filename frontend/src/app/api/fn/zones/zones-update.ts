@@ -13,6 +13,11 @@ import { ZoneRequest } from '../../models/zone-request';
 export interface ZonesUpdate$Params {
 
 /**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
+
+/**
  * A unique integer value identifying this zone.
  */
   id: number;
@@ -22,6 +27,7 @@ export interface ZonesUpdate$Params {
 export function zonesUpdate(http: HttpClient, rootUrl: string, params: ZonesUpdate$Params, context?: HttpContext): Observable<StrictHttpResponse<Zone>> {
   const rb = new RequestBuilder(rootUrl, zonesUpdate.PATH, 'put');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.path('id', params.id, {});
     rb.body(params.body, 'application/json');
   }

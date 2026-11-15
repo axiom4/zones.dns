@@ -11,12 +11,18 @@ import { PurgeRequestRequest } from '../../models/purge-request-request';
 import { PurgeResult } from '../../models/purge-result';
 
 export interface LogsPurgeCreate$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
       body: PurgeRequestRequest
 }
 
 export function logsPurgeCreate(http: HttpClient, rootUrl: string, params: LogsPurgeCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<PurgeResult>> {
   const rb = new RequestBuilder(rootUrl, logsPurgeCreate.PATH, 'post');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.body(params.body, 'application/json');
   }
 

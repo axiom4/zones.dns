@@ -13,15 +13,15 @@ from ..serializers import (ReverseZoneRequestSerializer, SyncPtrResultSerializer
 
 
 GRANT = OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
-                         description='Proof of a second factor for emptying or deleting this zone (POST /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has a second factor.')
+                         description='Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.')
 
 
-def need_grant(request, zone_id):
-    """None, or the 403 answer when the user has a second factor and did not prove it for this zone (scope zone-delete:<id>)."""
+def need_grant(request, zone_id=None, scope=None):
+    """None, or the 403 answer when the user has a second factor and did not prove it for this zone (scope zone-delete:<id>) or this scope."""
     if not mfa.methods(request.user):  # someone who has no second factor cannot be asked for one
         return None
     try:
-        mfa.use_grant(request.user, f'zone-delete:{zone_id}', request.headers.get('X-MFA-Grant'))
+        mfa.use_grant(request.user, scope or f'zone-delete:{zone_id}', request.headers.get('X-MFA-Grant'))
     except mfa.MfaError as e:
         return Response({'detail': e.text, 'mfa_required': True}, status=status.HTTP_403_FORBIDDEN)
     return None
@@ -36,6 +36,20 @@ class ZoneViewSet(viewsets.ModelViewSet):
         if (denied := need_grant(request, self.get_object().pk)) is not None:
             return denied
         return super().destroy(request, *args, **kwargs)
+
+    @extend_schema(parameters=[GRANT])
+    def update(self, request, *args, **kwargs):
+        """Switching a zone off stops serving it, like deleting it: the same proof of a second factor (scope zone-delete:<id>)."""
+        zone = self.get_object()
+        peek = self.get_serializer(zone, data=request.data, partial=True)
+        peek.is_valid(raise_exception=True)
+        if zone.enabled and peek.validated_data.get('enabled') is False and (denied := need_grant(request, zone.pk)) is not None:
+            return denied
+        return super().update(request, *args, **kwargs)
+
+    @extend_schema(parameters=[GRANT])
+    def partial_update(self, request, *args, **kwargs):
+        return super().partial_update(request, *args, **kwargs)
 
     @extend_schema(responses={(200, 'text/plain'): OpenApiTypes.STR})
     @action(detail=True, methods=['get'])

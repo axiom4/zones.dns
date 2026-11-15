@@ -11,10 +11,10 @@ from dnslib import QTYPE, RCODE, RR, A, DNSRecord
 from dnslib.server import DNSServer
 from rest_framework.test import APIClient
 
-from .dnsd import ddns, resolver, suspicious
+from .dnsd import ddns, ratelimit, resolver, suspicious, zonefile
 from .dnsd.dnsserver import Handler, PooledTCPServer, logger
 from .management.commands.rundns import Command as RunDns
-from .models import Record, TotpDevice, Zone
+from .models import QueryLog, Record, TotpDevice, Zone
 
 
 class DohAcceptTests(TestCase):
@@ -157,7 +157,7 @@ class DdnsValidationTests(TestCase):
 class StepUpGapTests(TestCase):
     def setUp(self):
         from django.core.cache import cache
-        cache.clear()  # a grant is one-use, and two made in the same second for the same scope are the same text
+        cache.clear()
         self.user = get_user_model().objects.create_superuser('root', password='x')
         TotpDevice.objects.create(user=self.user, secret='JBSWY3DPEHPK3PXP', confirmed=True)
         self.api = APIClient()
@@ -213,3 +213,123 @@ class InputCheckTests(TestCase):
         self.assertEqual(rec(name='alias', type='TXT', value='"x"').status_code, 400)
         www = Record.objects.filter(name='www').first()
         self.assertEqual(self.api.patch(f'/api/records/{www.pk}/', {'note': 'kept'}, format='json').status_code, 200)  # editing a record is not a duplicate of itself
+
+
+class CnameEverywhereTests(TestCase):
+    """The CNAME rule of the API also holds for the other ways a record gets in."""
+    def setUp(self):
+        self.zone = Zone.objects.create(name='corp.lan')
+        Record.objects.create(zone=self.zone, name='www', type='A', value='10.0.0.1')
+        Record.objects.create(zone=self.zone, name='alias', type='CNAME', value='www.corp.lan.')
+
+    def test_zone_file_import(self):
+        out = zonefile.import_zone(self.zone, 'www 300 IN CNAME other.corp.lan.\nalias 300 IN TXT "x"\nnew 300 IN CNAME www.corp.lan.\nnew 300 IN A 10.0.0.9\nok 300 IN A 10.0.0.2\n')
+        self.assertEqual((out['created'], len(out['errors'])), (2, 3))
+        self.assertEqual(sorted(self.zone.records.values_list('name', 'type')), [('alias', 'CNAME'), ('new', 'CNAME'), ('ok', 'A'), ('www', 'A')])
+
+    def test_dns_update_ignores_the_conflict(self):
+        req = DNSRecord.question('corp.lan', 'SOA')
+        req.add_auth(RR('alias.corp.lan', QTYPE.A, rdata=A('10.0.0.5'), ttl=60))
+        ddns._apply(req, self.zone)
+        self.assertEqual(list(Record.objects.filter(name='alias').values_list('type', flat=True)), ['CNAME'])
+
+    def test_django_admin(self):
+        from django.core.exceptions import ValidationError
+        with self.assertRaises(ValidationError):
+            Record(zone=self.zone, name='www', type='CNAME', value='other.corp.lan.').clean()
+        Record.objects.get(name='www').clean()  # a record is not in conflict with itself
+
+
+class MoreStepUpTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.user = get_user_model().objects.create_user('staff', password='x', is_staff=True)
+        TotpDevice.objects.create(user=self.user, secret='JBSWY3DPEHPK3PXP', confirmed=True)
+        self.api = APIClient()
+        self.api.force_authenticate(self.user)
+        self.zone = Zone.objects.create(name='corp.lan')
+
+    def _grant(self, scope):
+        from .security import mfa
+        return {'HTTP_X_MFA_GRANT': mfa.make_grant(self.user, scope)}
+
+    def test_two_grants_of_the_same_second_both_work(self):
+        url = f'/api/zones/{self.zone.pk}/'
+        for _ in range(2):
+            self.assertEqual(self.api.patch(url, {'enabled': False}, format='json', **self._grant(f'zone-delete:{self.zone.pk}')).status_code, 200)
+            self.assertEqual(self.api.patch(url, {'enabled': True}, format='json').status_code, 200)  # switching on needs no proof
+
+    def test_switching_a_zone_off_needs_the_zone_grant(self):
+        url = f'/api/zones/{self.zone.pk}/'
+        self.assertEqual(self.api.patch(url, {'enabled': False}, format='json').status_code, 403)
+        self.assertEqual(self.api.put(url, {'name': 'corp.lan', 'enabled': False}, format='json').status_code, 403)
+        self.assertTrue(Zone.objects.get(pk=self.zone.pk).enabled)
+
+    def test_purging_the_log_needs_its_grant(self):
+        QueryLog.objects.create(name='a.example', type='A', outcome='forwarded', client='10.0.0.1', ms=1)
+        body = {'older_than_hours': 0}
+        self.assertEqual(self.api.post('/api/logs/purge/', {**body, 'dry_run': True}, format='json').json()['count'], 1)
+        self.assertEqual(self.api.post('/api/logs/purge/', body, format='json').status_code, 403)
+        self.assertEqual(QueryLog.objects.count(), 1)
+        self.assertEqual(self.api.post('/api/logs/purge/', body, format='json', **self._grant('log-purge')).status_code, 200)
+        self.assertEqual(QueryLog.objects.count(), 0)
+
+    def test_bulk_delete_of_most_of_a_zone_needs_the_zone_grant(self):
+        ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]
+        post = lambda some, **kw: self.api.post('/api/records/bulk/', {'ids': some, 'action': 'delete'}, format='json', **kw).status_code
+        self.assertEqual(post(ids[:11]), 403)  # 11 of 20: over half
+        self.assertEqual(post(ids[:9]), 200)  # under BULK_MIN
+        self.assertEqual(post(ids[9:], **self._grant(f'zone-delete:{self.zone.pk}')), 200)
+
+
+class DegradedTests(TestCase):
+    def test_dhcp_names_without_database(self):
+        def gone(qname, cfg):
+            raise DatabaseError('gone away')
+        with self.assertLogs('zones.dnsd.resolver', 'WARNING'):
+            resolver._db_warned = 0.0
+            self.assertIsNone(resolver._lease(gone, 'pc.corp.lan'))
+
+    def test_only_the_upstream_asked_and_the_right_id_are_taken(self):
+        import threading
+        srv = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        srv.bind(('127.0.0.1', 0))
+        self.addCleanup(srv.close)
+        stranger = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.addCleanup(stranger.close)
+
+        def serve():
+            data, who = srv.recvfrom(512)
+            stranger.sendto(data, who)  # the right id from another port: dropped by the connected socket
+            srv.sendto(b'\x00\x00' + data[2:], who)  # the right server, another id: skipped
+            srv.sendto(data + b'ok', who)
+        threading.Thread(target=serve, daemon=True).start()
+        self.assertEqual(resolver._udp_exchange(b'\x12\x34question', '127.0.0.1', srv.getsockname()[1], False, 3), b'\x12\x34questionok')
+        with self.assertRaises(OSError):
+            resolver._udp_exchange(b'\x12\x34question', '127.0.0.1', srv.getsockname()[1], False, 0.2)  # nobody answers
+
+
+class RateLimitTests(TestCase):
+    def tearDown(self):
+        ratelimit.reset()
+
+    def test_ipv6_is_counted_per_64_and_refusals_are_numbered(self):
+        ratelimit.reset()
+        with override_settings(DNS_RATE_LIMIT=2, DNS_RATE_WINDOW=60):
+            self.assertEqual([ratelimit.exceeded(f'2001:db8:1:2::{i}') for i in range(1, 5)], [0, 0, 1, 2])  # one host, four addresses
+            self.assertEqual(ratelimit.exceeded('2001:db8:1:3::1'), 0)  # another network
+            self.assertEqual(ratelimit.exceeded('::ffff:10.0.0.1'), 0)
+            self.assertEqual([ratelimit.exceeded('10.0.0.1') for _ in range(2)], [0, 1])  # the same client as the mapped address
+
+    def test_a_flood_is_logged_once(self):
+        from types import SimpleNamespace
+        ratelimit.reset()
+        resolver._data = None
+        Zone.objects.create(name='corp.lan')
+        h = SimpleNamespace(client_address=('10.9.9.9', 0))
+        r = resolver.Resolver('1.1.1.1')
+        with override_settings(DNS_RATE_LIMIT=1, DNS_RATE_WINDOW=60, DNS_AUTHORITATIVE=True):
+            codes = [r.resolve(DNSRecord.question('x.corp.lan', 'A'), h).header.rcode for _ in range(6)]
+        self.assertEqual(codes, [RCODE.NXDOMAIN] + [RCODE.REFUSED] * 5)
+        self.assertEqual(QueryLog.objects.filter(via='rate limit').count(), 1)

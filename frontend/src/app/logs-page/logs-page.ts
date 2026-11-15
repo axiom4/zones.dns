@@ -7,6 +7,7 @@ import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsL
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
 import { countryName, flag } from '../lib/geo-util';
+import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 
 /** Sort key of an address: IPv4 as 4 zero-padded numbers, ahead of everything else. */
@@ -29,6 +30,7 @@ interface Open { subs: QueryLogGroup[] | null; total: number; rows: QueryLog[]; 
 })
 export class LogsPage implements OnDestroy {
   private api = inject(Api);
+  private stepUp = inject(StepUp);
   ui = inject(Ui);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -257,7 +259,9 @@ export class LogsPage implements OnDestroy {
 
   doPurge() {
     return this.ui.run(async () => {
-      await this.api.invoke(logsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: false } });
+      const grant = await this.stepUp.request('log-purge'); // the history is erased only by whoever proves a second factor
+      if (grant === null) return;
+      await this.api.invoke(logsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: false }, 'X-MFA-Grant': grant || undefined });
       this.pg().nativeElement.close();
       this.domains.set({}); this.names.set({});
       await this.reset();

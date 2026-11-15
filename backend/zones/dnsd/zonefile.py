@@ -87,11 +87,19 @@ def import_zone(zone, text, replace=False, dry_run=False):
         if replace and not dry_run:
             zone.records.all().delete()
         seen = set() if replace else set(zone.records.values_list('name', 'type', 'value'))
+        types = {}  # name -> types it has (existing and imported so far): a CNAME stays alone, as in the API
+        for name, rtype, _ in seen:
+            types.setdefault(name, set()).add(rtype)
         for d in records:
             key = (d['name'], d['type'], d['value'])
             if key in seen:
                 skipped += 1
                 continue
+            has = types.setdefault(d['name'], set())
+            if (has - {'CNAME'}) if d['type'] == 'CNAME' else 'CNAME' in has:
+                errors.append(f"{d['name']} {d['type']}: a CNAME cannot share its name with other records")
+                continue
+            has.add(d['type'])
             seen.add(key)
             created += 1
             if not dry_run:

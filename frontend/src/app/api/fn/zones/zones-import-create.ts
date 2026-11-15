@@ -13,7 +13,7 @@ import { ZoneImportResult } from '../../models/zone-import-result';
 export interface ZonesImportCreate$Params {
 
 /**
- * Proof of a second factor for emptying or deleting this zone (POST /api/mfa/stepup/..., scope zone-delete:<id>). Required when the user has a second factor.
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
  */
   'X-MFA-Grant'?: string;
 

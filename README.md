@@ -93,6 +93,8 @@ After the password a second factor is required: a code from an authenticator app
 
 **Deleting a zone** asks for the second factor again: after the usual confirmation a window asks for a fresh authenticator code or a passkey, with no user name or password (the user is already signed in). The server accepts the deletion only with a one-use proof (valid 2 minutes, for that zone only) that the factor was just checked (`X-MFA-Grant` header; the steps are `/api/mfa/stepup/…`, inside the encrypted channel when `LOGIN_ENCRYPTION` is on). A user with no second factor set up (possible only with `MFA_REQUIRED=false`) deletes with the normal confirmation. A code already used to sign in is refused: wait for the next one.
 
+The same proof is asked for what amounts to losing a zone or its traces: **switching a zone off**, **Import with Replace**, a **bulk delete** of all the records of a zone or most of them (10 or more and over half), **purging the query log** (scope `log-purge`) and **opening the Django admin** (scope `admin`).
+
 ```sh
 python manage.py mfa_reset <user>   # lost phone or key: the user starts the setup again
 ```
@@ -197,6 +199,7 @@ DNS_DDR=dot:dns.example.lan@192.168.1.23,2001:db8::53 doh:dns.example.lan/dns-qu
 - **DDR (`_dns.resolver.arpa` and `_dns.<adn>`):** when `DNS_DDR` is set, the DNS daemon answers `SVCB` queries for `_dns.resolver.arpa` (and for `_dns.<host>` when clients learn the resolver name via ADN-only DNR) with the ALPN (`dot` / `h2`), port, DoH path template and IPv4/IPv6 hints. Clients that support DDR (iOS/macOS, Windows 11, Android) upgrade from plain DNS automatically after verifying the TLS certificate for `<host>`.
 - **DoH (`/dns-query`):** set `DNS_DOH=true` to serve RFC 8484 DNS over HTTPS (`GET ?dns=` and `POST application/dns-message`), forwarded over TCP to `DNS_DOH_BACKEND` (default `127.0.0.1:5353`).
 - **DoT (port 853):** use the nginx stream proxy in `deploy/nginx/dns-dot.conf` in front of `127.0.0.1:5353`.
+- **Who the client is (`DNS_PROXY_PROTOCOL`):** DoH and DoT queries reach the daemon from this machine, so their clients are all `127.0.0.1` in the log, the rate limit, the suspicious-query count and `DNS_ALLOW_QUERY`. With `DNS_PROXY_PROTOCOL=true` the daemon reads the real address from a PROXY protocol line: add `proxy_protocol on;` to `dns-dot.conf` (both or neither, or DoT stops working) and keep `X-Real-IP` in the `/dns-query` location with `BEHIND_PROXY=true`. Only connections from this machine are believed.
 - **Verification (`check_ddr`):** `python manage.py check_ddr` sends a real DNS query to every endpoint in `DNS_DDR` over a verified TLS connection (checking certificate validity and SAN) and exits non-zero if any endpoint fails.
 - **DNR options (`dnr_options`):** `python manage.py dnr_options` (or `--format dnsmasq` / `--format kea`) encodes `DNS_DDR` into DHCPv4 option 162, DHCPv6 option 144 and IPv6 Router Advertisement option 144 (RFC 9463) for external routers/DHCP servers; `manage.py rundhcp` sends them natively when `DHCP_DNR=true`.
 

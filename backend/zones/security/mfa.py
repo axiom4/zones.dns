@@ -115,7 +115,7 @@ GRANT_AGE = 120  # seconds
 
 def make_grant(user, scope):
     """Signed proof that this user has just passed a second factor for this one action (scope, e.g. "zone-delete:7")."""
-    return signing.dumps({'u': user.pk, 's': scope}, salt='mfa-grant')
+    return signing.dumps({'u': user.pk, 's': scope, 'j': secrets.token_urlsafe(8)}, salt='mfa-grant')  # j: two grants of one second are not the same text
 
 
 def use_grant(user, scope, grant):

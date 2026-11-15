@@ -7,7 +7,7 @@ import { passkeyError, passkeysSupported, usePasskey } from './webauthn';
 interface Pending { scope: string; totp: boolean; passkey: boolean; resolve: (grant: string | null) => void }
 
 /**
- * Asks the signed-in user for a second factor before a dangerous action (deleting or emptying a zone, opening the Django admin). No user name or password:
+ * Asks the signed-in user for a second factor before a dangerous action (deleting, switching off or emptying a zone, purging the query log, opening the Django admin). No user name or password:
  * the user is already signed in, so a code or a passkey is enough. The answer is a one-use grant (2 minutes) for that action only.
  */
 @Injectable({ providedIn: 'root' })

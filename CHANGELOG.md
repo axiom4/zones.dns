@@ -11,9 +11,13 @@
   - Query log: `hours` with a huge or non-ASCII number gave error 500; `hours=0` listed nothing while counting everything (now: the whole log).
   - DNS UPDATE: records are checked like the API's (a record the daemon could not build is refused with `FORMERR`), a TTL of 0 takes the default instead of failing.
   - A blacklist answer worked out while the data was being reloaded could be remembered after the reload (an unblocked name stayed blocked up to `DNS_DATA_TTL`).
-  - Records: the API refuses a duplicate and a CNAME that shares its name with other records.
+  - Records: a duplicate is refused by the API, and a CNAME that shares its name with other records is refused everywhere (API, Django admin, zone file import, *Sync PTR*; a DNS UPDATE ignores it, RFC 2136 §3.4.2.2).
+  - With the database away the names of DHCP clients are answered as unknown instead of not at all, and with `DNS_LOG_FLUSH=0` the query is answered without its log row. The daemon says so on stderr once a minute.
+  - Rate limit: only the first refused query of a window is logged (a flood filled the log), and IPv6 clients are counted per /64 (a host that changed address inside its network started from zero).
+  - Upstream answers over UDP are taken only from the address and port that were asked, and a packet with another id is skipped instead of ending the wait.
+  - Two step-up grants issued in the same second for the same action were the same text: the second was refused as already used.
 - **Security**
-  - Emptying a zone asks for the second factor like deleting it: *Import* with *Replace* and a bulk delete of every record of a zone need the `zone-delete:<id>` grant (`X-MFA-Grant`).
+  - Emptying a zone asks for the second factor like deleting it: *Import* with *Replace* and a bulk delete of every record of a zone need the `zone-delete:<id>` grant (`X-MFA-Grant`). So do switching a zone off and a bulk delete of 10 or more records that are over half of the zone; purging the query log needs the new scope `log-purge`.
   - Opening the Django admin asks for the second factor (step-up scope `admin`): with a stolen token alone the admin could delete the owner's authenticator.
   - `DNS_PROXY_PROTOCOL` (off by default): DoH and DoT clients keep their own address for `DNS_ALLOW_QUERY`, the rate limit, the suspicious-query count and the log, instead of sharing 127.0.0.1. Needs `proxy_protocol on;` in `dns-dot.conf` and `X-Real-IP` in the `/dns-query` location (both in `deploy/nginx`).
   - `INSTALL.md`: `setcap` goes on a private copy of the interpreter, not on `/usr/bin/python3.x`, where it gave every local user the right to bind low ports (and raw sockets with DHCP).

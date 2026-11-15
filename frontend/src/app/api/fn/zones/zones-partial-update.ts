@@ -13,6 +13,11 @@ import { Zone } from '../../models/zone';
 export interface ZonesPartialUpdate$Params {
 
 /**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
+
+/**
  * A unique integer value identifying this zone.
  */
   id: number;
@@ -22,6 +27,7 @@ export interface ZonesPartialUpdate$Params {
 export function zonesPartialUpdate(http: HttpClient, rootUrl: string, params: ZonesPartialUpdate$Params, context?: HttpContext): Observable<StrictHttpResponse<Zone>> {
   const rb = new RequestBuilder(rootUrl, zonesPartialUpdate.PATH, 'patch');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.path('id', params.id, {});
     rb.body(params.body, 'application/json');
   }

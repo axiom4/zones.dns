@@ -24,6 +24,15 @@ def build_rr(zone, name, rtype, value, ttl):
     return rrs
 
 
+def cname_conflict(zone, name, rtype, exclude_pk=None):
+    """True when adding a record of this type breaks RFC 1034 §3.6.2: a name that is an alias (CNAME) has no other record."""
+    others = Record.objects.filter(zone=zone, name=name).exclude(pk=exclude_pk)
+    return (others.exclude(type='CNAME') if rtype == 'CNAME' else others.filter(type='CNAME')).exists()
+
+
+CNAME_ALONE = 'A CNAME cannot share its name with other records: remove them (or the CNAME) first.'
+
+
 class Record(models.Model):
     zone = models.ForeignKey(Zone, on_delete=models.CASCADE, related_name='records')
     name = models.CharField(max_length=253, default='@')  # relative to zone, '@' = apex
@@ -45,6 +54,8 @@ class Record(models.Model):
             build_rr(self.zone.name, self.name, self.type, self.value, self.ttl or 0)
         except Exception as e:
             raise ValidationError({'value': f'Invalid RDATA: {e}'})
+        if cname_conflict(self.zone, self.name, self.type, self.pk):
+            raise ValidationError({'type': CNAME_ALONE})
 
     def to_rr(self, owner=None):
         """owner overrides the name, used when a wildcard record answers for another name."""

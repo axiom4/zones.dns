@@ -17,6 +17,8 @@ from ..stats.rollup import floor_hour
 from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
 from rest_framework.pagination import LimitOffsetPagination
 
+from .zone import GRANT, need_grant
+
 
 class LogPagination(LimitOffsetPagination):
     default_limit = 50
@@ -243,7 +245,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
                 names[ip] = (zone, zone) if n == '@' else (f'{n}.{zone}', n)
         return Response(QueryLogClientSerializer([{'ip': r['key'], 'name': names.get(r['key'], ('', ''))[0], 'host': names.get(r['key'], ('', ''))[1], 'count': r['count']} for r in found], many=True).data)
 
-    @extend_schema(request=PurgeRequestSerializer, responses=PurgeResultSerializer)
+    @extend_schema(request=PurgeRequestSerializer, responses=PurgeResultSerializer, parameters=[GRANT])
     @action(detail=False, methods=['post'])
     def purge(self, request):
         """Delete old queries (not filtered by the list filters: it ages the whole log)."""
@@ -253,6 +255,8 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         qs = QueryLog.objects.filter(time__lt=timezone.now() - timedelta(hours=hours)) if hours else QueryLog.objects.all()
         if dry:
             count = qs.count()
+        elif (denied := need_grant(request, scope='log-purge')) is not None:  # the history is the evidence of what happened: not erased with a stolen token alone
+            return denied
         else:
             count, _ = qs.delete()
             rollup.purge(timezone.now() - timedelta(hours=hours) if hours else None)

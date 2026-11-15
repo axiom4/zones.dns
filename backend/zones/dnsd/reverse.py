@@ -3,7 +3,7 @@ import ipaddress
 
 from rest_framework import serializers
 
-from ..models import Record, Zone
+from ..models import Record, Zone, cname_conflict
 
 
 def cidr_to_zone(cidr):
@@ -59,6 +59,9 @@ def sync_ptrs(zone):
         if find_reverse_zone(ptr, zones=all_zones) != zone:
             continue
         name = ptr[: -len(zone.name) - 1]
+        if cname_conflict(zone, name, 'PTR'):  # the name is delegated with a CNAME (RFC 2317): no PTR next to it
+            skipped += 1
+            continue
         value = f'{r.fqdn}.'
         _, new = Record.objects.get_or_create(zone=zone, name=name, type='PTR', value=value, defaults={'ttl': r.ttl})
         created, skipped = created + new, skipped + (not new)
