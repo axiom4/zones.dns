@@ -34,8 +34,8 @@ server {
     listen [::]:80;
     server_name dns.example.lan wpad.*;
 
-    # WPAD (Proxy Auto-Discovery) and Proxy Root CA download work over plain HTTP on port 80 (required by OS WPAD clients).
-    location ~ ^/(wpad\.dat|proxy\.pac|proxy-ca\.crt)$ {
+    # WPAD (Proxy Auto-Discovery), Root CA and Apple profile work over plain HTTP on port 80 (required by OS WPAD clients).
+    location ~ ^/(wpad\.dat|proxy\.pac|proxy-ca\.crt|proxy\.mobileconfig)$ {
         proxy_pass http://dns_backend;
         proxy_http_version 1.1;
         proxy_set_header Connection "";
@@ -90,8 +90,8 @@ server {
     # Never serve hidden files (.env, .git...).
     location ~ /\. { deny all; }
 
-    # ---- API, Django admin, WPAD PAC and Proxy Root CA -> Django
-    location ~ ^/(api/|admin/|wpad\.dat$|proxy\.pac$|proxy-ca\.crt$) {
+    # ---- API, Django admin, WPAD PAC, Proxy Root CA and Apple profile -> Django
+    location ~ ^/(api/|admin/|wpad\.dat$|proxy\.pac$|proxy-ca\.crt$|proxy\.mobileconfig$) {
         limit_req zone=dns_login burst=15 nodelay;
         limit_req_status 429;
 

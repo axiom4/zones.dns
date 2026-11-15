@@ -4,7 +4,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from zones.security import admin_sso
 from zones import views as v
 from zones.views import EncryptedTokenView, LoginKeyView, TokenView
-from zones.views.dhcp import ProxyCaCertView, WpadView
+from zones.views.dhcp import ProxyCaCertView, ProxyMobileConfigView, WpadView
 from zones.views.doh import DohView
 
 urlpatterns = [
@@ -15,6 +15,7 @@ urlpatterns = [
     path('wpad.dat', WpadView.as_view()),
     path('proxy.pac', WpadView.as_view()),
     path('proxy-ca.crt', ProxyCaCertView.as_view()),
+    path('proxy.mobileconfig', ProxyMobileConfigView.as_view()),
     path('api/token/', TokenView.as_view()),
     path('api/token/encrypted/', EncryptedTokenView.as_view()),
     path('api/login-key/', LoginKeyView.as_view()),

@@ -98,8 +98,21 @@ class ProxyAndWpadTests(TestCase):
             self.assertIsNone(names.lease_hosts('wpad.home.lan', (True, 'home.lan')))
 
     def test_pac_file_generation_and_public_endpoints(self):
-        with override_settings(DHCP_SERVER='192.168.1.2', DHCP_DOMAIN='corp.lan', PROXY=True, PROXY_PORT=8888, DHCP_WPAD=True, PROXY_CUSTOM_RULES='@@intranet.corp.lan'):
-            r = self.client.get('/wpad.dat')
+        import plistlib
+        with override_settings(
+            ALLOWED_HOSTS=['dns.axiom4.net'],
+            SECURE_SSL_REDIRECT=True,
+            SECURE_REDIRECT_EXEMPT=[r'^(wpad\.dat|proxy\.pac|proxy-ca\.crt|proxy\.mobileconfig)$'],
+            DHCP_SERVER='192.168.1.2',
+            DHCP_DOMAIN='corp.lan',
+            DEFAULT_ZONE='axiom4.net',
+            PROXY=True,
+            PROXY_PORT=8888,
+            DHCP_WPAD=True,
+            PROXY_CUSTOM_RULES='@@intranet.corp.lan',
+        ):
+            # Works over plain HTTP even with Host: wpad.axiom4.net (not in ALLOWED_HOSTS) and SECURE_SSL_REDIRECT=True
+            r = self.client.get('/wpad.dat', HTTP_HOST='wpad.axiom4.net')
             self.assertEqual(r.status_code, 200)
             self.assertIn('application/x-ns-proxy-autoconfig', r['Content-Type'])
             text = r.content.decode()
@@ -107,9 +120,21 @@ class ProxyAndWpadTests(TestCase):
             self.assertIn('.corp.lan', text)
             self.assertIn('.intranet.corp.lan', text)
 
-            ca_resp = self.client.get('/proxy-ca.crt')
+            ca_resp = self.client.get('/proxy-ca.crt', HTTP_HOST='wpad.axiom4.net')
             self.assertEqual(ca_resp.status_code, 200)
             self.assertIn(b'BEGIN CERTIFICATE', ca_resp.content)
+
+            mc_resp = self.client.get('/proxy.mobileconfig', HTTP_HOST='wpad.axiom4.net')
+            self.assertEqual(mc_resp.status_code, 200)
+            self.assertEqual(mc_resp['Content-Type'], 'application/x-apple-aspen-config')
+            plist = plistlib.loads(mc_resp.content)
+            self.assertEqual(plist['PayloadContent'][0]['ProxyAutoConfigURLString'], 'http://192.168.1.2:8888/wpad.dat')
+
+            # wpad.axiom4.net (from DEFAULT_ZONE) also resolves in DNS
+            resolver._data = None
+            res = Resolver('127.0.0.1:9', log=None)
+            ans = res.resolve(DNSRecord.question('wpad.axiom4.net', 'A'), SimpleNamespace(client_address=('127.0.0.1', 0)))
+            self.assertEqual([str(rr.rdata) for rr in ans.rr], ['192.168.1.2'])
 
     def test_filter_rules_and_html_cleaning(self):
         s = dhcp.dhcp_settings(overrides={

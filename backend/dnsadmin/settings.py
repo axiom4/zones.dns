@@ -57,6 +57,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    'zones.views.dhcp.WpadMiddleware',  # /wpad.dat, /proxy.pac, /proxy-ca.crt, /proxy.mobileconfig work on plain HTTP and any Host: wpad.<domain>
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -147,6 +148,7 @@ if BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
     SECURE_SSL_REDIRECT = True  # nginx already redirects; this covers direct hits on the backend port
+    SECURE_REDIRECT_EXEMPT = [r'^(wpad\.dat|proxy\.pac|proxy-ca\.crt|proxy\.mobileconfig)$']  # OS WPAD clients fetch /wpad.dat over plain HTTP and refuse 301->HTTPS redirects
     SECURE_HSTS_SECONDS = 31536000
     # Off by default: browsers remember them for a year (preload: practically for ever). Turn on only if every subdomain is https-only.
     SECURE_HSTS_INCLUDE_SUBDOMAINS = os.environ.get('HSTS_INCLUDE_SUBDOMAINS', 'false').lower() in ('1', 'true', 'yes', 'on')

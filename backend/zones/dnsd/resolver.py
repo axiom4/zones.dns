@@ -107,7 +107,7 @@ def _load():
     _off_sources = frozenset(s for s, key in (('manual', PERSONAL_BLOCKS), ('list', PUBLIC_LISTS)) if st.get(key) == 'false')
     _regexes = () if 'manual' in _off_sources else _load_regexes()
     _dhcp_names = dhcp_leases._name_cfg()
-    _wpad_cfg = dhcp_leases._wpad_cfg()
+    _wpad_cfg = dhcp_leases._wpad_cfg(names)
     with _blocked_lock:
         _blocked.clear()
 

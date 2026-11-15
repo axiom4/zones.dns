@@ -183,7 +183,7 @@ class WpadView(View):
         if not ratelimit.allowed(client_ip):
             return HttpResponseForbidden('Forbidden')
         s = dhcp.dhcp_settings()
-        body = pac.build_pac(s, request_host=request.get_host())
+        body = pac.build_pac(s, request_host=request.META.get('HTTP_HOST', ''))
         resp = HttpResponse(body, content_type='application/x-ns-proxy-autoconfig; charset=utf-8')
         resp['Cache-Control'] = 'no-cache'
         return resp
@@ -200,6 +200,42 @@ class ProxyCaCertView(View):
         resp = HttpResponse(cert_pem, content_type='application/x-x509-ca-cert')
         resp['Content-Disposition'] = 'attachment; filename="zones-proxy-ca.crt"'
         return resp
+
+
+class ProxyMobileConfigView(View):
+    """Unauthenticated Apple Configuration Profile (/proxy.mobileconfig) for macOS and iOS (installs PAC proxy URL + Root CA)."""
+
+    def get(self, request):
+        client_ip = request.META.get('REMOTE_ADDR', '')
+        if not ratelimit.allowed(client_ip):
+            return HttpResponseForbidden('Forbidden')
+        s = dhcp.dhcp_settings()
+        cert_pem, _, _, _ = ca.ensure_ca()
+        body = pac.build_mobileconfig(s, ca_cert_pem=cert_pem, request_host=request.META.get('HTTP_HOST', ''))
+        resp = HttpResponse(body, content_type='application/x-apple-aspen-config')
+        resp['Content-Disposition'] = 'attachment; filename="zones-proxy.mobileconfig"'
+        return resp
+
+
+class WpadMiddleware:
+    """Serve /wpad.dat, /proxy.pac, /proxy-ca.crt and /proxy.mobileconfig before SecurityMiddleware and CommonMiddleware
+    so OS WPAD clients calling `http://wpad.<domain>/wpad.dat` over plain HTTP are neither 301-redirected to HTTPS nor rejected by ALLOWED_HOSTS."""
+
+    _ROUTES = {
+        '/wpad.dat': WpadView.as_view(),
+        '/proxy.pac': WpadView.as_view(),
+        '/proxy-ca.crt': ProxyCaCertView.as_view(),
+        '/proxy.mobileconfig': ProxyMobileConfigView.as_view(),
+    }
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        view = self._ROUTES.get(request.path)
+        if view is not None:
+            return view(request)
+        return self.get_response(request)
 
 
 class MacVendorView(APIView):

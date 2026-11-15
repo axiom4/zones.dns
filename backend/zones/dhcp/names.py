@@ -13,18 +13,25 @@ def _name_cfg():
     return bool(s.DHCP and s.DHCP_NAMES and s.DHCP_DOMAIN.strip('.')), s.DHCP_DOMAIN.strip('.').lower()
 
 
-def _wpad_cfg():
+def _wpad_cfg(extra_zones=()):
+    from django.conf import settings
+    from ..proxy import pac
     s = dhcp_settings()
-    domain = s.DHCP_DOMAIN.strip('.').lower()
-    server = s.DHCP_SERVER.strip()
-    on = bool((s.DHCP_WPAD or s.PROXY) and domain and server)
-    return on, domain, server
+    domains = {d for d in (s.DHCP_DOMAIN.strip('.').lower(), getattr(settings, 'DEFAULT_ZONE', '').strip('.').lower(), *extra_zones) if d and not d.endswith('.arpa')}
+    server = pac.server_ip_for(s)
+    on = bool((s.DHCP_WPAD or s.PROXY) and domains and server)
+    return on, frozenset(domains), server
 
 
 def wpad_hosts(qname, cfg=None):
-    """[(DHCP_SERVER, 60)] when qname is wpad.<DHCP_DOMAIN> and WPAD / Proxy is enabled, else None."""
-    on, domain, server = cfg or _wpad_cfg()
-    if on and qname.rstrip('.').lower() == f'wpad.{domain}':
+    """[(DHCP_SERVER, 60)] when qname is wpad.<DHCP_DOMAIN> or wpad.<DEFAULT_ZONE> and WPAD / Proxy is enabled, else None."""
+    on, domains, server = cfg or _wpad_cfg()
+    if not on:
+        return None
+    q = qname.rstrip('.').lower()
+    if isinstance(domains, str):
+        domains = (domains,) if domains else ()
+    if any(q == f'wpad.{d}' for d in domains):
         return [(server, 60)]
     return None
 

@@ -117,7 +117,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_bytes(403, 'text/html; charset=utf-8', body, {'X-Blocked-By': header_val})
 
     def _handle_local(self, s):
-        """Serve /wpad.dat, /proxy.pac and /ca.crt (/ca.pem) when requested directly from the proxy port."""
+        """Serve /wpad.dat, /proxy.pac, /ca.crt (/ca.pem) and /proxy.mobileconfig when requested directly from the proxy port."""
         path = self.path.partition('?')[0]
         if path in ('/wpad.dat', '/proxy.pac'):
             body = pac.build_pac(s, request_host=self.headers.get('Host', '')).encode('utf-8')
@@ -130,6 +130,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 'application/x-x509-ca-cert',
                 cert_pem.encode('utf-8'),
                 {'Content-Disposition': 'attachment; filename="zones-proxy-ca.crt"'},
+            )
+            return True
+        if path == '/proxy.mobileconfig':
+            cert_pem, _, _, _ = ca.ensure_ca()
+            body = pac.build_mobileconfig(s, ca_cert_pem=cert_pem, request_host=self.headers.get('Host', ''))
+            self._send_bytes(
+                200,
+                'application/x-apple-aspen-config',
+                body,
+                {'Content-Disposition': 'attachment; filename="zones-proxy.mobileconfig"'},
             )
             return True
         return False

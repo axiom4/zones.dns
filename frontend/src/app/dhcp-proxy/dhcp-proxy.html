@@ -5,6 +5,7 @@
   </div>
   <div class="actions">
     @if (info()?.pem) {
+      <a class="ghost" href="/proxy.mobileconfig" download="zones-proxy.mobileconfig">Apple Profile (.mobileconfig)</a>
       <button class="ghost" type="button" (click)="downloadCa()">Download Root CA (.crt)</button>
       <button class="ghost" type="button" (click)="regenerateCa()">Regenerate CA</button>
     }
@@ -15,7 +16,7 @@
 <form class="settings" (ngSubmit)="save()">
   <fieldset class="group">
     <legend>Proxy server &amp; DHCP auto-discovery (WPAD)</legend>
-    <p class="soft">When enabled, DHCPv4 sends option 252 (WPAD) and the DNS daemon resolves <code>wpad.&lt;domain&gt;</code> to the server IP so clients configure the proxy automatically.</p>
+    <p class="soft">When enabled, DHCPv4 sends option 252 (WPAD) and the DNS daemon resolves <code>wpad.&lt;domain&gt;</code> to the server IP. <b>macOS / iOS:</b> enable <i>Auto Proxy Discovery</i> in System Settings → Wi-Fi → Details… → Proxies, or install the one-click <b>Apple Profile (.mobileconfig)</b> above (sets up both the PAC proxy and the Root CA).</p>
     <div class="grid">
       <label class="check">
         <input type="checkbox" name="PROXY" [(ngModel)]="cfg().PROXY">
