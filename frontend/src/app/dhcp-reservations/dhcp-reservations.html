@@ -49,9 +49,9 @@
 
 <dialog #imp class="confirm wide" (click)="$event.target === imp ? imp.close() : null">
   <h3>Import reservations</h3>
-  <p class="soft">CSV, one per line: <code>mac,ip,hostname,note,enabled</code> (first line may be that header). Matched by MAC: existing ones are updated. Any error: nothing is changed.</p>
+  <p class="soft">CSV, one per line: <code>hostname,mac,ip</code> (optional: note, enabled). With a header line (<code>hostname,mac,ip</code>…) the columns can be in any order; without one the MAC and the IP are found by their look. Separator <code>,</code> <code>;</code> or tab. Matched by MAC: existing ones are updated. Any error: nothing is changed.</p>
   <input type="file" accept=".csv,.txt,text/csv,text/plain" (change)="pickFile($event)" aria-label="CSV file">
-  <textarea [(ngModel)]="importText" name="it" rows="9" placeholder="aa:bb:cc:dd:ee:ff,192.168.1.50,nas" aria-label="CSV content" (ngModelChange)="importResult.set(null)"></textarea>
+  <textarea [(ngModel)]="importText" name="it" rows="9" placeholder="nas,aa:bb:cc:dd:ee:ff,192.168.1.50" aria-label="CSV content" (ngModelChange)="importResult.set(null)"></textarea>
   <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Replace the existing reservations</label>
   @if (importResult(); as r) {
     <div class="result">

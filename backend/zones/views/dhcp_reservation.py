@@ -1,5 +1,6 @@
 import csv
 import io
+import re
 
 from django.db import transaction
 from django.http import HttpResponse
@@ -15,22 +16,38 @@ from ..serializers.dhcp_reservation import check_row
 from .zone import GRANT, need_grant
 
 COLUMNS = ['mac', 'ip', 'hostname', 'note', 'enabled']
+NAMES = {'mac': 'mac', 'mac address': 'mac', 'macaddress': 'mac', 'ip': 'ip', 'ip address': 'ip', 'ipaddress': 'ip', 'address': 'ip',
+         'hostname': 'hostname', 'host name': 'hostname', 'host': 'hostname', 'name': 'hostname', 'note': 'note', 'enabled': 'enabled'}
+HEADER_NAMES = set(NAMES)
+MAC_LIKE = re.compile(r'[0-9a-fA-F]{2}([:-]?[0-9a-fA-F]{2}){5}|[0-9a-fA-F]{4}(\.[0-9a-fA-F]{4}){2}')
+IP_LIKE = re.compile(r'\d{1,3}(\.\d{1,3}){3}')
 TRUE = ('1', 'true', 'yes', 'on', '')
 
 
 def import_rows(text, replace, dry_run):
     """The result of importing CSV text. Any error in any line: nothing is changed."""
     rows, errors = [], []
-    lines = [r for r in csv.reader(io.StringIO(text)) if r and any(c.strip() for c in r) and not r[0].lstrip().startswith('#')]
-    if lines and lines[0][0].strip().lower() == 'mac':
-        lines = lines[1:]  # header
+    first = next((l for l in text.splitlines() if l.strip()), '')
+    delim = next((d for d in (',', ';', '\t') if d in first), ',')  # Excel in many locales writes ';'
+    lines = [r for r in csv.reader(io.StringIO(text), delimiter=delim) if r and any(c.strip() for c in r) and not r[0].lstrip().startswith('#')]
+    cols = None
+    if lines and {c.strip().lower() for c in lines[0]} & HEADER_NAMES:  # header: columns in any order
+        cols = [NAMES.get(c.strip().lower()) for c in lines[0]]
+        lines = lines[1:]
     for n, r in enumerate(lines, 1):
-        r = [c.strip() for c in r] + [''] * 5
+        r = [c.strip() for c in r]
+        if cols:
+            d = {k: r[i] for i, k in enumerate(cols) if k and i < len(r)}
+        else:  # no header: the MAC and the address are found by their look, the rest is hostname, note, enabled in that order
+            mac = next((c for c in r if MAC_LIKE.fullmatch(c)), '')
+            ip = next((c for c in r if IP_LIKE.fullmatch(c)), '')
+            rest = [c for c in r if c not in (mac, ip)] + [''] * 3
+            d = {'mac': mac, 'ip': ip, 'hostname': rest[0], 'note': rest[1], 'enabled': rest[2]}
         try:
-            mac, ip, host = check_row(r[0], r[1], r[2])
-            rows.append((mac, ip, host, r[3][:255], r[4].lower() in TRUE))
+            mac, ip, host = check_row(d.get('mac', ''), d.get('ip', ''), d.get('hostname', '').split('.')[0])  # nas.lan -> nas
+            rows.append((mac, ip, host, d.get('note', '')[:255], d.get('enabled', '').lower() in TRUE))
         except ValueError as e:
-            errors.append(f'line {n} ({r[0]} {r[1]}): {e}')
+            errors.append(f'line {n} ({d.get("mac", "")} {d.get("ip", "")}): {e}')
     seen_mac, seen_ip = {}, {}
     for mac, ip, *_ in rows:
         if mac in seen_mac or ip in seen_ip:

@@ -56,6 +56,15 @@ class ReservationApiTests(TestCase):
         self.assertEqual(len(r['errors']), 2)
         self.assertFalse(DhcpReservation.objects.filter(mac='aa:bb:cc:dd:ee:09').exists())  # one bad line: nothing changed
 
+    def test_any_column_order_and_delimiter(self):
+        post = lambda t: self.api.post('/api/dhcp/reservations/import/', {'text': t}, format='json').json()
+        r = post('nas.lan,AA-BB-CC-DD-EE-01,192.168.1.50\ntv,aa:bb:cc:dd:ee:02,192.168.1.51\n')  # hostname, mac, ip, no header
+        self.assertEqual((r['created'], r['errors']), (2, []))
+        self.assertEqual(DhcpReservation.objects.get(mac='aa:bb:cc:dd:ee:01').hostname, 'nas')
+        r = post('IP Address;Host;MAC Address\n192.168.1.60;pc;aa:bb:cc:dd:ee:03\n')  # header, ';'
+        self.assertEqual((r['created'], r['errors']), (1, []))
+        self.assertEqual(DhcpReservation.objects.get(mac='aa:bb:cc:dd:ee:03').ip, '192.168.1.60')
+
     def test_replace_needs_the_second_factor(self):
         self.make('aa:bb:cc:dd:ee:01', '192.168.1.50')
         body = {'text': 'aa:bb:cc:dd:ee:07,192.168.1.70', 'replace': True}
