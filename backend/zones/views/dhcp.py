@@ -27,7 +27,7 @@ class DhcpLeasesView(APIView):
             qs4, qs6 = qs4.filter(expires__gt=now), qs6.filter(expires__gt=now)
         rows = [{'id': r.id, 'family': 4, 'kind': 'address', 'address': r.ip, 'client': r.mac or r.client, 'mac': r.mac, 'hostname': r.hostname, 'vendor': '', 'expires': r.expires, 'active': r.expires > now}
                 for r in qs4]
-        rows += [{'id': r.id, 'family': 6, 'kind': 'address' if r.kind in ('na', 'ta') else 'prefix', 'address': r.value, 'client': r.duid, 'mac': duid_mac(r.duid), 'hostname': '', 'vendor': '', 'expires': r.expires, 'active': r.expires > now}
+        rows += [{'id': r.id, 'family': 6, 'kind': 'address' if r.kind in ('na', 'ta') else 'prefix', 'address': r.value, 'client': r.duid, 'mac': r.mac or duid_mac(r.duid), 'hostname': r.hostname, 'vendor': '', 'expires': r.expires, 'active': r.expires > now}
                  for r in qs6]
         found = oui.lookup_many({r['mac'] for r in rows if r['mac']})
         names = {}  # a DHCPv6 client has no host name of its own here: the one its MAC gave to DHCPv4 (the newest lease) or to a reservation
@@ -37,7 +37,7 @@ class DhcpLeasesView(APIView):
             names[r['mac']] = r['hostname']
         for r in rows:
             r['vendor'] = oui.label(found[r['mac']]) if r['mac'] else ''
-            if r['family'] == 6:
+            if r['family'] == 6 and not r['hostname']:
                 r['hostname'] = names.get(r['mac'], '')
         if q:
             rows = [r for r in rows if q in f"{r['address']} {r['client']} {r['hostname']}".lower()]

@@ -19,7 +19,7 @@ from ..models import Dhcp6Lease, Dhcp6Reservation
 
 SOLICIT, ADVERTISE, REQUEST, CONFIRM, RENEW, REBIND, REPLY, RELEASE, DECLINE, RECONFIGURE, INFORMATION_REQUEST, RELAY_FORW, RELAY_REPL, LEASEQUERY, LEASEQUERY_REPLY = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 CLIENTID, SERVERID, IA_NA, IA_TA, IAADDR, ORO, PREFERENCE, AUTH, STATUS, RAPID, DNS, DOMAINS, IA_PD, IAPREFIX, REFRESH, INTERFACE_ID, RELAY_MSG, DNR = 1, 2, 3, 4, 5, 6, 7, 11, 13, 14, 23, 24, 25, 26, 32, 18, 9, 144
-RECONF_MSG, RECONF_ACCEPT = 19, 20
+RECONF_MSG, RECONF_ACCEPT, FQDN = 19, 20, 39
 LQ_QUERY, CLIENT_DATA, CLT_TIME, LQ_RELAY_DATA = 44, 45, 46, 47
 QUERY_BY_ADDRESS, QUERY_BY_CLIENTID = 1, 2
 SUCCESS, NOADDRS, NOBINDING, NOTONLINK, NOPREFIX, UNKNOWN_QUERY_TYPE, MALFORMED_QUERY, NOT_CONFIGURED = 0, 2, 3, 4, 6, 7, 8, 9
@@ -42,6 +42,33 @@ def duid_mac(duid):
     else:
         return ''
     return ':'.join(f'{b:02x}' for b in mac)
+
+
+def fqdn_host(value):
+    """The host name (one DNS label) in a Client FQDN option (RFC 4704): a flags byte, then the name in DNS wire format; '' when there is none."""
+    if len(value) < 3 or value[1] == 0 or value[1] > 63:
+        return ''
+    return dhcp.clean_hostname(value[2:2 + value[1]])
+
+
+def peer_mac(peer_ip, interface):
+    """The MAC address behind the link-local address a client wrote from: read from an EUI-64 address, else from the kernel's neighbour table (Linux `ip`).
+    '' when unknown (a relayed message, a privacy address that is not in the table yet: the next Renew finds it)."""
+    try:
+        addr = ipaddress.IPv6Address(str(peer_ip).split('%')[0])
+    except ValueError:
+        return ''
+    if not addr.is_link_local:
+        return ''
+    b = addr.packed
+    if b[11:13] == b'\xff\xfe':
+        return ':'.join(f'{x:02x}' for x in (b[8] ^ 2, b[9], b[10], b[13], b[14], b[15]))
+    cmd = ['ip', '-6', 'neigh', 'show', str(addr)] + (['dev', interface] if interface else [])
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=2).stdout.split()
+    except (OSError, subprocess.TimeoutExpired):
+        return ''
+    return out[out.index('lladdr') + 1].lower() if 'lladdr' in out and out.index('lladdr') + 1 < len(out) else ''
 
 
 def sync_pd_route(prefix, peer_ip=None, interface=None, add=True, enabled=None):
@@ -177,7 +204,7 @@ class Server6:
         self.duid = struct.pack('!H', 4) + uuid.uuid5(uuid.NAMESPACE_DNS, cfg.name).bytes  # DUID-UUID (RFC 6355): no hardware address needed
 
     # ---- messages
-    def handle(self, data, peer_ip=None):
+    def handle(self, data, peer_ip=None, relayed=False):
         """The reply to a client message or a Relay-forward, or None."""
         if data[:1] == bytes([RELAY_FORW]):
             return self._relay(data, 0)
@@ -200,6 +227,7 @@ class Server6:
         if not self.cfg.stateful or cid is None or not (3 <= len(cid) <= 130) or kind in (ADVERTISE, REPLY, RECONFIGURE, LEASEQUERY_REPLY):
             return None
         duid = cid.hex()
+        self._peer, self._host = (None if relayed else peer_ip), fqdn_host(first(FQDN) or b'')  # who wrote, and the name it gave: kept with the lease
         reconf_adv = option(RECONF_ACCEPT, b'') if RECONF_ACCEPT in o else b''
         reconf_rep = (reconf_adv + option(AUTH, dhcp.auth_key_body(duid))) if RECONF_ACCEPT in o else b''
         if kind == SOLICIT:
@@ -315,7 +343,7 @@ class Server6:
             return None
         inner = o[RELAY_MSG][0]
         relay_peer = str(ipaddress.IPv6Address(data[18:34]))
-        reply = self._relay(inner, depth + 1) if inner[:1] == bytes([RELAY_FORW]) else self.handle(inner, peer_ip=relay_peer)
+        reply = self._relay(inner, depth + 1) if inner[:1] == bytes([RELAY_FORW]) else self.handle(inner, peer_ip=relay_peer, relayed=True)
         if reply is None:
             return None
         out = bytes([RELAY_REPL]) + data[1:34] + option(RELAY_MSG, reply)
@@ -446,7 +474,15 @@ class Server6:
         Dhcp6Lease.objects.filter(value=value).exclude(duid=duid, iaid=iaid, kind=kind).delete()  # an expired lease of someone else
         cur = Dhcp6Lease.objects.filter(duid=duid, iaid=iaid, kind=kind, value=value, expires__gt=now).first()
         expires = max(cur.expires, now + timedelta(seconds=seconds)) if cur else now + timedelta(seconds=seconds)
-        Dhcp6Lease.objects.update_or_create(duid=duid, iaid=iaid, kind=kind, defaults={'value': value, 'expires': expires})
+        defaults = {'value': value, 'expires': expires}
+        if kind != 'pd':
+            known = Dhcp6Lease.objects.filter(duid=duid, iaid=iaid, kind=kind).values_list('mac', flat=True).first()
+            mac = known or duid_mac(duid) or (peer_mac(self._peer, self.cfg.interface) if getattr(self, '_peer', None) else '')
+            if mac:
+                defaults['mac'] = mac
+            if getattr(self, '_host', ''):
+                defaults['hostname'] = self._host
+        Dhcp6Lease.objects.update_or_create(duid=duid, iaid=iaid, kind=kind, defaults=defaults)
         if kind == 'pd' and seconds > OFFER_HOLD:
             sync_pd_route(value, peer_ip=peer_ip, interface=self.cfg.interface, add=True, enabled=self.cfg.pd_routes)
         return value

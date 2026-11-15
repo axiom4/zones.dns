@@ -7,6 +7,8 @@ class Dhcp6Lease(models.Model):
     iaid = models.PositiveBigIntegerField()
     kind = models.CharField(max_length=2)  # 'na' or 'pd'
     value = models.CharField(max_length=43, unique=True)  # the address, or the prefix as 2001:db8::/56
+    mac = models.CharField(max_length=17, blank=True)  # aa:bb:cc:dd:ee:ff when known: from the DUID, or from the link-local address the client wrote from
+    hostname = models.CharField(max_length=63, blank=True)  # from the Client FQDN option (39), when the client sends one
     expires = models.DateTimeField(db_index=True)
     updated = models.DateTimeField(auto_now=True)
 

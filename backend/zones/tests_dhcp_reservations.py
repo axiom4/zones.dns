@@ -186,6 +186,25 @@ class Reservation6CsvTests(TestCase):
         self.assertIn('00030001d83addbe4e69,2001:db8:1::10,cam,true', out)
 
 
+class Lease6IdentityTests(TestCase):
+    def test_mac_and_host_name_kept_with_the_lease(self):
+        from django.utils import timezone
+        from .dhcp.v6 import Config6, Server6, fqdn_host, peer_mac
+        from .models import Dhcp6Lease
+        self.assertEqual(peer_mac('fe80::7a6c:84ff:fea9:e428%eth0', 'eth0'), '78:6c:84:a9:e4:28')  # EUI-64: the MAC is in the address
+        self.assertEqual(peer_mac('2001:db8::1', 'eth0'), '')  # not link-local (a relay, or a global address)
+        self.assertEqual(fqdn_host(b'\x00' + bytes([14]) + b'Home-Assistant' + b'\x00'), 'home-assistant')
+        self.assertEqual(fqdn_host(b'\x00'), '')
+        cfg = Config6([ipaddress.IPv6Address('2001:db8::53')], ['lan'], [], 1200, ipaddress.IPv6Network('2001:db8:1::/64'),
+                      ipaddress.IPv6Address('2001:db8:1::100'), ipaddress.IPv6Address('2001:db8:1::101'), None, 56, name='t')
+        s = Server6(cfg)
+        s._peer, s._host = 'fe80::7a6c:84ff:fea9:e428%eth0', 'ha'
+        # a DUID-UUID (type 4) holds no MAC: the one of the link-local address is kept
+        s._take('na', '0004' + '6a4e9ff7c05012e80bc66101c269be65', 1, [], timezone.now(), 3600, False)
+        row = Dhcp6Lease.objects.get()
+        self.assertEqual((row.mac, row.hostname), ('78:6c:84:a9:e4:28', 'ha'))
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone
