@@ -1,4 +1,4 @@
-import { Component, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
 import { dhcpLeasesDestroy, dhcpReservationsList, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
@@ -22,7 +22,8 @@ export class DhcpPage {
   leases = signal<DhcpLease[]>([]);
   cfg = signal<DhcpSettings>({});
   saved = signal(false);
-  tab = signal<'leases' | 'reservations'>('leases');
+  tab = signal<'leases' | 'leases6' | 'reservations'>('leases');
+  shown = computed(() => this.leases().filter(l => l.family === (this.tab() === 'leases6' ? 6 : 4)));
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
   reserved = signal(new Set<string>()); // MACs and addresses that already have a reservation
   q = '';
@@ -57,7 +58,7 @@ export class DhcpPage {
   }
   watch(l: DhcpLease) { this.live()?.open(l.address); }
   pingOne(l: DhcpLease) { return this.ui.run(() => this.ping.once(l.address)); }
-  pingAll() { return this.ui.run(() => this.ping.run(this.leases().filter(l => l.active && l.kind === 'address').map(l => l.address))); }
+  pingAll() { return this.ui.run(() => this.ping.run(this.shown().filter(l => l.active && l.kind === 'address').map(l => l.address))); }
   isReserved(l: DhcpLease) { return this.reserved().has(l.client) || this.reserved().has(l.address); }
   when(iso: string) { return new Date(iso).toLocaleString(); }
   end(l: DhcpLease) {
