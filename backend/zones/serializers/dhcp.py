@@ -60,6 +60,8 @@ class DhcpPingResultSerializer(serializers.Serializer):
     address = serializers.CharField()
     up = serializers.BooleanField()
     ms = serializers.FloatField(allow_null=True, help_text='Round trip time')
+    ttl = serializers.IntegerField(allow_null=True, help_text='TTL (hop limit) of the reply')
+    bytes = serializers.IntegerField(allow_null=True, help_text='Size of the ICMP reply, like the first number of ping')
     error = serializers.CharField(allow_blank=True)
 
 

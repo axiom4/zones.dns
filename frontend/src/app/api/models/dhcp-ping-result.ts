@@ -3,11 +3,21 @@
 
 export interface DhcpPingResult {
   address: string;
+
+  /**
+   * Size of the ICMP reply, like the first number of ping
+   */
+  bytes: number | null;
   error: string;
 
   /**
    * Round trip time
    */
   ms: number | null;
+
+  /**
+   * TTL (hop limit) of the reply
+   */
+  ttl: number | null;
   up: boolean;
 }

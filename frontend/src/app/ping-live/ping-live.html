@@ -1,15 +1,9 @@
 <dialog #dlg class="confirm wide" (close)="stop()" (click)="$event.target === dlg ? dlg.close() : null">
   <h3>Ping {{ address() }}</h3>
-  <p class="soft">One echo per second until you close this window. {{ sent() }} sent, {{ got() }} received, {{ loss() }}% lost@if (min() != null) {; min {{ min() }} / avg {{ avg() }} / max {{ max() }} ms}.</p>
-  <ul class="records ping-list" aria-live="off">
-    @for (s of shown(); track s.n) {
-      <li [class.off]="!s.up">
-        <span class="rvalue">#{{ s.n }}</span>
-        <span class="pingr" [class.up]="s.up">{{ s.error || (s.up ? (s.ms ?? '?') + ' ms' : 'no answer') }}</span>
-      </li>
-    } @empty {
-      <li class="empty">Waiting for the first answer…</li>
-    }
-  </ul>
-  <div class="actions"><button class="primary" (click)="dlg.close()">Close</button></div>
+  <textarea #out class="ping-out" readonly rows="14" spellcheck="false" aria-label="Output of ping" [value]="text()"></textarea>
+  <div class="actions">
+    <button class="ghost" (click)="copy()">{{ copied() ? 'Copied' : 'Copy' }}</button>
+    @if (running()) { <button class="ghost" (click)="stop()">Stop</button> } @else { <button class="ghost" (click)="start()">Restart</button> }
+    <button class="primary" (click)="dlg.close()">Close</button>
+  </div>
 </dialog>

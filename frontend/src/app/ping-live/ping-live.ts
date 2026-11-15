@@ -1,9 +1,7 @@
 import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { Ping } from '../services/ping';
 
-interface Sample { n: number; up: boolean; ms: number | null; error: string }
-
-/** A window that pings one host every second until it is closed (open it with a double click on a Ping button). */
+/** A window that pings one host every second and prints what `ping` prints (iputils format), until Stop or Close. */
 @Component({
   selector: 'app-ping-live',
   templateUrl: './ping-live.html',
@@ -11,41 +9,75 @@ interface Sample { n: number; up: boolean; ms: number | null; error: string }
 export class PingLive {
   private ping = inject(Ping);
   private dlg = viewChild.required<ElementRef<HTMLDialogElement>>('dlg');
+  private out = viewChild<ElementRef<HTMLTextAreaElement>>('out');
   address = signal('');
-  samples = signal<Sample[]>([]);
+  lines = signal<string[]>([]);
+  running = signal(false);
+  copied = signal(false);
+  text = computed(() => this.lines().join('\n'));
   private run = 0; // a new window (or a close) ends the loop of the old one
-  shown = computed(() => [...this.samples()].reverse().slice(0, 30));
-  sent = computed(() => this.samples().length);
-  got = computed(() => this.samples().filter(s => s.up).length);
-  times = computed(() => this.samples().filter(s => s.up && s.ms != null).map(s => s.ms as number));
-  min = computed(() => this.times().length ? Math.min(...this.times()) : null);
-  max = computed(() => this.times().length ? Math.max(...this.times()) : null);
-  avg = computed(() => this.times().length ? Math.round(this.times().reduce((a, b) => a + b, 0) / this.times().length * 10) / 10 : null);
-  loss = computed(() => this.sent() ? Math.round(100 * (this.sent() - this.got()) / this.sent()) : 0);
+  private times: number[] = [];
+  private sent = 0;
+  private started = 0;
 
   open(address: string) {
     this.address.set(address);
-    this.samples.set([]);
     this.dlg().nativeElement.showModal();
+    this.start();
+  }
+  start() {
+    const address = this.address();
+    this.times = []; this.sent = 0; this.started = Date.now(); this.copied.set(false);
+    this.lines.set([`PING ${address} (${address}) 56(84) bytes of data.`]);
+    this.running.set(true);
     this.loop(address, ++this.run);
   }
-  stop() { this.run++; }
+  /** Like Ctrl-C: the loop ends and the statistics are printed. */
+  stop() {
+    if (!this.running()) return;
+    this.run++;
+    this.running.set(false);
+    this.add(...this.statistics());
+  }
+  async copy() {
+    try { await navigator.clipboard.writeText(this.text()); this.copied.set(true); } catch { this.out()?.nativeElement.select(); }
+  }
 
+  private statistics() {
+    const a = this.address(), got = this.times.length;
+    const loss = this.sent ? Math.round(100 * (this.sent - got) / this.sent) : 0;
+    const lines = ['', `--- ${a} ping statistics ---`, `${this.sent} packets transmitted, ${got} received, ${loss}% packet loss, time ${Date.now() - this.started}ms`];
+    if (got) {
+      const min = Math.min(...this.times), max = Math.max(...this.times), avg = this.times.reduce((x, y) => x + y, 0) / got;
+      const mdev = Math.sqrt(this.times.reduce((x, y) => x + (y - avg) ** 2, 0) / got);
+      lines.push(`rtt min/avg/max/mdev = ${[min, avg, max, mdev].map(v => v.toFixed(3)).join('/')} ms`);
+    }
+    return lines;
+  }
+  private add(...more: string[]) {
+    this.lines.update(l => [...l, ...more].slice(-3600));
+    setTimeout(() => { const t = this.out()?.nativeElement; if (t) t.scrollTop = t.scrollHeight; });
+  }
   private async loop(address: string, id: number) {
-    for (let n = 1; id === this.run; n++) {
-      const started = Date.now();
-      let s: Sample;
+    for (let seq = 1; id === this.run; seq++) {
+      const began = Date.now();
+      this.sent++;
       try {
         const r = await this.ping.once(address);
-        s = { n, up: r.up, ms: r.ms, error: r.error };
+        if (id !== this.run) return;
+        if (r.error) { this.sent--; this.add(`ping: ${r.error}`); this.run++; this.running.set(false); return; } // refused for good: asking again changes nothing
+        if (r.up) {
+          this.times.push(r.ms ?? 0);
+          this.add(`${r.bytes ?? 64} bytes from ${address}: icmp_seq=${seq}${r.ttl != null ? ` ttl=${r.ttl}` : ''} time=${(r.ms ?? 0).toFixed(2)} ms`);
+        } else this.add(`no answer yet for icmp_seq=${seq}`);
       } catch (e: any) {
-        s = { n, up: false, ms: null, error: e.error?.detail ?? e.message ?? 'Request failed.' };
-        if (e.status === 401 || e.status === 403) { if (id === this.run) this.samples.update(a => [...a, s]); return; } // signed out: stop asking
+        if (id !== this.run) return;
+        this.sent--;
+        this.add(`ping: ${e.error?.detail ?? e.message ?? 'request failed'}`);
+        this.run++; this.running.set(false);
+        return;
       }
-      if (id !== this.run) return;
-      this.samples.update(a => [...a, s].slice(-3600));
-      if (s.error && !s.up && s.error.startsWith('Only')) return; // refused for good: pinging again changes nothing
-      await new Promise(r => setTimeout(r, Math.max(0, 1000 - (Date.now() - started))));
+      await new Promise(r => setTimeout(r, Math.max(0, 1000 - (Date.now() - began))));
     }
   }
 }

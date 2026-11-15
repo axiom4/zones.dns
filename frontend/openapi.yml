@@ -2402,12 +2402,22 @@ components:
           format: double
           nullable: true
           description: Round trip time
+        ttl:
+          type: integer
+          nullable: true
+          description: TTL (hop limit) of the reply
+        bytes:
+          type: integer
+          nullable: true
+          description: Size of the ICMP reply, like the first number of ping
         error:
           type: string
       required:
       - address
+      - bytes
       - error
       - ms
+      - ttl
       - up
     DhcpReservation:
       type: object

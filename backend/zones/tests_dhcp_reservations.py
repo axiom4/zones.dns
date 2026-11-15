@@ -155,7 +155,7 @@ class VendorAndPingTests(TestCase):
         self.assertIn('Google', self.api.get('/api/dhcp/reservations/').json()[0]['vendor'])
 
     def test_ping_only_local_addresses(self):
-        with mock.patch('zones.netcheck.ping_one', side_effect=lambda ip: (str(ip) == '192.168.1.1', 1.5)) as p:
+        with mock.patch('zones.netcheck.ping_one', side_effect=lambda ip: (str(ip) == '192.168.1.1', 1.5, 64, 64)) as p:
             r = self.api.post('/api/dhcp/ping/', {'addresses': ['192.168.1.1', '192.168.1.2', '8.8.8.8', 'nas.lan', '-c5', 'fd00::1']}, format='json').json()
         self.assertEqual([(x['address'], x['up'], bool(x['error'])) for x in r],
                          [('192.168.1.1', True, False), ('192.168.1.2', False, False), ('8.8.8.8', False, True), ('nas.lan', False, True), ('-c5', False, True), ('fd00::1', False, False)])
@@ -203,9 +203,10 @@ class IcmpTests(TestCase):
         import ipaddress
 
         from . import netcheck
-        up, ms = netcheck.ping_one(ipaddress.ip_address('127.0.0.1'))
+        up, ms, ttl, size = netcheck.ping_one(ipaddress.ip_address('127.0.0.1'))
         self.assertTrue(up)
-        self.assertIsNotNone(ms)
-        with mock.patch('zones.netcheck._socket', side_effect=netcheck.Unavailable), mock.patch('zones.netcheck.ping_command', return_value=(True, 0.5)) as cmd:
-            self.assertEqual(netcheck.ping_one(ipaddress.ip_address('127.0.0.1')), (True, 0.5))  # no socket allowed: the ping program
+        self.assertEqual((ms is not None, size), (True, 64))  # 56 bytes of data + 8 of header, like ping
+        self.assertIn(ttl, (None, *range(1, 256)))
+        with mock.patch('zones.netcheck._socket', side_effect=netcheck.Unavailable), mock.patch('zones.netcheck.ping_command', return_value=(True, 0.5, 64, 64)) as cmd:
+            self.assertEqual(netcheck.ping_one(ipaddress.ip_address('127.0.0.1')), (True, 0.5, 64, 64))  # no socket allowed: the ping program
         self.assertTrue(cmd.called)
