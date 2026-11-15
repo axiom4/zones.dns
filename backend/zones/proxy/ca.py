@@ -11,6 +11,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from django.db import DatabaseError, transaction
 
 from ..models import DataVersion, Setting
 
@@ -84,9 +85,13 @@ def ensure_ca(regenerate=False):
             except ValueError:
                 pass
         cert_pem, key_pem, cert, key = _generate_ca()
-        Setting.objects.update_or_create(key=CA_CERT_KEY, defaults={'value': cert_pem})
-        Setting.objects.update_or_create(key=CA_PRIV_KEY, defaults={'value': key_pem})
-        DataVersion.bump()
+        try:
+            with transaction.atomic():
+                Setting.objects.update_or_create(key=CA_CERT_KEY, defaults={'value': cert_pem})
+                Setting.objects.update_or_create(key=CA_PRIV_KEY, defaults={'value': key_pem})
+                DataVersion.bump()
+        except DatabaseError:
+            pass  # migration 0037 not applied yet on PostgreSQL/MySQL: keep CA in memory until `manage.py migrate` is run
         _cached_ca = (cert_pem, key_pem, cert, key)
         _leaf_contexts.clear()
         return _cached_ca

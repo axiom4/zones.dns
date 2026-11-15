@@ -2,9 +2,9 @@ from django.db import models
 
 
 class Setting(models.Model):
-    """Switches that the GUI changes and the DNS daemon follows (a change raises DataVersion, see signals.py)."""
+    """Switches and settings that the GUI changes and the daemons follow (a change raises DataVersion, see signals.py)."""
     key = models.CharField(max_length=50, primary_key=True)
-    value = models.CharField(max_length=255, blank=True)
+    value = models.TextField(blank=True)
 
     @classmethod
     def flag(cls, key, default=True):
