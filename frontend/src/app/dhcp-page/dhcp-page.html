@@ -100,7 +100,7 @@
     <li [class.off]="!l.active">
       <span class="type" [attr.data-t]="l.family === 6 ? 'AAAA' : 'A'">{{ l.kind === 'prefix' ? 'PD' : 'v' + l.family }}</span>
       <span class="rname">{{ l.address }}@if (l.hostname) {<small class="note-t">{{ l.hostname }}</small>}</span>
-      <span class="rvalue" [title]="l.family === 6 ? 'DUID ' + l.client : ''">{{ l.mac || (l.client.length > 24 ? l.client.slice(0, 24) + '…' : l.client) }}@if (l.vendor) {<small class="note-t">{{ l.vendor }}</small>}</span>
+      <span class="rvalue" [title]="l.family === 6 ? 'DUID ' + l.client : ''">{{ l.mac || l.client }}@if (l.vendor) {<small class="note-t">{{ l.vendor }}</small>} @else if (l.family === 6 && !l.mac) {<small class="note-t">DUID</small>}</span>
       @if (ping.label(l.address); as p) { <span class="pingr" [class.up]="ping.results()[l.address]?.up">{{ p }}</span> }
       <span class="ttlv">{{ l.active ? 'until' : 'ended' }} {{ when(l.expires) }}</span>
       @if (l.kind === 'address') { <button class="mini" type="button" (click)="pingOne(l)" (dblclick)="watch(l)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + l.address">Ping</button> }
