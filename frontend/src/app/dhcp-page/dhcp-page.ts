@@ -1,5 +1,6 @@
-import { Component, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, computed, inject, input, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { dhcpLeasesDestroy, dhcpReservationsList, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
 import { DhcpLease, DhcpSettings } from '../api/models';
@@ -11,7 +12,7 @@ import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-dhcp-page',
-  imports: [FormsModule, DhcpReservations, PingLive],
+  imports: [FormsModule, RouterLink, DhcpReservations, PingLive],
   templateUrl: './dhcp-page.html',
 })
 export class DhcpPage {
@@ -22,7 +23,9 @@ export class DhcpPage {
   leases = signal<DhcpLease[]>([]);
   cfg = signal<DhcpSettings>({});
   saved = signal(false);
-  tab = signal<'leases' | 'leases6' | 'reservations'>('leases');
+  private router = inject(Router);
+  section = input('leases', { alias: 'tab' }); // the :tab of the route /dhcp/:tab
+  tab = computed(() => (['leases', 'leases6', 'reservations'].includes(this.section()) ? this.section() : 'leases'));
   shown = computed(() => this.leases().filter(l => l.family === (this.tab() === 'leases6' ? 6 : 4)));
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
   reserved = signal(new Set<string>()); // MACs and addresses that already have a reservation
@@ -54,7 +57,7 @@ export class DhcpPage {
   /** Make the address of a DHCPv4 lease fixed for its client: opens the reservations with the form filled in. */
   fix(l: DhcpLease) {
     this.reserve.set({ mac: l.client, ip: l.address, hostname: l.hostname });
-    this.tab.set('reservations');
+    this.router.navigate(['/dhcp', 'reservations']);
   }
   watch(l: DhcpLease) { this.live()?.open(l.address); }
   pingOne(l: DhcpLease) { return this.ui.run(() => this.ping.once(l.address)); }
