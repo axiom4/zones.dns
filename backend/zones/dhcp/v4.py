@@ -20,7 +20,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from ..dnsd import ddr
-from ..models import DhcpLease, Setting
+from ..models import DataVersion, DhcpLease, DhcpReservation, Setting
 
 MAGIC = b'\x63\x82\x53\x63'
 DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK, RELEASE, INFORM, FORCERENEW = 1, 2, 3, 4, 5, 6, 7, 8, 9
@@ -358,6 +358,19 @@ class Server:
         self.cfgs = cfgs if isinstance(cfgs, list) else [cfgs]
         self.cfg = self.cfgs[0]  # the network of this host
         self.probe = probe if probe is not None else (ping if self.cfg.probe else None)
+        self._base = [dict(c.reservations) for c in self.cfgs]  # the ones from DHCP_RESERVATIONS; the table of the GUI is added on top
+        self._seen, self.names = None, {}
+
+    def _refresh(self):
+        """Reservations made in the GUI take effect at once: reloaded when the data counter moves."""
+        ver = DataVersion.version()
+        if ver == self._seen:
+            return
+        rows = list(DhcpReservation.objects.filter(enabled=True))
+        for cfg, base in zip(self.cfgs, self._base):
+            cfg.reservations = {**base, **{r.mac: ipaddress.IPv4Address(r.ip) for r in rows if ipaddress.IPv4Address(r.ip) in cfg.network}}
+        self.names = {r.mac: r.hostname for r in rows if r.hostname}
+        self._seen = ver
 
     def _scope(self, req):
         """The Config for this client: the local network, or the one a relay agent (giaddr) is in; None = not ours."""
@@ -370,6 +383,7 @@ class Server:
         req = parse(data)
         if not req or not req['opts'].get(53):
             return None
+        self._refresh()
         cfg = self._scope(req)
         if cfg is None:
             return None
@@ -548,7 +562,7 @@ class Server:
         return None, False
 
     def _store(self, req, ip, seconds, now):
-        self._hold(req['client'], ip, seconds, now, self._hostname(req), req['mac'])
+        self._hold(req['client'], ip, seconds, now, self.names.get(req['mac']) or self._hostname(req), req['mac'])
 
     def _hold(self, key, ip, seconds, now, host='', mac=''):
         DhcpLease.objects.filter(ip=str(ip)).exclude(client=key).delete()  # an expired lease of someone else (_ok said it is free)

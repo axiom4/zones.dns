@@ -373,6 +373,180 @@ paths:
       responses:
         '204':
           description: No response body
+  /api/dhcp/reservations/:
+    get:
+      operationId: dhcp_reservations_list
+      description: Fixed DHCPv4 addresses by MAC.
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DhcpReservation'
+          description: ''
+    post:
+      operationId: dhcp_reservations_create
+      description: Fixed DHCPv4 addresses by MAC.
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DhcpReservationRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '201':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpReservation'
+          description: ''
+  /api/dhcp/reservations/{id}/:
+    get:
+      operationId: dhcp_reservations_retrieve
+      description: Fixed DHCPv4 addresses by MAC.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCP reservation.
+        required: true
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpReservation'
+          description: ''
+    put:
+      operationId: dhcp_reservations_update
+      description: Fixed DHCPv4 addresses by MAC.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCP reservation.
+        required: true
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DhcpReservationRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpReservation'
+          description: ''
+    patch:
+      operationId: dhcp_reservations_partial_update
+      description: Fixed DHCPv4 addresses by MAC.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCP reservation.
+        required: true
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedDhcpReservationRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpReservation'
+          description: ''
+    delete:
+      operationId: dhcp_reservations_destroy
+      description: Fixed DHCPv4 addresses by MAC.
+      parameters:
+      - in: path
+        name: id
+        schema:
+          type: integer
+        description: A unique integer value identifying this DHCP reservation.
+        required: true
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
+  /api/dhcp/reservations/export/:
+    get:
+      operationId: dhcp_reservations_export_retrieve
+      description: Every reservation as CSV (mac,ip,hostname,note,enabled).
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            text/csv:
+              schema:
+                type: string
+          description: ''
+  /api/dhcp/reservations/import/:
+    post:
+      operationId: dhcp_reservations_import_create
+      description: Add or update reservations from CSV (matched by MAC); with replace
+        the table is emptied first.
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DhcpReservationImportRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DhcpReservationImportResult'
+          description: ''
   /api/dhcp/settings/:
     get:
       operationId: dhcp_settings_retrieve
@@ -2151,6 +2325,97 @@ components:
       - hostname
       - id
       - kind
+    DhcpReservation:
+      type: object
+      properties:
+        id:
+          type: integer
+          readOnly: true
+        mac:
+          type: string
+          maxLength: 17
+        ip:
+          type: string
+          format: ipv4
+        hostname:
+          type: string
+          maxLength: 63
+        note:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
+        created:
+          type: string
+          format: date-time
+          readOnly: true
+      required:
+      - created
+      - id
+      - ip
+      - mac
+    DhcpReservationImportRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          minLength: 1
+          description: 'CSV: mac,ip,hostname,note,enabled (first line may be that
+            header)'
+          maxLength: 2000000
+        replace:
+          type: boolean
+          default: false
+          description: Delete every reservation first (needs a second factor when
+            the user has one)
+        dry_run:
+          type: boolean
+          default: false
+          description: Only count, change nothing
+      required:
+      - text
+    DhcpReservationImportResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        updated:
+          type: integer
+        skipped:
+          type: integer
+          description: Already present, same values
+        errors:
+          type: array
+          items:
+            type: string
+          description: When there are errors nothing is changed
+      required:
+      - created
+      - errors
+      - skipped
+      - updated
+    DhcpReservationRequest:
+      type: object
+      properties:
+        mac:
+          type: string
+          minLength: 1
+          maxLength: 17
+        ip:
+          type: string
+          format: ipv4
+          minLength: 1
+        hostname:
+          type: string
+          maxLength: 63
+        note:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
+      required:
+      - ip
+      - mac
     DhcpSettings:
       type: object
       properties:
@@ -2871,6 +3136,25 @@ components:
           type: string
           format: date-time
           nullable: true
+    PatchedDhcpReservationRequest:
+      type: object
+      properties:
+        mac:
+          type: string
+          minLength: 1
+          maxLength: 17
+        ip:
+          type: string
+          format: ipv4
+          minLength: 1
+        hostname:
+          type: string
+          maxLength: 63
+        note:
+          type: string
+          maxLength: 255
+        enabled:
+          type: boolean
     PatchedDhcpSettingsRequest:
       type: object
       properties:

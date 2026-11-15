@@ -3,11 +3,12 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
 import { dhcpLeasesDestroy, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
 import { DhcpLease, DhcpSettings } from '../api/models';
+import { DhcpReservations } from '../dhcp-reservations/dhcp-reservations';
 import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-dhcp-page',
-  imports: [FormsModule],
+  imports: [FormsModule, DhcpReservations],
   templateUrl: './dhcp-page.html',
 })
 export class DhcpPage {
@@ -17,6 +18,8 @@ export class DhcpPage {
   cfg = signal<DhcpSettings>({});
   showSettings = signal(false);
   saved = signal(false);
+  tab = signal<'leases' | 'reservations'>('leases');
+  reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
   q = '';
   all = false;
 
@@ -38,6 +41,11 @@ export class DhcpPage {
       this.cfg.set(await this.api.invoke(dhcpSettingsPartialUpdate, { body: this.cfg() }));
       this.saved.set(true);
     });
+  }
+  /** Make the address of a DHCPv4 lease fixed for its client: opens the reservations with the form filled in. */
+  fix(l: DhcpLease) {
+    this.reserve.set({ mac: l.client, ip: l.address, hostname: l.hostname });
+    this.tab.set('reservations');
   }
   when(iso: string) { return new Date(iso).toLocaleString(); }
   end(l: DhcpLease) {

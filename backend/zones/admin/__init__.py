@@ -1,4 +1,5 @@
 from .dhcp_lease import DhcpLeaseAdmin
+from .dhcp_reservation import DhcpReservationAdmin
 from .blocked_domain import PersonalBlockAdmin, PublicBlocklistAdmin
 from .ip_geo import IpGeoAdmin
 from .mfa import PasskeyAdmin, TotpDeviceAdmin
@@ -9,7 +10,7 @@ from .stat import DomainStatAdmin, GeoStatAdmin, StatCountAdmin
 from .static_host import StaticHostAdmin
 from .zone import ZoneAdmin
 
-__all__ = ['PasskeyAdmin', 'TotpDeviceAdmin', 'IpGeoAdmin', 'PersonalBlockAdmin', 'PublicBlocklistAdmin', 'QueryLogAdmin', 'RecordAdmin', 'SettingAdmin', 'StatCountAdmin', 'GeoStatAdmin', 'DomainStatAdmin', 'StaticHostAdmin', 'ZoneAdmin']
+__all__ = ['DhcpReservationAdmin', 'PasskeyAdmin', 'TotpDeviceAdmin', 'IpGeoAdmin', 'PersonalBlockAdmin', 'PublicBlocklistAdmin', 'QueryLogAdmin', 'RecordAdmin', 'SettingAdmin', 'StatCountAdmin', 'GeoStatAdmin', 'DomainStatAdmin', 'StaticHostAdmin', 'ZoneAdmin']
 
 
 from django.contrib import admin as _admin  # noqa: E402

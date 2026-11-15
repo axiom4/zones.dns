@@ -19,6 +19,10 @@ export type { DestinationNetwork } from './models/destination-network';
 export type { DestinationPoint } from './models/destination-point';
 export type { Destinations } from './models/destinations';
 export type { DhcpLease } from './models/dhcp-lease';
+export type { DhcpReservation } from './models/dhcp-reservation';
+export type { DhcpReservationImportRequest } from './models/dhcp-reservation-import-request';
+export type { DhcpReservationImportResult } from './models/dhcp-reservation-import-result';
+export type { DhcpReservationRequest } from './models/dhcp-reservation-request';
 export type { DhcpSettings } from './models/dhcp-settings';
 export type { Dmarc } from './models/dmarc';
 export type { DnsRecords } from './models/dns-records';
@@ -54,6 +58,7 @@ export type { PaginatedQueryLogGroupList } from './models/paginated-query-log-gr
 export type { PaginatedQueryLogList } from './models/paginated-query-log-list';
 export type { PasskeyInfo } from './models/passkey-info';
 export type { PatchedBlockedDomainRequest } from './models/patched-blocked-domain-request';
+export type { PatchedDhcpReservationRequest } from './models/patched-dhcp-reservation-request';
 export type { PatchedDhcpSettingsRequest } from './models/patched-dhcp-settings-request';
 export type { PatchedPersonalSwitchRequest } from './models/patched-personal-switch-request';
 export type { PatchedRecordRequest } from './models/patched-record-request';

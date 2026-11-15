@@ -606,3 +606,7 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
   .records.logs li.grp > :is(button.mini, a.mini) { min-width: 4rem; padding-inline: .5rem; }
 }
 .confirm.detail .actions { position: sticky; bottom: -1.75rem; margin: 0 -1.75rem -1.75rem; padding: .75rem 1.75rem 1.75rem; background: var(--surface); }  /* Close stays in view under a long WHOIS record */
+
+.subtabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+.subtabs button { background: none; border: 1px solid transparent; border-radius: 999px; padding: .4rem .9rem; font-weight: 700; color: inherit; opacity: .7; }
+.subtabs button.on { opacity: 1; border-color: currentColor; }
