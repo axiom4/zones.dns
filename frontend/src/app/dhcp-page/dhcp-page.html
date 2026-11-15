@@ -37,10 +37,10 @@
     <fieldset class="group">
       <legend>DHCPv4 · what clients receive</legend>
       <div class="grid">
-      <label class="f"><span>DNS servers</span><input name="DHCP_DNS" [(ngModel)]="cfg().DHCP_DNS" placeholder="empty = server IP" autocomplete="off"></label>
+      <label class="f"><span>DNS servers</span><input name="DHCP_DNS" [(ngModel)]="cfg().DHCP_DNS" placeholder="several: 192.168.1.2 1.1.1.1 (empty = server IP)" autocomplete="off"></label>
       <label class="f"><span>Domain</span><input name="DHCP_DOMAIN" [(ngModel)]="cfg().DHCP_DOMAIN" placeholder="lan" autocomplete="off"></label>
       <label class="f"><span>Search domains</span><input name="DHCP_SEARCH" [(ngModel)]="cfg().DHCP_SEARCH" placeholder="lan example.lan" autocomplete="off"></label>
-      <label class="f"><span>NTP servers</span><input name="DHCP_NTP" [(ngModel)]="cfg().DHCP_NTP" placeholder="" autocomplete="off"></label>
+      <label class="f"><span>NTP servers</span><input name="DHCP_NTP" [(ngModel)]="cfg().DHCP_NTP" placeholder="several: separated by spaces or commas" autocomplete="off"></label>
       <label class="f wide"><span>Static routes</span><input name="DHCP_ROUTES" [(ngModel)]="cfg().DHCP_ROUTES" placeholder="10.0.0.0/8=192.168.1.254" autocomplete="off"></label>
       <label class="f"><span>MTU</span><input type="number" name="DHCP_MTU" [(ngModel)]="cfg().DHCP_MTU" placeholder="0 = not sent" autocomplete="off"></label>
       <label class="check"><input type="checkbox" name="DHCP_DNR" [(ngModel)]="cfg().DHCP_DNR"> Announce encrypted DNS <small class=soft>(DNR, RFC 9463)</small></label>

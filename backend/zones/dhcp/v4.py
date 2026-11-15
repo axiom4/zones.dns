@@ -103,7 +103,7 @@ def dhcp_settings(base=None, overrides=None):
 
 
 def _ip_list(text):
-    return [ipaddress.IPv4Address(x) for x in text.replace(',', ' ').split()]
+    return [ipaddress.IPv4Address(x) for x in re.split(r'[\s,;]+', text.strip()) if x]  # spaces, commas or semicolons
 
 
 def _names(text):

@@ -116,6 +116,14 @@ class EnvImportTests(TestCase):
         self.assertEqual(dhcp_settings().DHCP_LEASE, 600)
 
 
+class DnsListTests(TestCase):
+    def test_several_dns_servers(self):
+        from .dhcp.v4 import scopes
+        for text in ('192.168.1.23,192.168.1.254', '192.168.1.23 192.168.1.254', '192.168.1.23, 192.168.1.254;'):
+            s = dhcp_settings(overrides={'DHCP': True, 'DHCP_SERVER': '192.168.1.23', 'DHCP_RANGE': '192.168.1.100-192.168.1.200', 'DHCP_DNS': text})
+            self.assertEqual([str(x) for x in scopes(s)[0].dns], ['192.168.1.23', '192.168.1.254'])
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone
