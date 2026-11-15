@@ -1,8 +1,15 @@
 """The IPv6 hosts this machine knows on the network (the kernel's neighbour table, `ip -6 neigh`): the ones that configured themselves (SLAAC) leave no DHCP lease."""
 import ipaddress
+import os
+import shutil
 import subprocess
 
 from ..models import Dhcp6Lease
+
+def ip_command():
+    """Path of `ip`: it lives in /sbin or /usr/sbin, which a service started by supervisor or systemd often has no PATH entry for. None when it is not installed."""
+    return shutil.which('ip') or next((p for p in ('/usr/sbin/ip', '/sbin/ip', '/usr/bin/ip', '/bin/ip') if os.access(p, os.X_OK)), None)
+
 
 GONE = {'FAILED', 'INCOMPLETE'}  # no link-layer address (yet) or the host did not answer
 
@@ -36,12 +43,17 @@ def kind(row, leased):
 
 
 def neighbors(interface=''):
-    """The parsed table, each row with its kind; [] when `ip` is not there (not Linux)."""
+    """The parsed table, each row with its kind. RuntimeError with the reason when `ip` is missing (not Linux) or fails."""
+    ip = ip_command()
+    if not ip:
+        raise RuntimeError('The ip command is not installed (this needs Linux, package iproute2).')
     try:
-        out = subprocess.run(['ip', '-6', 'neigh', 'show'] + (['dev', interface] if interface else []), capture_output=True, text=True, timeout=3).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return []
-    rows = parse(out)
+        done = subprocess.run([ip, '-6', 'neigh', 'show'] + (['dev', interface] if interface else []), capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f'ip -6 neigh failed: {e}')
+    if done.returncode:
+        raise RuntimeError(f'ip -6 neigh failed: {done.stderr.strip() or done.returncode}')
+    rows = parse(done.stdout)
     leased = set(Dhcp6Lease.objects.filter(kind__in=('na', 'ta')).values_list('value', flat=True))
     for r in rows:
         r['kind'] = kind(r, leased)

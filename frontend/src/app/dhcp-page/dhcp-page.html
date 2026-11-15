@@ -31,7 +31,7 @@
       <legend>DHCPv4 · network</legend>
       <p class="soft">Turn it on only after the router's own DHCP server is off. Saved settings apply at once: <code>rundhcp</code> restarts itself with them.</p>
       <div class="grid">
-      <label class="check"><input type="checkbox" name="DHCP" [(ngModel)]="cfg().DHCP"> DHCPv4 enabled</label>
+      <label class="check"><input type="checkbox" name="DHCP" [(ngModel)]="cfg().DHCP"> <span>DHCPv4 enabled</span></label>
       <label class="f"><span>Server IP</span><input name="DHCP_SERVER" [(ngModel)]="cfg().DHCP_SERVER" placeholder="192.168.1.2" autocomplete="off"></label>
       <label class="f"><span>Netmask</span><input name="DHCP_NETMASK" [(ngModel)]="cfg().DHCP_NETMASK" placeholder="255.255.255.0" autocomplete="off"></label>
       <label class="f"><span>Address range</span><input name="DHCP_RANGE" [(ngModel)]="cfg().DHCP_RANGE" placeholder="192.168.1.100-192.168.1.200" autocomplete="off"></label>
@@ -49,8 +49,8 @@
       <label class="f"><span>NTP servers</span><input name="DHCP_NTP" [(ngModel)]="cfg().DHCP_NTP" placeholder="several: separated by spaces or commas" autocomplete="off"></label>
       <label class="f wide"><span>Static routes</span><input name="DHCP_ROUTES" [(ngModel)]="cfg().DHCP_ROUTES" placeholder="10.0.0.0/8=192.168.1.254" autocomplete="off"></label>
       <label class="f"><span>MTU</span><input type="number" name="DHCP_MTU" [(ngModel)]="cfg().DHCP_MTU" placeholder="0 = not sent" autocomplete="off"></label>
-      <label class="check"><input type="checkbox" name="DHCP_DNR" [(ngModel)]="cfg().DHCP_DNR"> Announce encrypted DNS <small class=soft>(DNR, RFC 9463)</small></label>
-      <label class="check"><input type="checkbox" name="DHCP_NAMES" [(ngModel)]="cfg().DHCP_NAMES"> Answer lease names in DNS</label>
+      <label class="check"><input type="checkbox" name="DHCP_DNR" [(ngModel)]="cfg().DHCP_DNR"> <span>Announce encrypted DNS <small class=soft>(DNR, RFC 9463)</small></span></label>
+      <label class="check"><input type="checkbox" name="DHCP_NAMES" [(ngModel)]="cfg().DHCP_NAMES"> <span>Answer lease names in DNS</span></label>
       </div>
     </fieldset>
     <fieldset class="group">
@@ -61,14 +61,14 @@
       <label class="f"><span>PXE boot server</span><input name="DHCP_BOOT_SERVER" [(ngModel)]="cfg().DHCP_BOOT_SERVER" placeholder="" autocomplete="off"></label>
       <label class="f"><span>PXE boot file</span><input name="DHCP_BOOT_FILE" [(ngModel)]="cfg().DHCP_BOOT_FILE" placeholder="" autocomplete="off"></label>
       <label class="f"><span>Failover delay (s)</span><input type="number" name="DHCP_FAILOVER_SECS" [(ngModel)]="cfg().DHCP_FAILOVER_SECS" placeholder="0 = primary" autocomplete="off"></label>
-      <label class="check"><input type="checkbox" name="DHCP_PROBE" [(ngModel)]="cfg().DHCP_PROBE"> Probe an address before offering it <small class=soft>(ARP/ICMP)</small></label>
-      <label class="check"><input type="checkbox" name="DHCP_UNICAST" [(ngModel)]="cfg().DHCP_UNICAST"> Reply straight to the client MAC <small class=soft>(Linux, needs CAP_NET_RAW)</small></label>
+      <label class="check"><input type="checkbox" name="DHCP_PROBE" [(ngModel)]="cfg().DHCP_PROBE"> <span>Probe an address before offering it <small class=soft>(ARP/ICMP)</small></span></label>
+      <label class="check"><input type="checkbox" name="DHCP_UNICAST" [(ngModel)]="cfg().DHCP_UNICAST"> <span>Reply straight to the client MAC <small class=soft>(Linux, needs CAP_NET_RAW)</small></span></label>
       </div>
     </fieldset>
     <fieldset class="group">
       <legend>DHCPv6</legend>
       <div class="grid">
-      <label class="check"><input type="checkbox" name="DHCP6" [(ngModel)]="cfg().DHCP6"> DHCPv6 enabled</label>
+      <label class="check"><input type="checkbox" name="DHCP6" [(ngModel)]="cfg().DHCP6"> <span>DHCPv6 enabled</span></label>
       <label class="f"><span>Prefix</span><input name="DHCP6_PREFIX" [(ngModel)]="cfg().DHCP6_PREFIX" placeholder="2001:db8:1::/64" autocomplete="off"></label>
       <label class="f wide"><span>Address pool (IA_NA/IA_TA)</span><input name="DHCP6_POOL" [(ngModel)]="cfg().DHCP6_POOL" placeholder="first-last" autocomplete="off"></label>
       <label class="f"><span>Prefix delegation pool</span><input name="DHCP6_PD_POOL" [(ngModel)]="cfg().DHCP6_PD_POOL" placeholder="2001:db8:ff00::/40" autocomplete="off"></label>
@@ -76,17 +76,18 @@
       <label class="f"><span>DNS servers</span><input name="DHCP6_DNS" [(ngModel)]="cfg().DHCP6_DNS" placeholder="" autocomplete="off"></label>
       <label class="f"><span>Lease (seconds)</span><input type="number" name="DHCP6_LEASE" [(ngModel)]="cfg().DHCP6_LEASE" placeholder="" autocomplete="off"></label>
       <label class="f"><span>Preference (0-255)</span><input type="number" name="DHCP6_PREFERENCE" [(ngModel)]="cfg().DHCP6_PREFERENCE" placeholder="" autocomplete="off"></label>
-      <label class="check"><input type="checkbox" name="DHCP6_RAPID" [(ngModel)]="cfg().DHCP6_RAPID"> Rapid commit</label>
-      <label class="check"><input type="checkbox" name="DHCP6_PD_ROUTES" [(ngModel)]="cfg().DHCP6_PD_ROUTES"> Add kernel routes for delegated prefixes</label>
+      <label class="check"><input type="checkbox" name="DHCP6_RAPID" [(ngModel)]="cfg().DHCP6_RAPID"> <span>Rapid commit</span></label>
+      <label class="check"><input type="checkbox" name="DHCP6_PD_ROUTES" [(ngModel)]="cfg().DHCP6_PD_ROUTES"> <span>Add kernel routes for delegated prefixes</span></label>
       </div>
     </fieldset>
     <fieldset class="group">
       <legend>Router Advertisements</legend>
+      <p class="soft">Sent to all hosts on the link: DNS servers, search domain and, with an address pool, the “managed” flag that makes clients ask this server for an address. <b>Router lifetime above 0 tells clients to use this host as their IPv6 default gateway</b>: leave 0 unless it really routes IPv6.</p>
       <div class="grid">
-      <label class="check"><input type="checkbox" name="DHCP_RA" [(ngModel)]="cfg().DHCP_RA"> RA enabled</label>
+      <label class="check"><input type="checkbox" name="DHCP_RA" [(ngModel)]="cfg().DHCP_RA"> <span>RA enabled</span></label>
       <label class="f"><span>Interval (s)</span><input type="number" name="DHCP_RA_INTERVAL" [(ngModel)]="cfg().DHCP_RA_INTERVAL" placeholder="" autocomplete="off"></label>
       <label class="f"><span>Router lifetime (s)</span><input type="number" name="DHCP_RA_ROUTER_LIFETIME" [(ngModel)]="cfg().DHCP_RA_ROUTER_LIFETIME" placeholder="0 = not a router" autocomplete="off"></label>
-      <label class="check"><input type="checkbox" name="DHCP_RA_SLAAC" [(ngModel)]="cfg().DHCP_RA_SLAAC"> Let clients build an address (SLAAC)</label>
+      <label class="check"><input type="checkbox" name="DHCP_RA_SLAAC" [(ngModel)]="cfg().DHCP_RA_SLAAC"> <span>Let clients build an address (SLAAC)</span></label>
       </div>
     </fieldset>
     <div class="actions">

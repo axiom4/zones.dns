@@ -299,7 +299,7 @@ class NeighborTests(TestCase):
         DhcpLease.objects.create(client='k', ip='192.168.1.50', mac='90:09:d0:6b:05:eb', hostname='nas', expires=later)
         api = APIClient()
         api.force_authenticate(get_user_model().objects.create_user('staffn', password='x', is_staff=True))
-        with mock.patch('zones.dhcp.neighbors.subprocess.run', return_value=mock.Mock(stdout=self.OUT)):
+        with mock.patch('zones.dhcp.neighbors.ip_command', return_value='/sbin/ip'), mock.patch('zones.dhcp.neighbors.subprocess.run', return_value=mock.Mock(stdout=self.OUT, returncode=0)):
             rows = api.get('/api/dhcp/neighbors/').json()
         kinds = {r['address']: (r['kind'], r['hostname']) for r in rows}
         self.assertEqual(kinds['fd4c:61da:7888:bc1a::100'], ('dhcpv6', ''))
@@ -307,8 +307,10 @@ class NeighborTests(TestCase):
         self.assertEqual(kinds['fd4c:61da:7888:bc1a:aaaa:bbbb:cccc:dddd'], ('other', 'nas'))
         self.assertEqual(kinds['fe80::1'][0], 'link-local')
         self.assertEqual(rows[-1]['kind'], 'link-local')  # link-local last
-        with mock.patch('zones.dhcp.neighbors.subprocess.run', side_effect=FileNotFoundError):
-            self.assertEqual(api.get('/api/dhcp/neighbors/').json(), [])
+        with mock.patch('zones.dhcp.neighbors.ip_command', return_value=None):
+            r = api.get('/api/dhcp/neighbors/')
+            self.assertEqual(r.status_code, 503)
+            self.assertIn('ip command', r.json()['detail'])
 
 
 class Duid6Tests(TestCase):

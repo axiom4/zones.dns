@@ -620,6 +620,7 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 .settings .f span { font-weight: 700; font-size: .85rem; color: var(--muted); }
 .settings .f input { width: 100%; }
 .settings .check { align-self: center; white-space: normal; }
+.settings .check input { flex: none; }  /* a long label wraps in its span; the box keeps its size */
 @media (max-width: 600px) { .settings .f.wide { grid-column: auto; } }
 
 .settings-dialog { width: min(980px, 96vw); }

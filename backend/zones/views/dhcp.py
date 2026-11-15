@@ -30,8 +30,11 @@ def names_by_mac():
 class DhcpNeighborsView(APIView):
     @extend_schema(responses=DhcpNeighborSerializer(many=True))
     def get(self, request):
-        """The IPv6 hosts on the network that this machine knows (kernel neighbour table, Linux): also the ones that configured themselves with SLAAC and so have no lease. Empty where `ip` is missing."""
-        rows = neighbors(dhcp.dhcp_settings().DHCP_INTERFACE)
+        """The IPv6 hosts on the network that this machine knows (kernel neighbour table, Linux): also the ones that configured themselves with SLAAC and so have no lease. 503 where `ip` is missing or fails."""
+        try:
+            rows = neighbors(dhcp.dhcp_settings().DHCP_INTERFACE)
+        except RuntimeError as e:
+            return Response({'detail': str(e)}, status=status.HTTP_503_SERVICE_UNAVAILABLE)
         found, names = oui.lookup_many({r['mac'] for r in rows}), names_by_mac()
         for r in rows:
             r['vendor'], r['hostname'] = oui.label(found[r['mac']]), names.get(r['mac'], '')

@@ -16,6 +16,7 @@ from django.utils import timezone
 from ..dnsd import ddr
 from . import v4 as dhcp
 from ..models import Dhcp6Lease, Dhcp6Reservation
+from .neighbors import ip_command
 
 SOLICIT, ADVERTISE, REQUEST, CONFIRM, RENEW, REBIND, REPLY, RELEASE, DECLINE, RECONFIGURE, INFORMATION_REQUEST, RELAY_FORW, RELAY_REPL, LEASEQUERY, LEASEQUERY_REPLY = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15
 CLIENTID, SERVERID, IA_NA, IA_TA, IAADDR, ORO, PREFERENCE, AUTH, STATUS, RAPID, DNS, DOMAINS, IA_PD, IAPREFIX, REFRESH, INTERFACE_ID, RELAY_MSG, DNR = 1, 2, 3, 4, 5, 6, 7, 11, 13, 14, 23, 24, 25, 26, 32, 18, 9, 144
@@ -63,7 +64,10 @@ def peer_mac(peer_ip, interface):
     b = addr.packed
     if b[11:13] == b'\xff\xfe':
         return ':'.join(f'{x:02x}' for x in (b[8] ^ 2, b[9], b[10], b[13], b[14], b[15]))
-    cmd = ['ip', '-6', 'neigh', 'show', str(addr)] + (['dev', interface] if interface else [])
+    ip = ip_command()
+    if not ip:
+        return ''
+    cmd = [ip, '-6', 'neigh', 'show', str(addr)] + (['dev', interface] if interface else [])
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=2).stdout.split()
     except (OSError, subprocess.TimeoutExpired):
@@ -76,7 +80,7 @@ def sync_pd_route(prefix, peer_ip=None, interface=None, add=True, enabled=None):
     on = dhcp.dhcp_settings().DHCP6_PD_ROUTES if enabled is None else enabled
     if not on:
         return False
-    cmd = ['ip', '-6', 'route', 'replace' if add else 'del', str(prefix)]
+    cmd = [ip_command() or 'ip', '-6', 'route', 'replace' if add else 'del', str(prefix)]
     if add and peer_ip:
         cmd += ['via', str(peer_ip).split('%')[0]]
     iface = interface or dhcp.dhcp_settings().DHCP_INTERFACE
