@@ -7,6 +7,7 @@ class DhcpLeaseSerializer(serializers.Serializer):
     kind = serializers.ChoiceField(choices=['address', 'prefix'])
     address = serializers.CharField(help_text='The address, or the delegated prefix')
     client = serializers.CharField(help_text='MAC address (DHCPv4) or DUID (DHCPv6)')
+    mac = serializers.CharField(allow_blank=True, help_text='MAC address; for DHCPv6 the one inside the DUID (types 1 and 3), empty for the other DUIDs')
     hostname = serializers.CharField(allow_blank=True)
     vendor = serializers.CharField(allow_blank=True, help_text='Maker of the network card (from the MAC address), empty if unknown')
     expires = serializers.DateTimeField()

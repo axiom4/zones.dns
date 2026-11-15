@@ -7,7 +7,7 @@ from django.test import TestCase, override_settings
 from rest_framework.test import APIClient
 
 from .dhcp.v4 import Config, Server, dhcp_settings
-from .models import DataVersion, DhcpLease, DhcpReservation, MacVendor, Setting
+from .models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, MacVendor, Setting
 
 NET = dict(DHCP=True, DHCP_SERVER='192.168.1.2', DHCP_NETMASK='255.255.255.0', DHCP_RANGE='192.168.1.100-192.168.1.110')
 A = ipaddress.IPv4Address
@@ -114,6 +114,24 @@ class EnvImportTests(TestCase):
         self.assertEqual(Setting.objects.get(key='dhcp:DHCP_ROUTER').value, '10.0.0.1')
         self.assertEqual(dhcp_settings().DHCP6_POOL, 'fd00::100-fd00::1ff')
         self.assertEqual(dhcp_settings().DHCP_LEASE, 600)
+
+
+class Duid6Tests(TestCase):
+    def test_mac_from_duid_and_names_from_dhcp4(self):
+        from django.utils import timezone
+        from .views.dhcp import duid_mac
+        llt, ll = '00010001' + '2b3c4d5e' + 'd83addbe4e69', '00030001' + 'd83addbe4e69'
+        self.assertEqual(duid_mac(llt), 'd8:3a:dd:be:4e:69')
+        self.assertEqual(duid_mac(ll), 'd8:3a:dd:be:4e:69')
+        self.assertEqual(duid_mac('0002' + '00000000' + 'aabb'), '')  # DUID-EN: no MAC
+        self.assertEqual(duid_mac('zz'), '')
+        later = timezone.now() + timezone.timedelta(hours=1)
+        DhcpLease.objects.create(client='x', ip='192.168.1.101', mac='d8:3a:dd:be:4e:69', hostname='pi', expires=later)
+        Dhcp6Lease.objects.create(duid=llt, iaid=1, kind='na', value='fd00::101', expires=later)
+        c = APIClient()
+        c.force_authenticate(get_user_model().objects.create_user('u6', password='x', is_staff=True))
+        row = next(r for r in c.get('/api/dhcp/leases/').json() if r['family'] == 6)
+        self.assertEqual((row['mac'], row['hostname']), ('d8:3a:dd:be:4e:69', 'pi'))
 
 
 class SettingsReloadTests(TestCase):

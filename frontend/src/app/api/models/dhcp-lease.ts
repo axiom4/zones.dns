@@ -25,6 +25,11 @@ export interface DhcpLease {
   kind: KindEnum;
 
   /**
+   * MAC address; for DHCPv6 the one inside the DUID (types 1 and 3), empty for the other DUIDs
+   */
+  mac: string;
+
+  /**
    * Maker of the network card (from the MAC address), empty if unknown
    */
   vendor: string;

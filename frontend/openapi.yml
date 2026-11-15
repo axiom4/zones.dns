@@ -2356,6 +2356,10 @@ components:
         client:
           type: string
           description: MAC address (DHCPv4) or DUID (DHCPv6)
+        mac:
+          type: string
+          description: MAC address; for DHCPv6 the one inside the DUID (types 1 and
+            3), empty for the other DUIDs
         hostname:
           type: string
         vendor:
@@ -2376,6 +2380,7 @@ components:
       - hostname
       - id
       - kind
+      - mac
       - vendor
     DhcpPingRequestRequest:
       type: object
