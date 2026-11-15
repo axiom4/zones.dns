@@ -224,6 +224,30 @@ class Dns6NamesTests(TestCase):
         self.assertIsNone(lease_ptr(ptr('fd00::300')))
 
 
+class Dns6OnlyLeaseTests(TestCase):
+    def ask(self, name, qtype):
+        from types import SimpleNamespace
+
+        from dnslib import DNSRecord
+
+        from .dnsd.resolver import Resolver
+        return Resolver('127.0.0.1:9', log=None).resolve(DNSRecord.question(name, qtype), SimpleNamespace(client_address=('127.0.0.1', 0)))
+
+    @override_settings(DHCP=True, DHCP_DOMAIN='lan', DHCP_NAMES=True, DNS_AUTHORITATIVE=False)
+    def test_name_with_only_v6_leases_is_not_answered_empty_for_a(self):
+        from django.utils import timezone
+
+        from .dnsd import resolver
+        from .models import Dhcp6Lease
+        resolver._data = None
+        resolver._dhcp_names = (True, 'lan')
+        Dhcp6Lease.objects.create(duid='0004aa', iaid=1, kind='na', value='fd00::100', hostname='ha', expires=timezone.now() + timezone.timedelta(hours=1))
+        aaaa = self.ask('ha.lan', 'AAAA')
+        self.assertEqual((aaaa.header.aa, [str(r.rdata) for r in aaaa.rr]), (1, ['fd00::100']))
+        a = self.ask('ha.lan', 'A')  # no IPv4 among its leases: the name goes on to the upstream, which may know it
+        self.assertEqual(a.header.rcode, 2)  # SERVFAIL: it was forwarded to the (unreachable) upstream, not answered empty
+
+
 class Duid6Tests(TestCase):
     def test_mac_from_duid_and_names_from_dhcp4(self):
         from django.utils import timezone
