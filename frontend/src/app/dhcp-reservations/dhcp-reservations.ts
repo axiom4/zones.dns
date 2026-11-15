@@ -3,6 +3,7 @@ import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
 import { dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservationsExportRetrieve, dhcpReservationsImportCreate, dhcpReservationsList, dhcpReservationsPartialUpdate } from '../api/functions';
 import { DhcpReservation, DhcpReservationImportResult } from '../api/models';
+import { byIp } from '../lib/ip';
 import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 
@@ -24,7 +25,8 @@ export class DhcpReservations {
   filter = signal('');
   shown = computed(() => {
     const q = this.filter().trim().toLowerCase();
-    return q ? this.items().filter(r => `${r.mac} ${r.ip} ${r.hostname ?? ''} ${r.note ?? ''}`.toLowerCase().includes(q)) : this.items();
+    const rows = q ? this.items().filter(r => `${r.mac} ${r.ip} ${r.hostname ?? ''} ${r.note ?? ''}`.toLowerCase().includes(q)) : this.items();
+    return [...rows].sort((a, b) => byIp(a.ip, b.ip));
   });
   draft = empty();
   editing = signal<number | null>(null);

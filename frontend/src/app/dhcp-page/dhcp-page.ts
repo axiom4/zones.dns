@@ -1,8 +1,9 @@
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { dhcpLeasesDestroy, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
+import { dhcpLeasesDestroy, dhcpReservationsList, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
 import { DhcpLease, DhcpSettings } from '../api/models';
+import { byIp } from '../lib/ip';
 import { DhcpReservations } from '../dhcp-reservations/dhcp-reservations';
 import { Ui } from '../services/ui';
 
@@ -20,6 +21,7 @@ export class DhcpPage {
   saved = signal(false);
   tab = signal<'leases' | 'reservations'>('leases');
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
+  reserved = signal(new Set<string>()); // MACs and addresses that already have a reservation
   q = '';
   all = false;
 
@@ -27,11 +29,13 @@ export class DhcpPage {
 
   load() {
     return this.ui.run(async () => {
-      const [leases, cfg] = await Promise.all([
+      const [leases, cfg, res] = await Promise.all([
         this.api.invoke(dhcpLeasesList, { q: this.q || undefined, all: this.all || undefined }),
         this.api.invoke(dhcpSettingsRetrieve),
+        this.api.invoke(dhcpReservationsList),
       ]);
-      this.leases.set(leases);
+      this.leases.set([...leases].sort((a, b) => byIp(a.address, b.address)));
+      this.reserved.set(new Set(res.flatMap(r => [r.mac, r.ip])));
       this.cfg.set(cfg);
     });
   }
@@ -47,6 +51,7 @@ export class DhcpPage {
     this.reserve.set({ mac: l.client, ip: l.address, hostname: l.hostname });
     this.tab.set('reservations');
   }
+  isReserved(l: DhcpLease) { return this.reserved().has(l.client) || this.reserved().has(l.address); }
   when(iso: string) { return new Date(iso).toLocaleString(); }
   end(l: DhcpLease) {
     this.ui.ask(`End the lease of ${l.address}?`, 'The address is free again. The client keeps using it until it renews, and is then told it cannot.', () =>
