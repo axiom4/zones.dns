@@ -646,3 +646,8 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 .vendor-hint { align-self: center; }
 
 .confirm textarea.ping-out { font: 12.5px/1.45 var(--mono); white-space: pre; overflow: auto; background: #14111f; color: #d9f2d9; resize: vertical; min-height: 12rem; }
+@media (max-width: 600px) {
+  .confirm textarea.ping-out { font-size: 11px; min-height: 0; height: min(52dvh, 22rem); margin: .5rem 0 0; padding: .5rem; }
+  .confirm:has(.ping-out) h3 { font-size: 1rem; overflow-wrap: anywhere; }
+  .confirm:has(.ping-out) .actions { display: grid; grid-template-columns: repeat(3, 1fr); margin-top: .75rem; }  /* three equal buttons, easy to hit with a thumb */
+}
