@@ -15,9 +15,10 @@ import zlib
 
 from django.conf import settings
 from django.db import DatabaseError, connections
+from dnslib import DNSRecord, QTYPE
 
 from ..dhcp import v4 as dhcp
-from ..dnsd import ratelimit
+from ..dnsd import ratelimit, resolver
 from ..models import DataVersion
 from . import ca, filter as pfilter, pac
 
@@ -33,6 +34,46 @@ _dns_inflight = {}  # (host, allow_loopback) -> threading.Lock (singleflight ded
 _DNS_TTL = 600.0
 _DNS_NEG_TTL = 120.0
 _DNS_MAX = 8192
+
+_proxy_resolver = None
+_proxy_resolver_lock = threading.Lock()
+
+
+def _get_proxy_resolver():
+    global _proxy_resolver
+    if _proxy_resolver is None:
+        with _proxy_resolver_lock:
+            if _proxy_resolver is None:
+                _proxy_resolver = resolver.Resolver(settings.UPSTREAM_DNS, log=None)
+    return _proxy_resolver
+
+
+def _resolve_hostname_direct(clean_host):
+    """Resolve `clean_host` in-process via `zones.dnsd.resolver` (internal zones, static hosts, shared Redis cache, and UPSTREAM_DNS)
+    without calling `socket.getaddrinfo()`, so the proxy never sends loopback DNS queries from 127.0.0.1 to rundns."""
+    if clean_host == 'localhost':
+        return [(socket.AF_INET, '127.0.0.1')]
+    try:
+        if resolver._data is None or (time.monotonic() - resolver._data_checked) >= 1.0:
+            pfilter.run_on_db_pool(resolver._snapshot)
+        sh = resolver.static_hosts(clean_host)
+        if sh:
+            return [(socket.AF_INET6 if ':' in ip else socket.AF_INET, ip) for ip, _ in sh]
+        loc = resolver.lookup(clean_host, 'A')
+        if loc:
+            recs, _ = loc
+            ips = [(socket.AF_INET, r.value) for r in recs if r.type == 'A']
+            if ips:
+                return ips
+    except Exception:
+        pass
+    res = _get_proxy_resolver()
+    for qtype, fam, rtype in (('A', socket.AF_INET, QTYPE.A), ('AAAA', socket.AF_INET6, QTYPE.AAAA)):
+        reply, _ = res.forward(DNSRecord.question(clean_host, qtype))
+        ips = [(fam, str(rr.rdata)) for rr in reply.rr if rr.rtype == rtype]
+        if ips:
+            return ips
+    return []
 
 _mitm_lock = threading.Lock()
 _mitm_failed = OrderedDict()  # (client_ip, host) -> expires_at (auto-fallback to CONNECT tunnel when a client/app rejects MITM TLS)
@@ -187,24 +228,15 @@ def _resolve_target(host, port, allow_loopback=False):
                     raise OSError(f'Cannot resolve {host} (cached negative)')
                 return cached[1], (cached[2], int(port))
         try:
-            try:
-                infos = socket.getaddrinfo(clean_host, port, socket.AF_INET, socket.SOCK_STREAM)
-            except OSError:
-                try:
-                    infos = socket.getaddrinfo(clean_host, port, socket.AF_INET6, socket.SOCK_STREAM)
-                except OSError:
-                    with _dns_lock:
-                        _dns_cache[key] = (time.monotonic() + _DNS_NEG_TTL, None, None)
-                    raise
-            if not infos:
+            addrs = _resolve_hostname_direct(clean_host)
+            if not addrs:
                 with _dns_lock:
                     _dns_cache[key] = (time.monotonic() + _DNS_NEG_TTL, None, None)
                 raise OSError(f'Cannot resolve {host}')
-            for family, _, _, _, sockaddr in infos:
-                ip_str = sockaddr[0]
+            for _, ip_str in addrs:
                 if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback):
                     raise PermissionError(f'Target address {ip_str} is not allowed through the proxy')
-            res_family, res_ip = infos[0][0], infos[0][4][0]
+            res_family, res_ip = addrs[0]
             with _dns_lock:
                 _dns_cache[key] = (time.monotonic() + _DNS_TTL, res_family, res_ip)
                 if len(_dns_cache) > _DNS_MAX:
