@@ -28,9 +28,27 @@ _cfg_version = None
 _CFG_CHECK_INTERVAL = 1.0
 
 _dns_lock = threading.Lock()
-_dns_cache = OrderedDict()  # (host, port, allow_loopback) -> (expires_at, family, addr)
-_DNS_TTL = 120.0
-_DNS_MAX = 4096
+_dns_cache = OrderedDict()  # (host, allow_loopback) -> (expires_at, family, ip_str)
+_dns_inflight = {}  # (host, allow_loopback) -> threading.Lock (singleflight deduplication for concurrent lookups of the same host)
+_DNS_TTL = 600.0
+_DNS_MAX = 8192
+
+
+class _ResolvedHTTPSConnection(HTTPSConnection):
+    """HTTPSConnection that connects to an already-resolved IP address (avoiding a second getaddrinfo call) while preserving SNI/hostname verification."""
+
+    def __init__(self, host, port, resolved_addr, family=socket.AF_INET, **kwargs):
+        super().__init__(host, port, **kwargs)
+        self._resolved_addr = resolved_addr
+        self._family = family
+
+    def connect(self):
+        sock = socket.socket(self._family, socket.SOCK_STREAM)
+        _set_nodelay(sock)
+        sock.settimeout(self.timeout)
+        sock.connect(self._resolved_addr)
+        server_hostname = self._tunnel_host if self._tunnel_host else self.host
+        self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
 
 
 def _set_nodelay(sock):
@@ -99,29 +117,59 @@ def _is_forbidden_target_ip(ip_str, allow_loopback=False):
 
 
 def _resolve_target(host, port, allow_loopback=False):
-    """Resolve `host` (with an in-memory TTL cache) and verify none of its addresses are forbidden internal/loopback targets."""
-    key = (host, int(port), bool(allow_loopback))
+    """Resolve `host` (with a 5-minute in-memory cache, IPv4-first to avoid duplicate A+AAAA queries) and check SSRF rules."""
+    clean_host = host.strip('[]')
+    try:
+        ip_obj = ipaddress.ip_address(clean_host)
+        ip_str = str(ip_obj)
+        if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback):
+            raise PermissionError(f'Target address {ip_str} is not allowed through the proxy')
+        fam = socket.AF_INET6 if ip_obj.version == 6 else socket.AF_INET
+        return fam, (ip_str, int(port))
+    except ValueError:
+        pass
+
+    key = (clean_host, bool(allow_loopback))
     now = time.monotonic()
     with _dns_lock:
         cached = _dns_cache.get(key)
         if cached is not None:
             if cached[0] > now:
                 _dns_cache.move_to_end(key)
-                return cached[1], cached[2]
+                return cached[1], (cached[2], int(port))
             del _dns_cache[key]
-    infos = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
-    if not infos:
-        raise OSError(f'Cannot resolve {host}')
-    for family, _, _, _, sockaddr in infos:
-        ip_str = sockaddr[0]
-        if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback):
-            raise PermissionError(f'Target address {ip_str} is not allowed through the proxy')
-    res_family, res_addr = infos[0][0], infos[0][4][:2]
-    with _dns_lock:
-        _dns_cache[key] = (now + _DNS_TTL, res_family, res_addr)
-        if len(_dns_cache) > _DNS_MAX:
-            _dns_cache.popitem(last=False)
-    return res_family, res_addr
+        host_lock = _dns_inflight.get(key)
+        if host_lock is None:
+            host_lock = threading.Lock()
+            _dns_inflight[key] = host_lock
+
+    with host_lock:
+        now = time.monotonic()
+        with _dns_lock:
+            cached = _dns_cache.get(key)
+            if cached is not None and cached[0] > now:
+                _dns_cache.move_to_end(key)
+                return cached[1], (cached[2], int(port))
+        try:
+            try:
+                infos = socket.getaddrinfo(clean_host, port, socket.AF_INET, socket.SOCK_STREAM)
+            except OSError:
+                infos = socket.getaddrinfo(clean_host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+            if not infos:
+                raise OSError(f'Cannot resolve {host}')
+            for family, _, _, _, sockaddr in infos:
+                ip_str = sockaddr[0]
+                if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback):
+                    raise PermissionError(f'Target address {ip_str} is not allowed through the proxy')
+            res_family, res_ip = infos[0][0], infos[0][4][0]
+            with _dns_lock:
+                _dns_cache[key] = (time.monotonic() + _DNS_TTL, res_family, res_ip)
+                if len(_dns_cache) > _DNS_MAX:
+                    _dns_cache.popitem(last=False)
+            return res_family, (res_ip, int(port))
+        finally:
+            with _dns_lock:
+                _dns_inflight.pop(key, None)
 
 
 def _decompress(data, encoding):
@@ -277,7 +325,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            _, resolved_addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
+            resolved_family, resolved_addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
         except PermissionError:
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
             return
@@ -310,7 +358,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             else:
                 if target_scheme == 'https':
                     ctx = self.server.upstream_ssl_context or ssl.create_default_context()
-                    conn = HTTPSConnection(host, port, timeout=20, context=ctx)
+                    conn = _ResolvedHTTPSConnection(host, port, resolved_addr=resolved_addr, family=resolved_family, timeout=20, context=ctx)
                 else:
                     conn = HTTPConnection(resolved_addr[0], resolved_addr[1], timeout=20)
                 conn.request(self.command, path_query, body=req_body, headers=fwd_headers)
@@ -418,7 +466,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
 
         allow_domains, _, _, _ = pfilter.parse_custom_rules(getattr(s, 'PROXY_CUSTOM_RULES', ''))
-        use_mitm = bool(getattr(s, 'PROXY_HTTPS_MITM', False)) and not pfilter.is_domain_allowed(host, allow_domains)
+        use_mitm = bool(getattr(s, 'PROXY_HTTPS_MITM', False)) and not pfilter.is_mitm_bypassed(host, allow_domains)
 
         if use_mitm:
             self.send_response(200, 'Connection Established')
