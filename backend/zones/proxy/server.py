@@ -205,14 +205,18 @@ def _resolve_target(host, port, allow_loopback=False):
 
 def _decompress(data, encoding):
     enc = (encoding or '').strip().lower()
-    if enc == 'gzip' or enc == 'x-gzip':
+    if enc in ('', 'identity'):
+        if data.startswith(b'\x1f\x8b'):
+            return gzip.decompress(data)
+        return data
+    if enc in ('gzip', 'x-gzip'):
         return gzip.decompress(data)
     if enc == 'deflate':
         try:
             return zlib.decompress(data)
         except zlib.error:
             return zlib.decompress(data, -zlib.MAX_WBITS)
-    return data
+    raise ValueError(f'Unsupported Content-Encoding: {enc}')
 
 
 class ProxyServer(ThreadingMixIn, HTTPServer):
@@ -367,12 +371,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         content_len = int(self.headers.get('Content-Length', '0') or 0)
         req_body = self.rfile.read(content_len) if content_len > 0 else None
 
+        filter_enabled = bool(getattr(s, 'PROXY_BLOCK_ADS', True) or getattr(s, 'PROXY_BLOCK_POPUPS', True))
         fwd_headers = {}
         for k, v in self.headers.items():
-            if k.lower() not in HOP_BY_HOP:
-                fwd_headers[k] = v
+            kl = k.lower()
+            if kl in HOP_BY_HOP or kl == 'host':
+                continue
+            if kl == 'accept-encoding' and filter_enabled:
+                continue
+            fwd_headers[k] = v
         fwd_headers['Host'] = f'{host}:{port}' if port not in (80, 443) else host
-        if getattr(s, 'PROXY_BLOCK_ADS', True) or getattr(s, 'PROXY_BLOCK_POPUPS', True):
+        if filter_enabled:
             fwd_headers['Accept-Encoding'] = 'gzip, deflate'
 
         conn_header_val = 'keep-alive' if keep_alive else 'close'
@@ -401,18 +410,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 ctype = resp.getheader('Content-Type', '') or ''
                 cenc = resp.getheader('Content-Encoding', '') or ''
                 clen_hdr = resp.getheader('Content-Length')
-                if 'text/html' not in ctype.lower() and clen_hdr and clen_hdr.isdigit():
-                    # Stream non-HTML responses with known Content-Length directly without buffering in RAM
+                low_ctype = ctype.lower()
+                if 'text/html' not in low_ctype and (
+                    (clen_hdr and clen_hdr.isdigit()) or 'text/event-stream' in low_ctype
+                ):
+                    # Stream non-HTML responses with known Content-Length and real-time SSE streams directly
+                    stream_keep_alive = keep_alive and bool(clen_hdr and clen_hdr.isdigit())
                     self.send_response(status_code, reason)
                     for k, v in resp.getheaders():
                         if k.lower() not in HOP_BY_HOP:
                             self.send_header(k, v)
-                    self.send_header('Connection', conn_header_val)
+                    self.send_header('Connection', 'keep-alive' if stream_keep_alive else 'close')
                     self.end_headers()
                     if self.command != 'HEAD':
-                        while chunk := resp.read(65536):
+                        read_fn = getattr(resp, 'read1', None) or resp.read
+                        while chunk := read_fn(65536):
                             self.wfile.write(chunk)
-                    self.close_connection = not keep_alive
+                            if 'text/event-stream' in low_ctype:
+                                self.wfile.flush()
+                    self.close_connection = not stream_keep_alive
                     return
                 raw_body = resp.read()
                 out_headers = [

@@ -19,6 +19,12 @@ from .proxy.server import ProxyHandler, _mitm_failed, cached_proxy_settings, is_
 
 
 def _fake_fetcher(scheme, host, port, method, path, body, headers):
+    if path == '/br-page':
+        # Verify lowercase accept-encoding was stripped and replaced with gzip, deflate
+        ae_keys = [k for k in headers if k.lower() == 'accept-encoding']
+        assert ae_keys == ['Accept-Encoding'] and headers['Accept-Encoding'] == 'gzip, deflate'
+        fake_brotli = b'\x8b\x13\x80\xff\xfe\xfd\x00\x99\xa0\xb1\xc2\xd3\xe4\xf5'
+        return 200, 'OK', [('Content-Type', 'text/html; charset=utf-8'), ('Content-Encoding', 'br')], fake_brotli
     if path == '/gzip-page':
         raw = (
             b'<!doctype html><html><head><title>News</title>'
@@ -216,6 +222,14 @@ class ProxyAndWpadTests(TestCase):
         self.assertIn('id="zones-popup-blocker"', text)
         self.assertIn('id="zones-adblock-css"', text)
         self.assertIn('<h1>Hello</h1>', text)
+
+        # 3b. Upstream Brotli/Zstd response or lowercase accept-encoding is never corrupted into replacement chars
+        resp_br = _run_proxy_session(
+            b'GET http://127.0.0.1/br-page HTTP/1.1\r\nHost: 127.0.0.1\r\naccept-encoding: gzip, deflate, br, zstd\r\n\r\n',
+            make_server_ns(),
+        )
+        self.assertIn(b'Content-Encoding: br\r\n', resp_br)
+        self.assertTrue(resp_br.endswith(b'\x8b\x13\x80\xff\xfe\xfd\x00\x99\xa0\xb1\xc2\xd3\xe4\xf5'))
 
         # 4. HTTPS CONNECT to blocked domain is rejected with 403 without needing MITM
         resp = _run_proxy_session(b'CONNECT ads.badtracker.example:443 HTTP/1.1\r\nHost: ads.badtracker.example:443\r\n\r\n', make_server_ns())

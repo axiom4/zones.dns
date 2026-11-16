@@ -225,6 +225,9 @@ def filter_html(html_bytes, content_type='', host='', s=None):
     if is_domain_allowed(h, allow_domains):
         return html_bytes
 
+    if b'\x00' in html_bytes[:1024]:
+        raise ValueError('Binary content cannot be filtered as HTML')
+
     m_cs = _CHARSET_RX.search(content_type or '')
     charset = m_cs.group(1) if m_cs else 'utf-8'
     try:
@@ -232,6 +235,9 @@ def filter_html(html_bytes, content_type='', host='', s=None):
     except LookupError:
         charset = 'utf-8'
         text = html_bytes.decode('utf-8', errors='replace')
+
+    if text.count('\ufffd') > max(8, len(text) // 20):
+        raise ValueError('Compressed or non-text payload cannot be filtered as HTML')
 
     def _clean_script(match):
         attrs, body = match.group(1), match.group(2)
