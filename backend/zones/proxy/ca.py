@@ -175,6 +175,10 @@ def leaf_context(host):
     leaf_pem, key_pem = build_leaf_pem(host)
     ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     ctx.minimum_version = ssl.TLSVersion.TLSv1_2
+    try:
+        ctx.set_alpn_protocols(['http/1.1'])
+    except NotImplementedError:
+        pass
     with tempfile.NamedTemporaryFile('w', suffix='.pem', delete=True) as cf, tempfile.NamedTemporaryFile('w', suffix='.key', delete=True) as kf:
         cf.write(leaf_pem)
         cf.flush()

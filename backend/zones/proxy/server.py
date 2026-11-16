@@ -33,6 +33,35 @@ _dns_inflight = {}  # (host, allow_loopback) -> threading.Lock (singleflight ded
 _DNS_TTL = 600.0
 _DNS_MAX = 8192
 
+_mitm_lock = threading.Lock()
+_mitm_failed = OrderedDict()  # (client_ip, host) -> expires_at (auto-fallback to CONNECT tunnel when a client/app rejects MITM TLS)
+_MITM_FAIL_TTL = 1800.0
+_MITM_FAIL_MAX = 8192
+
+
+def is_mitm_failed(client_ip, host):
+    """True when `(client_ip, host)` recently failed a MITM TLS handshake (e.g. certificate pinning or missing CA on client)."""
+    key = (client_ip, host)
+    now = time.monotonic()
+    with _mitm_lock:
+        exp = _mitm_failed.get(key)
+        if exp is None:
+            return False
+        if exp > now:
+            _mitm_failed.move_to_end(key)
+            return True
+        del _mitm_failed[key]
+        return False
+
+
+def record_mitm_failure(client_ip, host):
+    """Remember that `(client_ip, host)` rejected the MITM certificate so subsequent connections use direct CONNECT passthrough."""
+    key = (client_ip, host)
+    with _mitm_lock:
+        _mitm_failed[key] = time.monotonic() + _MITM_FAIL_TTL
+        if len(_mitm_failed) > _MITM_FAIL_MAX:
+            _mitm_failed.popitem(last=False)
+
 
 class _ResolvedHTTPSConnection(HTTPSConnection):
     """HTTPSConnection that connects to an already-resolved IP address (avoiding a second getaddrinfo call) while preserving SNI/hostname verification."""
@@ -81,6 +110,8 @@ def cached_proxy_settings(base=None, force=False):
                 ver, fresh = pfilter.run_on_db_pool(_load_cfg_from_db, base or settings, force or _cfg_data is None, _cfg_version)
                 if fresh is not None:
                     _cfg_data = fresh
+                    with _mitm_lock:
+                        _mitm_failed.clear()
                 _cfg_version = ver
             except DatabaseError:
                 if _cfg_data is None:
@@ -288,7 +319,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return True
         return False
 
-    def _proxy_http(self, scheme=None, default_host=None, default_port=None):
+    def _proxy_http(self, scheme=None, default_host=None, default_port=None, keep_alive=False):
         if not self._client_allowed():
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden')
             return
@@ -344,6 +375,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if getattr(s, 'PROXY_BLOCK_ADS', True) or getattr(s, 'PROXY_BLOCK_POPUPS', True):
             fwd_headers['Accept-Encoding'] = 'gzip, deflate'
 
+        conn_header_val = 'keep-alive' if keep_alive else 'close'
         conn = None
         try:
             fetcher = getattr(self.server, 'http_fetcher', None)
@@ -375,12 +407,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     for k, v in resp.getheaders():
                         if k.lower() not in HOP_BY_HOP:
                             self.send_header(k, v)
-                    self.send_header('Connection', 'close')
+                    self.send_header('Connection', conn_header_val)
                     self.end_headers()
                     if self.command != 'HEAD':
                         while chunk := resp.read(65536):
                             self.wfile.write(chunk)
-                    self.close_connection = True
+                    self.close_connection = not keep_alive
                     return
                 raw_body = resp.read()
                 out_headers = [
@@ -408,11 +440,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if cenc:
             self.send_header('Content-Encoding', cenc)
         self.send_header('Content-Length', str(len(raw_body)))
-        self.send_header('Connection', 'close')
+        self.send_header('Connection', conn_header_val)
         self.end_headers()
         if self.command != 'HEAD' and raw_body:
             self.wfile.write(raw_body)
-        self.close_connection = True
+        self.close_connection = not keep_alive
 
     def do_GET(self):
         self._proxy_http()
@@ -465,8 +497,13 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
             return
 
+        client_ip = self.client_address[0]
         allow_domains, _, _, _ = pfilter.parse_custom_rules(getattr(s, 'PROXY_CUSTOM_RULES', ''))
-        use_mitm = bool(getattr(s, 'PROXY_HTTPS_MITM', False)) and not pfilter.is_mitm_bypassed(host, allow_domains)
+        use_mitm = (
+            bool(getattr(s, 'PROXY_HTTPS_MITM', False))
+            and not pfilter.is_domain_allowed(host, allow_domains)
+            and not is_mitm_failed(client_ip, host)
+        )
 
         if use_mitm:
             self.send_response(200, 'Connection Established')
@@ -476,11 +513,15 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 ctx = ca.leaf_context(host)
                 with ctx.wrap_socket(self.connection, server_side=True) as tls_client:
                     mitm_handler = _MitmHandler(tls_client, self.client_address, self.server, host=host, port=port)
-                    mitm_handler.handle_one_request()
+                    mitm_handler.handle_requests()
+                    if mitm_handler.tls_handshake_failed:
+                        record_mitm_failure(client_ip, host)
                     try:
                         tls_client.unwrap()
                     except Exception:
                         pass
+            except (ssl.SSLError, OSError):
+                record_mitm_failure(client_ip, host)
             except Exception:
                 pass
             self.close_connection = True
@@ -537,26 +578,45 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
 
 class _MitmHandler(ProxyHandler):
-    """Handles decrypted HTTP/1.1 requests inside an HTTPS MITM tunnel."""
+    """Handles decrypted HTTP/1.1 requests (with Keep-Alive) inside an HTTPS MITM tunnel."""
 
     def __init__(self, connection, client_address, server, host, port):
         self._mitm_host = host
         self._mitm_port = port
+        self.handled_requests = 0
+        self.tls_handshake_failed = False
         self.request = connection
         self.connection = connection
         self.client_address = client_address
         self.server = server
         self.setup()
 
-    def handle_one_request(self):
+    def handle_requests(self):
+        self.close_connection = False
         try:
-            self.raw_requestline = self.rfile.readline(65537)
-            if not self.raw_requestline or len(self.raw_requestline) > 65536:
-                return
-            if not self.parse_request():
-                return
-            self._proxy_http(scheme='https', default_host=self._mitm_host, default_port=self._mitm_port)
-            self.wfile.flush()
+            while not self.close_connection and self.handled_requests < 64:
+                if self.handled_requests > 0:
+                    self.connection.settimeout(15)
+                self.raw_requestline = self.rfile.readline(65537)
+                if not self.raw_requestline:
+                    if self.handled_requests == 0:
+                        self.tls_handshake_failed = True
+                    return
+                if len(self.raw_requestline) > 65536 or not self.parse_request():
+                    return
+                self.handled_requests += 1
+                conn_hdr = (self.headers.get('Connection') or '').lower()
+                keep_alive = conn_hdr != 'close' and self.request_version >= 'HTTP/1.1'
+                self._proxy_http(
+                    scheme='https',
+                    default_host=self._mitm_host,
+                    default_port=self._mitm_port,
+                    keep_alive=keep_alive,
+                )
+                self.wfile.flush()
+        except ssl.SSLError:
+            if self.handled_requests == 0:
+                self.tls_handshake_failed = True
         except Exception:
             pass
         finally:

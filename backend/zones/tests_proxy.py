@@ -15,7 +15,7 @@ from .dnsd import resolver
 from .dnsd.resolver import Resolver
 from .models import BlockedDomain, DataVersion, Setting
 from .proxy import ca, filter as pfilter
-from .proxy.server import ProxyHandler, cached_proxy_settings
+from .proxy.server import ProxyHandler, _mitm_failed, cached_proxy_settings, is_mitm_failed
 
 
 def _fake_fetcher(scheme, host, port, method, path, body, headers):
@@ -242,6 +242,7 @@ class ProxyAndWpadTests(TestCase):
         t.join(timeout=5)
 
         # 6. HTTPS CONNECT with MITM=True performs TLS handshake with dynamically signed cert and filters HTTPS HTML
+        _mitm_failed.clear()
         mitm_enabled['on'] = True
         c_sock, s_sock = socket.socketpair()
         srv_ns = make_server_ns()
@@ -272,6 +273,41 @@ class ProxyAndWpadTests(TestCase):
         self.assertIn('id="zones-popup-blocker"', mitm_resp)
         self.assertIn('id="zones-adblock-css"', mitm_resp)
         self.assertIn('Real article content', mitm_resp)
+        self.assertFalse(is_mitm_failed('127.0.0.1', '127.0.0.1'))
+
+        # 7. Dynamic adaptive MITM fallback: if a client/app rejects the MITM TLS handshake (pinning or missing CA),
+        #    the proxy automatically remembers (client_ip, host) and switches the next connection to direct CONNECT passthrough
+        c_sock2, s_sock2 = socket.socketpair()
+        t2 = threading.Thread(target=lambda: (ProxyHandler(s_sock2, ('10.0.0.99', 54322), srv_ns), s_sock2.close()), daemon=True)
+        t2.start()
+        c_sock2.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
+        banner2 = b''
+        while b'\r\n\r\n' not in banner2:
+            banner2 += c_sock2.recv(1024)
+        self.assertIn(b'200 Connection Established', banner2)
+        c_sock2.close()  # simulate client aborting TLS handshake immediately upon seeing MITM certificate
+        t2.join(timeout=5)
+        self.assertTrue(is_mitm_failed('10.0.0.99', '127.0.0.1'))
+
+        # Next connection from 10.0.0.99 to 127.0.0.1 automatically uses direct CONNECT tunnel even with MITM=True
+        up2_a, up2_b = socket.socketpair()
+        def _echo_up2():
+            data = up2_b.recv(1024)
+            up2_b.sendall(b'AUTO-BYPASS:' + data)
+            up2_b.close()
+        threading.Thread(target=_echo_up2, daemon=True).start()
+        c_sock3, s_sock3 = socket.socketpair()
+        srv_ns2 = make_server_ns(tunnel_factory=lambda h, p: up2_a)
+        t3 = threading.Thread(target=lambda: (ProxyHandler(s_sock3, ('10.0.0.99', 54323), srv_ns2), s_sock3.close()), daemon=True)
+        t3.start()
+        c_sock3.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
+        banner3 = c_sock3.recv(1024)
+        self.assertIn(b'200 Connection Established', banner3)
+        c_sock3.sendall(b'pinned-client')
+        self.assertEqual(c_sock3.recv(1024), b'AUTO-BYPASS:pinned-client')
+        c_sock3.close()
+        t3.join(timeout=5)
+        _mitm_failed.clear()
 
     def test_proxy_api_endpoints(self):
         user = get_user_model().objects.create_user('admin_p', password='x', is_staff=True)

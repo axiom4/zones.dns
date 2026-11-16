@@ -159,19 +159,6 @@ def parse_custom_rules(raw_rules):
     return allow_domains, url_patterns, global_css, domain_css
 
 
-# Domains with strict OS/browser Certificate Pinning or captive-portal/push checks:
-# they are still checked against ad/tracker blocklists in check_request(), but bypass TLS MITM
-# re-signing so background daemons do not fail TLS handshakes and enter infinite DNS retry loops.
-MITM_BYPASS_DOMAINS = frozenset({
-    'google.com', 'googleapis.com', 'gstatic.com', 'gvt1.com', 'gvt2.com', 'ggpht.com',
-    '1e100.net', 'youtube.com', 'ytimg.com', 'googlevideo.com', 'chrome.com', 'chromium.org',
-    'apple.com', 'icloud.com', 'icloud-content.com', 'mzstatic.com', 'cdn-apple.com', 'aaplimg.com', 'me.com',
-    'msftconnecttest.com', 'msftncsi.com', 'windowsupdate.com', 'microsoft.com', 'live.com', 'office.com',
-    'mozilla.com', 'mozilla.net', 'mozilla.org', 'firefox.com',
-    'whatsapp.com', 'whatsapp.net', 'signal.org', 'telegram.org',
-})
-
-
 def is_domain_allowed(host, allow_domains):
     """True when `host` or a parent domain is in `allow_domains` (@@domain exception)."""
     h = (host or '').strip().lower().rstrip('.')
@@ -179,11 +166,6 @@ def is_domain_allowed(host, allow_domains):
         return False
     labels = h.split('.')
     return any('.'.join(labels[i:]) in allow_domains for i in range(len(labels)))
-
-
-def is_mitm_bypassed(host, allow_domains=None):
-    """True when `host` should use a direct CONNECT tunnel instead of TLS MITM interception."""
-    return is_domain_allowed(host, MITM_BYPASS_DOMAINS) or (bool(allow_domains) and is_domain_allowed(host, allow_domains))
 
 
 def check_request(host, url='', s=None):
