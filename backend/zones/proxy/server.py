@@ -367,6 +367,10 @@ class ProxyHandler(BaseHTTPRequestHandler):
         accept = (self.headers.get('Accept') or '').lower()
         if low_path.endswith('.js') or 'javascript' in accept:
             self._send_bytes(200, 'application/javascript; charset=utf-8', b'/* blocked by Zones.dns */\n', {'X-Blocked-By': header_val})
+        elif low_path.endswith('.css') or 'text/css' in accept:
+            self._send_bytes(200, 'text/css; charset=utf-8', b'/* blocked by Zones.dns */\n', {'X-Blocked-By': header_val})
+        elif low_path.endswith('.map'):
+            self._send_bytes(200, 'application/json; charset=utf-8', b'{"version":3,"sources":[],"mappings":""}', {'X-Blocked-By': header_val})
         elif low_path.endswith(('.gif', '.png', '.jpg', '.jpeg', '.webp', '.ico')) or accept.startswith('image/'):
             self._send_bytes(200, 'image/gif', TRANSPARENT_GIF, {'X-Blocked-By': header_val})
         else:

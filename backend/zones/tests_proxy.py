@@ -123,6 +123,7 @@ class ProxyAndWpadTests(TestCase):
             self.assertIn('application/x-ns-proxy-autoconfig', r['Content-Type'])
             text = r.content.decode()
             self.assertIn('PROXY 192.168.1.2:8888', text)
+            self.assertIn('wss:', text)
             self.assertIn('.corp.lan', text)
             self.assertIn('.axiom4.net', text)
             self.assertIn('.intranet.corp.lan', text)

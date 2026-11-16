@@ -100,7 +100,7 @@ def build_pac(s, request_host=None):
         '  if (/^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/.test(h)) {\n'
         '    return "DIRECT";\n'
         '  }\n'
-        '  if (url.substring(0, 5) === "http:" || url.substring(0, 6) === "https:") {\n'
+        '  if (url.substring(0, 5) === "http:" || url.substring(0, 6) === "https:" || url.substring(0, 3) === "ws:" || url.substring(0, 4) === "wss:") {\n'
         f'    return {json.dumps(proxy_str)};\n'
         '  }\n'
         '  return "DIRECT";\n'
