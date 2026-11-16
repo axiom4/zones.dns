@@ -203,11 +203,27 @@ def _resolve_target(host, port, allow_loopback=False):
                 _dns_inflight.pop(key, None)
 
 
-def _decompress(data, encoding):
-    enc = (encoding or '').strip().lower()
+try:
+    import brotli as _brotli
+except ImportError:
+    try:
+        import brotlicffi as _brotli
+    except ImportError:
+        _brotli = None
+
+try:
+    from compression import zstd as _zstd_stdlib
+except ImportError:
+    _zstd_stdlib = None
+
+try:
+    import zstandard as _zstandard
+except ImportError:
+    _zstandard = None
+
+
+def _decompress_single(data, enc):
     if enc in ('', 'identity'):
-        if data.startswith(b'\x1f\x8b'):
-            return gzip.decompress(data)
         return data
     if enc in ('gzip', 'x-gzip'):
         return gzip.decompress(data)
@@ -216,7 +232,25 @@ def _decompress(data, encoding):
             return zlib.decompress(data)
         except zlib.error:
             return zlib.decompress(data, -zlib.MAX_WBITS)
+    if enc == 'br' and _brotli is not None:
+        return _brotli.decompress(data)
+    if enc == 'zstd':
+        if _zstd_stdlib is not None:
+            return _zstd_stdlib.decompress(data)
+        if _zstandard is not None:
+            return _zstandard.ZstdDecompressor().decompress(data, max_output_size=MAX_HTML_BYTES)
     raise ValueError(f'Unsupported Content-Encoding: {enc}')
+
+
+def _decompress(data, encoding):
+    raw_enc = (encoding or '').strip().lower()
+    if not raw_enc or raw_enc == 'identity':
+        if data.startswith(b'\x1f\x8b'):
+            return gzip.decompress(data)
+        return data
+    for enc in reversed([ p.strip() for p in raw_enc.split(',') if p.strip() ]):
+        data = _decompress_single(data, enc)
+    return data
 
 
 class ProxyServer(ThreadingMixIn, HTTPServer):
