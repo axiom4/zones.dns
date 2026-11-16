@@ -28,9 +28,10 @@ _cfg_version = None
 _CFG_CHECK_INTERVAL = 1.0
 
 _dns_lock = threading.Lock()
-_dns_cache = OrderedDict()  # (host, allow_loopback) -> (expires_at, family, ip_str)
+_dns_cache = OrderedDict()  # (host, allow_loopback) -> (expires_at, family, ip_str) or (expires_at, None, None) for negative cache
 _dns_inflight = {}  # (host, allow_loopback) -> threading.Lock (singleflight deduplication for concurrent lookups of the same host)
 _DNS_TTL = 600.0
+_DNS_NEG_TTL = 120.0
 _DNS_MAX = 8192
 
 _mitm_lock = threading.Lock()
@@ -167,6 +168,8 @@ def _resolve_target(host, port, allow_loopback=False):
         if cached is not None:
             if cached[0] > now:
                 _dns_cache.move_to_end(key)
+                if cached[1] is None:
+                    raise OSError(f'Cannot resolve {host} (cached negative)')
                 return cached[1], (cached[2], int(port))
             del _dns_cache[key]
         host_lock = _dns_inflight.get(key)
@@ -180,13 +183,22 @@ def _resolve_target(host, port, allow_loopback=False):
             cached = _dns_cache.get(key)
             if cached is not None and cached[0] > now:
                 _dns_cache.move_to_end(key)
+                if cached[1] is None:
+                    raise OSError(f'Cannot resolve {host} (cached negative)')
                 return cached[1], (cached[2], int(port))
         try:
             try:
                 infos = socket.getaddrinfo(clean_host, port, socket.AF_INET, socket.SOCK_STREAM)
             except OSError:
-                infos = socket.getaddrinfo(clean_host, port, socket.AF_UNSPEC, socket.SOCK_STREAM)
+                try:
+                    infos = socket.getaddrinfo(clean_host, port, socket.AF_INET6, socket.SOCK_STREAM)
+                except OSError:
+                    with _dns_lock:
+                        _dns_cache[key] = (time.monotonic() + _DNS_NEG_TTL, None, None)
+                    raise
             if not infos:
+                with _dns_lock:
+                    _dns_cache[key] = (time.monotonic() + _DNS_NEG_TTL, None, None)
                 raise OSError(f'Cannot resolve {host}')
             for family, _, _, _, sockaddr in infos:
                 ip_str = sockaddr[0]
@@ -649,10 +661,12 @@ class _MitmHandler(ProxyHandler):
                     self.connection.settimeout(15)
                 self.raw_requestline = self.rfile.readline(65537)
                 if not self.raw_requestline:
-                    if self.handled_requests == 0:
-                        self.tls_handshake_failed = True
                     return
                 if len(self.raw_requestline) > 65536 or not self.parse_request():
+                    return
+                if (self.headers.get('Upgrade') or '').lower() == 'websocket':
+                    # WebSockets inside MITM should fall back to direct CONNECT tunnel on next attempt
+                    self.tls_handshake_failed = True
                     return
                 self.handled_requests += 1
                 conn_hdr = (self.headers.get('Connection') or '').lower()
@@ -664,10 +678,9 @@ class _MitmHandler(ProxyHandler):
                     keep_alive=keep_alive,
                 )
                 self.wfile.flush()
-        except ssl.SSLError:
-            if self.handled_requests == 0:
-                self.tls_handshake_failed = True
         except Exception:
             pass
         finally:
+            if self.handled_requests == 0:
+                self.tls_handshake_failed = True
             self.finish()

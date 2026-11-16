@@ -73,11 +73,21 @@ def build_pac(s, request_host=None):
     server_ip = server_ip_for(s) or req_h or '127.0.0.1'
     port = int(getattr(s, 'PROXY_PORT', 8080) or 8080)
     host_str = f'[{server_ip}]' if ':' in server_ip and not server_ip.startswith('[') else server_ip
-    proxy_str = f'PROXY {host_str}:{port}; DIRECT'
+    proxy_str = f'PROXY {host_str}:{port}'
     domain = str(getattr(s, 'DHCP_DOMAIN', '') or '').strip().strip('.').lower()
+    default_zone = str(getattr(settings, 'DEFAULT_ZONE', '') or '').strip().strip('.').lower()
     bypass_domains = ['localhost', 'local', 'home.arpa']
-    if domain and domain not in bypass_domains:
-        bypass_domains.append(domain)
+    for d in (domain, default_zone):
+        if d and d not in bypass_domains:
+            bypass_domains.append(d)
+    for h in getattr(settings, 'ALLOWED_HOSTS', ()):
+        h = str(h or '').strip().strip('.').lower()
+        if h and h != '*' and ':' not in h:
+            try:
+                ipaddress.ip_address(h)
+            except ValueError:
+                if h not in bypass_domains:
+                    bypass_domains.append(h)
     for d in parse_allow_domains(getattr(s, 'PROXY_CUSTOM_RULES', '')):
         if d not in bypass_domains:
             bypass_domains.append(d)
@@ -87,14 +97,8 @@ def build_pac(s, request_host=None):
         '  var h = (host || "").toLowerCase();\n'
         '  if (!h || isPlainHostName(h) || h === "wpad" || h.indexOf("wpad.") === 0) return "DIRECT";\n'
         f'  if ({dom_checks}) return "DIRECT";\n'
-        '  if (/^\\d+\\.\\d+\\.\\d+\\.\\d+$/.test(h)) {\n'
-        '    if (isInNet(h, "127.0.0.0", "255.0.0.0") ||\n'
-        '        isInNet(h, "10.0.0.0", "255.0.0.0") ||\n'
-        '        isInNet(h, "172.16.0.0", "255.240.0.0") ||\n'
-        '        isInNet(h, "192.168.0.0", "255.255.0.0") ||\n'
-        '        isInNet(h, "169.254.0.0", "255.255.0.0")) {\n'
-        '      return "DIRECT";\n'
-        '    }\n'
+        '  if (/^(127\\.|10\\.|192\\.168\\.|169\\.254\\.|172\\.(1[6-9]|2\\d|3[01])\\.)/.test(h)) {\n'
+        '    return "DIRECT";\n'
         '  }\n'
         '  if (url.substring(0, 5) === "http:" || url.substring(0, 6) === "https:") {\n'
         f'    return {json.dumps(proxy_str)};\n'
