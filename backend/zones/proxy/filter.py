@@ -83,9 +83,10 @@ DEFAULT_AD_SELECTORS = (
     'iframe[src*="googlesyndication.com"]',
 )
 
-# Anti-popup & anti-popunder script injected early into <head> when PROXY_BLOCK_POPUPS is enabled
+# Anti-popup & anti-popunder script injected into <head> when PROXY_BLOCK_POPUPS is enabled
 POPUP_BLOCKER_JS = (
     '<script id="zones-popup-blocker">(function(){'
+    'var me=document.currentScript;if(me&&me.parentNode)me.parentNode.removeChild(me);'
     'var origOpen=window.open;'
     'var lastTrusted=0;'
     'var recordTrust=function(e){if(e&&e.isTrusted)lastTrusted=Date.now();};'
@@ -101,7 +102,7 @@ POPUP_BLOCKER_JS = (
     'return origOpen.apply(window,arguments);'
     '};'
     'document.addEventListener("click",function(e){'
-    'var a=e.target&&e.target.closest?e.target.closest("a[target=\\"_blank\\"]"):null;'
+    'var a=e.target&&e.target.closest?e.target.closest(\'a[target="_blank"]\'):null;'
     'if(!a)return;'
     'var href=String(a.getAttribute("href")||"");'
     'var st=window.getComputedStyle(a);'
@@ -118,7 +119,9 @@ _SCRIPT_TAG_RX = re.compile(r'<script\b([^>]*)>(.*?)</script\s*>', re.IGNORECASE
 _IFRAME_TAG_RX = re.compile(r'<iframe\b([^>]*)>.*?</iframe\s*>', re.IGNORECASE | re.DOTALL)
 _SRC_ATTR_RX = re.compile(r'\bsrc\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', re.IGNORECASE)
 _HEAD_OPEN_RX = re.compile(r'(<head\b[^>]*>)', re.IGNORECASE)
+_HEAD_CLOSE_RX = re.compile(r'(</head\s*>)', re.IGNORECASE)
 _CHARSET_RX = re.compile(r'charset\s*=\s*([a-zA-Z0-9._-]+)', re.IGNORECASE)
+_NO_HTML_FILTER_DOMAINS = frozenset({'challenges.cloudflare.com', 'hcaptcha.com', 'recaptcha.net'})
 
 
 @lru_cache(maxsize=32)
@@ -222,7 +225,7 @@ def filter_html(html_bytes, content_type='', host='', s=None):
     custom_raw = '' if s is None else str(getattr(s, 'PROXY_CUSTOM_RULES', '') or '')
     allow_domains, _, global_css, domain_css = parse_custom_rules(custom_raw)
     h = (host or '').strip().lower().rstrip('.').partition(':')[0]
-    if is_domain_allowed(h, allow_domains):
+    if is_domain_allowed(h, allow_domains) or is_domain_allowed(h, _NO_HTML_FILTER_DOMAINS):
         return html_bytes
 
     if b'\x00' in html_bytes[:1024]:
@@ -275,8 +278,10 @@ def filter_html(html_bytes, content_type='', host='', s=None):
 
     if injections:
         snippet = ''.join(injections)
-        if _HEAD_OPEN_RX.search(text):
-            text = _HEAD_OPEN_RX.sub(r'\1' + snippet, text, count=1)
+        if _HEAD_CLOSE_RX.search(text):
+            text = _HEAD_CLOSE_RX.sub(lambda m: snippet + m.group(1), text, count=1)
+        elif _HEAD_OPEN_RX.search(text):
+            text = _HEAD_OPEN_RX.sub(lambda m: m.group(1) + snippet, text, count=1)
         else:
             text = snippet + text
 

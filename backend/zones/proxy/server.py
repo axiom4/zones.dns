@@ -524,11 +524,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
             if conn:
                 conn.close()
 
-        if self.command != 'HEAD' and 'text/html' in ctype.lower() and len(raw_body) <= MAX_HTML_BYTES:
+        sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
+        is_bg_fetch = (sec_dest and sec_dest != 'document') or (
+            (self.headers.get('X-Requested-With') or '').strip().lower() == 'xmlhttprequest'
+        )
+        if (
+            self.command != 'HEAD'
+            and not is_bg_fetch
+            and '/cdn-cgi/' not in path_query
+            and 'text/html' in ctype.lower()
+            and len(raw_body) <= MAX_HTML_BYTES
+        ):
             try:
                 plain = _decompress(raw_body, cenc)
                 raw_body = pfilter.filter_html(plain, content_type=ctype, host=host, s=s)
                 cenc = ''
+                out_headers = [(k, v) for k, v in out_headers if k.lower() != 'etag']
             except Exception:
                 pass
 
