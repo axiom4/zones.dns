@@ -3,7 +3,6 @@
     <p class="brand"><img src="logo.svg" alt="" width="30" height="30"><i>Zones<span>.dns</span></i></p>
     <div class="tabs">
       <a routerLink="/zones" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: false }">Zones</a>
-      <a routerLink="/hosts" routerLinkActive="on">Hosts</a>
       <a routerLink="/dhcp" routerLinkActive="on">DHCP</a>
       <a routerLink="/proxy" routerLinkActive="on">Proxy</a>
       <a routerLink="/blacklist" routerLinkActive="on">Blacklist</a>
@@ -11,16 +10,17 @@
       <a routerLink="/geo" routerLinkActive="on">Geolocation</a>
       <a routerLink="/audit" routerLinkActive="on">Domain audit</a>
       <a routerLink="/stats" routerLinkActive="on">Statistics</a>
-      <a routerLink="/security" routerLinkActive="on">Security</a>
     </div>
     <div class="grow"></div>
     @if (superuser()) { <button class="link" (click)="openAdmin()">Django Admin ↗</button> }
+    <a class="link" routerLink="/security" routerLinkActive="on">Security</a>
     <button class="link" (click)="logout()">Sign out</button>
   </aside>
 
   <main>
     @if (inZones()) {
       <nav class="subtabs" aria-label="Zones">
+        <a routerLink="/zones/hosts" routerLinkActive="on">Static hosts</a>
         @for (z of zoneList(); track z.id) {
           <span class="zt" [class.off]="z.enabled === false">
             <a [routerLink]="['/zones', z.id]" routerLinkActive="on" [title]="z.cidr ? z.name : ''">{{ z.cidr ?? z.name }}</a>

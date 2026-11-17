@@ -11,8 +11,9 @@ export const routes: Routes = [
     children: [
       { path: '', pathMatch: 'full', redirectTo: 'zones' },
       { path: 'zones', loadComponent: () => import('./zones-index/zones-index').then(m => m.ZonesIndex) },
+      { path: 'zones/hosts', loadComponent: () => import('./hosts-page/hosts-page').then(m => m.HostsPage) },
       { path: 'zones/:id', loadComponent: () => import('./zone-page/zone-page').then(m => m.ZonePage) },
-      { path: 'hosts', loadComponent: () => import('./hosts-page/hosts-page').then(m => m.HostsPage) },
+      { path: 'hosts', redirectTo: 'zones/hosts' },
       { path: 'dhcp', pathMatch: 'full', redirectTo: 'dhcp/leases' },
       { path: 'dhcp/proxy', redirectTo: 'proxy/settings' }, // the proxy has a section of its own
       { path: 'dhcp/proxy-logs', redirectTo: 'proxy/logs' },

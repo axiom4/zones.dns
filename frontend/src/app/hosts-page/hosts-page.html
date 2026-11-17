@@ -1,6 +1,6 @@
 <header>
   <div>
-    <h2>Hosts</h2>
+    <h2>Static hosts</h2>
     <p class="soft">{{ hosts().length }} {{ hosts().length === 1 ? 'static host' : 'static hosts' }}. Like a hosts file: the name is answered with the address set here, whatever the real DNS says. It wins over zones, the blacklist and the upstream.</p>
   </div>
   @if (hosts().length > 5) {
