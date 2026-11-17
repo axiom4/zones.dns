@@ -2566,7 +2566,10 @@ components:
           description: Start of the minute or hour (UTC)
         count:
           type: integer
-          description: All queries in the bucket
+          description: All queries and proxy requests in the bucket
+        proxy_count:
+          type: integer
+          description: Of which proxy requests
         blocked:
           type: integer
           description: Of which blocked by the DNS daemon
@@ -2577,6 +2580,7 @@ components:
       - blocked
       - count
       - proxy_blocked
+      - proxy_count
       - t
     BulkActionRequest:
       type: object

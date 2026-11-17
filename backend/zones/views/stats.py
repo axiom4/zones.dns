@@ -31,7 +31,7 @@ def _from_log(start):
     qs = QueryLog.objects.filter(time__gte=start)
     outcomes = list(qs.values('outcome').annotate(count=Count('id'), ms=Sum('ms')).order_by('-count'))
     total = sum(r['count'] for r in outcomes)
-    series = qs.annotate(t=TruncMinute('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id'), blocked=Count('id', filter=Q(outcome='blocked')), proxy_blocked=Value(0)).order_by('t')
+    series = qs.annotate(t=TruncMinute('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id'), blocked=Count('id', filter=Q(outcome='blocked')), proxy_blocked=Value(0), proxy_count=Value(0)).order_by('t')
     return {
         'total': total,
         'avg_ms': (sum(r['ms'] or 0 for r in outcomes) / total) if total else 0,
@@ -63,7 +63,7 @@ def _from_counters(start):
         'top_domains': top('name', 10),
         'top_blocked': top('blocked', 10),
         'top_clients': top('client', 10),
-        'series': [{'t': r['hour'], 'count': r['count'], 'blocked': r['blocked'] or 0, 'proxy_blocked': 0} for r in series],
+        'series': [{'t': r['hour'], 'count': r['count'], 'blocked': r['blocked'] or 0, 'proxy_blocked': 0, 'proxy_count': 0} for r in series],
     }
 
 
@@ -74,7 +74,7 @@ def _from_proxy(start, step):
     outcomes = list(qs.values('outcome').annotate(count=Count('id'), ms=Sum('ms')))
     total = sum(r['count'] for r in outcomes)
     trunc = TruncMinute if step == 60 else TruncHour
-    series = qs.annotate(t=trunc('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id'), blocked=Value(0), proxy_blocked=Count('id', filter=Q(outcome='blocked'))).order_by('t')
+    series = qs.annotate(t=trunc('time', tzinfo=dt_timezone.utc)).values('t').annotate(count=Count('id'), blocked=Value(0), proxy_blocked=Count('id', filter=Q(outcome='blocked')), proxy_count=Count('id')).order_by('t')
     name = {'allowed': 'proxied'}
     answers = Counter()
     for r in outcomes:
@@ -105,10 +105,11 @@ def _merge(d, p):
     series = {}
     for row in d['series'] + p['series']:
         t = row['t']
-        o = series.setdefault(t, {'t': t, 'count': 0, 'blocked': 0, 'proxy_blocked': 0})
+        o = series.setdefault(t, {'t': t, 'count': 0, 'blocked': 0, 'proxy_blocked': 0, 'proxy_count': 0})
         o['count'] += row['count']
         o['blocked'] += row['blocked'] or 0
         o['proxy_blocked'] += row['proxy_blocked'] or 0
+        o['proxy_count'] += row['proxy_count'] or 0
     return {
         'total': total,
         'avg_ms': ((d['avg_ms'] * d['total'] + p['avg_ms'] * p['total']) / total) if total else 0,

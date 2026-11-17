@@ -9,7 +9,7 @@ export interface Bucket {
   blocked: number;
 
   /**
-   * All queries in the bucket
+   * All queries and proxy requests in the bucket
    */
   count: number;
 
@@ -17,6 +17,11 @@ export interface Bucket {
    * Of which blocked by the filtering proxy
    */
   proxy_blocked: number;
+
+  /**
+   * Of which proxy requests
+   */
+  proxy_count: number;
 
   /**
    * Start of the minute or hour (UTC)

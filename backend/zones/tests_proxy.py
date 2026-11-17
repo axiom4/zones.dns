@@ -475,6 +475,7 @@ class ProxyStatsTests(TestCase):
         self.assertEqual(both['top_blocked'][0], {'name': 'ads.example', 'count': 3})
         self.assertEqual(sum(b['count'] for b in both['series']), 6)
         self.assertEqual((sum(b['blocked'] for b in both['series']), sum(b['proxy_blocked'] for b in both['series'])), (1, 2))
+        self.assertEqual(sum(b['proxy_count'] for b in both['series']), 4)
         dns = api.get('/api/stats/?hours=1&source=dns').json()
         self.assertEqual(dns['total'], 2)
         prx = api.get('/api/stats/?hours=1&source=proxy').json()
