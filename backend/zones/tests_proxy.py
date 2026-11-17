@@ -1272,3 +1272,19 @@ class UploadAndWebSocketTests(TestCase):
 def os_urandom(n):
     import os
     return os.urandom(n)
+
+
+class LingerTests(TestCase):
+    def test_nothing_is_written_after_the_sending_side_is_closed(self):
+        import asyncio
+        from .proxy.streams import RawStream
+
+        async def main():
+            a, b = socket.socketpair()
+            r, w = await asyncio.open_connection(sock=a)
+            stream = RawStream(r, w)
+            stream.write_eof()
+            await stream.write(b'close_notify')  # was: RuntimeError: Cannot call write() after write_eof()
+            await stream.aclose()
+            b.close()
+        asyncio.run(main())

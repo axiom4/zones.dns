@@ -631,8 +631,7 @@ async def _linger(stream):
     with its body still arriving, makes the kernel reset the connection, and the client may lose the answer it was sent."""
     raw = getattr(stream, 'raw', stream)
     try:
-        if raw.writer.can_write_eof():
-            raw.writer.write_eof()
+        raw.write_eof()
         loop = asyncio.get_running_loop()
         end, total = loop.time() + LINGER_SECONDS, 0
         while total < LINGER_BYTES and (left := end - loop.time()) > 0:

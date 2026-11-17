@@ -34,6 +34,7 @@ class RawStream:
         self.reader = reader
         self.writer = writer
         self._prefix = prefix
+        self.eof_sent = False
 
     async def read(self, n=READ_SIZE, timeout=None):
         """Up to n bytes; b'' at the end of the stream. TimeoutError after `timeout` seconds without data."""
@@ -45,9 +46,14 @@ class RawStream:
         return await asyncio.wait_for(self.reader.read(n), timeout)
 
     async def write(self, data):
-        if data:
+        if data and not self.eof_sent:  # after write_eof() nothing more may go out (a TLS close_notify, say)
             self.writer.write(data)
             await self.writer.drain()
+
+    def write_eof(self):
+        if not self.eof_sent and self.writer.can_write_eof():
+            self.writer.write_eof()
+            self.eof_sent = True
 
     def take_prefix(self):
         data, self._prefix = self._prefix, b''
