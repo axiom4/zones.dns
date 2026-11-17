@@ -15,6 +15,7 @@ from zones.dhcp import ra
 from zones.dhcp.v4 import DHCP_SETTING_SPEC, Server, dhcp_settings, l2_frame, scopes
 from zones.models import DataVersion
 from zones.dhcp.v6 import Config6, Server6
+from zones.logfmt import stamp_output
 
 
 def mac_of(interface):
@@ -35,6 +36,7 @@ class Command(BaseCommand):
         p.add_argument('--client-port6', type=int, default=546)
 
     def handle(self, *a, address, address6, port, client_port, port6, client_port6, **o):
+        stamp_output(self)
         s = dhcp_settings(settings)
         if not s.DHCP:
             self.stdout.write('DHCP is off: waiting until it is turned on in the GUI (DHCP > DHCP settings; turn off the DHCP server of your router first).')

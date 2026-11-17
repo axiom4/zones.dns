@@ -331,3 +331,13 @@ PROXY_BLOCK_POPUPS = True  # block popup/popunder scripts and inject window.open
 PROXY_HTTPS_MITM = False  # intercept HTTPS traffic with the local Proxy Root CA to filter HTML and block popups inside HTTPS pages
 PROXY_RULE_LISTS = ''  # external ad-block lists (EasyList syntax), `name=https://…` separated by spaces or new lines; downloaded by the proxy every day, see zones/proxy/rules.py
 PROXY_CUSTOM_RULES = ''  # extra rules (one per line): URL substrings/regexes, ##.css-selector cosmetic rules, @@domain exceptions
+
+
+# Warnings and errors of every process (Django, the DoH view, ...) on stderr with the date first, like the other logs (zones/logfmt.py, gunicorn.conf.py).
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {'dated': {'format': '%(asctime)s %(levelname)s %(name)s: %(message)s', 'datefmt': '%Y-%m-%d %H:%M:%S'}},
+    'handlers': {'stderr': {'class': 'logging.StreamHandler', 'formatter': 'dated'}},
+    'root': {'handlers': ['stderr'], 'level': 'WARNING'},
+}

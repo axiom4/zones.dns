@@ -14,6 +14,7 @@ from dnslib.server import DNSServer
 
 from zones.stats.logwriter import LogWriter
 from zones.dnsd.dnsserver import Handler, PooledTCPServer, PooledUDPServer, logger
+from zones.logfmt import stamp_output
 
 
 class Command(BaseCommand):
@@ -40,6 +41,7 @@ class Command(BaseCommand):
             self.stderr.write(f'Log purge: {e} (retried in an hour)')
 
     def handle(self, *a, address, port, upstream, **o):
+        stamp_output(self)
         if settings.REDIS_URL:
             from django.core.cache import cache
             from zones import redis_pool

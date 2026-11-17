@@ -473,7 +473,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             reason=str(reason or '')[:255],
             ms=ms,
         )
-        print(f'{time.strftime("%Y-%m-%d %H:%M:%S")} {entry.client} {entry.method} {entry.status} {entry.outcome} {entry.ms}ms {entry.url} {entry.reason}'.rstrip(), flush=True)  # the supervisor log of runproxy: one line per request
+        print(f'{entry.client} {entry.method} {entry.status} {entry.outcome} {entry.ms}ms {entry.url} {entry.reason}'.rstrip(), flush=True)  # the supervisor log of runproxy: one line per request
         if hasattr(logger, 'add'):
             logger.add(entry)
         elif logger is True:

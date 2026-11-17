@@ -13,6 +13,7 @@ from zones.dnsd import resolver
 from zones.models import DataVersion, ProxyLog
 from zones.proxy import ca, filter as pfilter, rules
 from zones.proxy.server import ProxyLogWriter, ProxyServer, cached_proxy_settings
+from zones.logfmt import stamp_output
 
 BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
 
@@ -28,6 +29,7 @@ class Command(BaseCommand):
         p.add_argument('--port', type=int, default=0, help='bind to this TCP port (default: PROXY_PORT or 8080)')
 
     def handle(self, *a, address, port, **o):
+        stamp_output(self)
         s = cached_proxy_settings(settings, force=True)
         if not s.PROXY:
             self.stdout.write('Proxy is off: waiting until it is turned on in the GUI (DHCP > Proxy).')
