@@ -82,11 +82,11 @@ class DohView(View):
                 return HttpResponse(status=400)
             out = _exchange(wire, client_ip(request))
         except OSError as e:  # the daemon is down, or not listening on DNS_DOH_BACKEND, or too slow (5 s)
-            log.warning('DoH: cannot reach the DNS daemon at %s: %r', settings.DNS_DOH_BACKEND, e)
+            log.warning('DoH: client %s: cannot reach the DNS daemon at %s: %r', client_ip(request), settings.DNS_DOH_BACKEND, e)
             return HttpResponse(status=502)
         except Exception:
             return HttpResponse(status=400)
         if out is None:
-            log.warning('DoH: the DNS daemon at %s closed the connection without an answer (client %s not in DNS_ALLOW_QUERY, or DNS_PROXY_PROTOCOL set on one side only)', settings.DNS_DOH_BACKEND, client_ip(request))
+            log.warning('DoH: client %s: the DNS daemon at %s closed the connection without an answer (client not in DNS_ALLOW_QUERY, or DNS_PROXY_PROTOCOL set on one side only)', client_ip(request), settings.DNS_DOH_BACKEND)
             return HttpResponse(status=502)
         return HttpResponse(out, content_type='application/dns-message', headers={'Cache-Control': 'max-age=0'})
