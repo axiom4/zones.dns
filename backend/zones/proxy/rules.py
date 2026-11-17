@@ -30,10 +30,11 @@ def split_entries(text):
     for entry in re.split(r'[\s,]+', str(text or '').strip()):
         if not entry:
             continue
-        m = re.match(r'^([a-z0-9._-]{1,40})=(https?://.+)$', entry)
+        # https only: whoever can change a list downloaded over plain http can add @@ rules that turn the filter off
+        m = re.match(r'^([a-z0-9._-]{1,40})=(https://.+)$', entry)
         if m:
             out.append((m[1], m[2]))
-        elif entry.startswith(('http://', 'https://')):
+        elif entry.startswith('https://'):
             name = re.sub(r'[^a-z0-9._-]', '-', entry.split('?')[0].rstrip('/').rsplit('/', 1)[-1].lower())[:40] or 'list'
             out.append((name, entry))
         else:
@@ -84,6 +85,8 @@ def reduce(text):
 def fetch(url):
     req = urllib.request.Request(url, headers={'User-Agent': 'zones-dns/1.0'})
     with urllib.request.urlopen(req, timeout=60) as r:
+        if not r.geturl().startswith('https://'):
+            raise OSError('the list was redirected to plain http')  # urllib follows an https -> http redirect
         raw = r.read(MAX_BYTES + 1)
     if len(raw) > MAX_BYTES:
         raise OSError('response exceeds 50 MB limit')

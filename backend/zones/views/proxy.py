@@ -2,8 +2,9 @@ from datetime import timedelta
 import ipaddress
 from urllib.parse import urlsplit
 
+from django.conf import settings
 from django.db.models import Q
-from django.http import HttpResponse, HttpResponseForbidden
+from django.http import HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.utils import timezone
 from django.views import View
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -14,6 +15,7 @@ from rest_framework.views import APIView
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit
 from ..models import DataVersion, ProxyLog, Setting
+from .token import client_ip
 from .zone import GRANT, need_grant
 from ..proxy import ca, filter as pfilter, pac, rules
 from ..serializers import (
@@ -28,6 +30,9 @@ from ..serializers import (
 )
 # The proxy settings are stored with the DHCP ones (Setting rows `dhcp:<NAME>`): one snapshot, one restart signal for rundhcp and runproxy.
 
+# Settings that send the clients' traffic somewhere else or open it to inspection: changing them needs a second-factor grant (scope proxy-change)
+SENSITIVE = ('PROXY_HTTPS_MITM', 'DHCP_WPAD', 'DHCP_WPAD_URL', 'PROXY_ADDRESS', 'PROXY_PORT')
+
 
 class ProxySettingsView(APIView):
     @staticmethod
@@ -39,11 +44,16 @@ class ProxySettingsView(APIView):
         """Current proxy configuration: the filtering proxy (`runproxy`) and its announcement to DHCP clients (WPAD)."""
         return Response(ProxySettingsSerializer(self._serialize(dhcp.dhcp_settings())).data)
 
-    @extend_schema(request=ProxySettingsSerializer, responses=ProxySettingsSerializer)
+    @extend_schema(request=ProxySettingsSerializer, responses=ProxySettingsSerializer, parameters=[GRANT])
     def patch(self, request):
-        """Update the proxy settings and validate them before saving. `runproxy` and `rundhcp` apply them by themselves."""
+        """Update the proxy settings and validate them before saving. `runproxy` and `rundhcp` apply them by themselves.
+        Changing HTTPS inspection, WPAD or the proxy address/port needs a second-factor grant (scope proxy-change)."""
         ser = ProxySettingsSerializer(data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
+        cur = dhcp.dhcp_settings()
+        if any(k in ser.validated_data and ser.validated_data[k] != getattr(cur, k) for k in SENSITIVE) \
+                and (denied := need_grant(request, scope='proxy-change')) is not None:
+            return denied
         cand = dhcp.dhcp_settings(overrides=ser.validated_data)
         try:
             if cand.DHCP:
@@ -101,9 +111,11 @@ class ProxyInfoView(APIView):
         """Return Proxy Root CA certificate info, active WPAD URL, and generated PAC script."""
         return Response(ProxyInfoSerializer(self._payload(request=request)).data)
 
-    @extend_schema(request=None, responses=ProxyInfoSerializer)
+    @extend_schema(request=None, responses=ProxyInfoSerializer, parameters=[GRANT])
     def post(self, request):
-        """Regenerate the local Proxy Root CA certificate and private key."""
+        """Regenerate the local Proxy Root CA certificate and private key. Needs a second-factor grant (scope proxy-change)."""
+        if (denied := need_grant(request, scope='proxy-change')) is not None:
+            return denied
         return Response(ProxyInfoSerializer(self._payload(regenerate=True, request=request)).data)
 
 
@@ -193,8 +205,7 @@ class WpadView(View):
     """Unauthenticated WPAD / PAC file endpoint (/wpad.dat, /proxy.pac) for LAN clients using DHCP option 252 or DNS wpad.<domain>."""
 
     def get(self, request):
-        client_ip = request.META.get('REMOTE_ADDR', '')
-        if not ratelimit.allowed(client_ip):
+        if not ratelimit.allowed(client_ip(request)):  # behind nginx REMOTE_ADDR is always 127.0.0.1
             return HttpResponseForbidden('Forbidden')
         s = dhcp.dhcp_settings()
         body = pac.build_pac(s, request_host=request.META.get('HTTP_HOST', ''))
@@ -203,12 +214,20 @@ class WpadView(View):
         return resp
 
 
+def _https_only(request):
+    """The redirect to the https GUI for a Root CA / profile asked over plain http (anyone on the path could swap the certificate), or None."""
+    if request.is_secure() or not str(settings.GUI_URL).startswith('https://'):
+        return None
+    return HttpResponseRedirect(settings.GUI_URL.rstrip('/') + request.path)
+
+
 class ProxyCaCertView(View):
-    """Unauthenticated Root CA certificate download (/proxy-ca.crt) for LAN clients when HTTPS MITM inspection is used."""
+    """Unauthenticated Root CA certificate download (/proxy-ca.crt) for LAN clients when HTTPS MITM inspection is used. https only."""
 
     def get(self, request):
-        client_ip = request.META.get('REMOTE_ADDR', '')
-        if not ratelimit.allowed(client_ip):
+        if (to := _https_only(request)) is not None:
+            return to
+        if not ratelimit.allowed(client_ip(request)):  # behind nginx REMOTE_ADDR is always 127.0.0.1
             return HttpResponseForbidden('Forbidden')
         cert_pem, _, _, _ = ca.ensure_ca()
         resp = HttpResponse(cert_pem, content_type='application/x-x509-ca-cert')
@@ -217,11 +236,12 @@ class ProxyCaCertView(View):
 
 
 class ProxyMobileConfigView(View):
-    """Unauthenticated Apple Configuration Profile (/proxy.mobileconfig) for macOS and iOS (installs PAC proxy URL + Root CA)."""
+    """Unauthenticated Apple Configuration Profile (/proxy.mobileconfig) for macOS and iOS (installs PAC proxy URL + Root CA). https only."""
 
     def get(self, request):
-        client_ip = request.META.get('REMOTE_ADDR', '')
-        if not ratelimit.allowed(client_ip):
+        if (to := _https_only(request)) is not None:
+            return to
+        if not ratelimit.allowed(client_ip(request)):  # behind nginx REMOTE_ADDR is always 127.0.0.1
             return HttpResponseForbidden('Forbidden')
         s = dhcp.dhcp_settings()
         cert_pem, _, _, _ = ca.ensure_ca()

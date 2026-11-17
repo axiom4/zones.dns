@@ -170,6 +170,19 @@ export class ProxyPage implements OnDestroy {
     return false;
   }
 
+  /** Runs `call` without a grant; when the server asks for a second factor (HTTPS inspection, WPAD, proxy address or port, a new Root CA)
+   * asks for it once and runs `call` again with the grant. null when the user cancels. */
+  private async withGrant<T>(call: (grant?: string) => Promise<T>): Promise<T | null> {
+    try {
+      return await call();
+    } catch (e: any) {
+      if (e?.status !== 403 || !e?.error?.mfa_required) throw e;
+    }
+    const grant = await this.stepUp.request('proxy-change');
+    if (grant === null) return null;
+    return call(grant || undefined);
+  }
+
   allowHost(row: ProxyLog) {
     const host = (row.host || '').trim().toLowerCase();
     if (!host || this.isHostAllowed(host)) return;
@@ -186,7 +199,8 @@ export class ProxyPage implements OnDestroy {
   save() {
     this.saved.set(false);
     return this.ui.run(async () => {
-      const updated = await this.api.invoke(proxySettingsPartialUpdate, { body: this.cfg() });
+      const updated = await this.withGrant(g => this.api.invoke(proxySettingsPartialUpdate, { body: this.cfg(), 'X-MFA-Grant': g }));
+      if (updated === null) return;
       this.cfg.set(updated);
       this.info.set(await this.api.invoke(proxyInfoRetrieve));
       this.saved.set(true);
@@ -195,7 +209,9 @@ export class ProxyPage implements OnDestroy {
 
   syncRules() {
     return this.ui.run(async () => {
-      this.cfg.set(await this.api.invoke(proxySettingsPartialUpdate, { body: this.cfg() }));
+      const updated = await this.withGrant(g => this.api.invoke(proxySettingsPartialUpdate, { body: this.cfg(), 'X-MFA-Grant': g }));
+      if (updated === null) return;
+      this.cfg.set(updated);
       this.rules.set(await this.api.invoke(proxyRulesCreate));
     });
   }
@@ -218,7 +234,8 @@ export class ProxyPage implements OnDestroy {
       'Clients using HTTPS MITM inspection will need to install the new Root CA certificate.',
       () =>
         this.ui.run(async () => {
-          this.info.set(await this.api.invoke(proxyInfoCreate));
+          const info = await this.withGrant(g => this.api.invoke(proxyInfoCreate, { 'X-MFA-Grant': g }));
+          if (info !== null) this.info.set(info);
         }),
     );
   }

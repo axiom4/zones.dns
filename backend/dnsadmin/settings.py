@@ -331,6 +331,9 @@ PROXY_BLOCK_POPUPS = True  # block popup/popunder scripts and inject window.open
 PROXY_HTTPS_MITM = False  # intercept HTTPS traffic with the local Proxy Root CA to filter HTML and block popups inside HTTPS pages
 PROXY_RULE_LISTS = ''  # external ad-block lists (EasyList syntax), `name=https://…` separated by spaces or new lines; downloaded by the proxy every day, see zones/proxy/rules.py
 PROXY_CUSTOM_RULES = ''  # extra rules (one per line): URL substrings/regexes, ##.css-selector cosmetic rules, @@domain exceptions
+# Ports a CONNECT tunnel through the proxy may reach (comma separated, * = any). Not in the GUI: a tunnel to any port lets clients reach
+# mail relays (25) and internal services through the proxy, past the firewall (RFC 9110 9.3.6).
+PROXY_CONNECT_PORTS = os.environ.get('PROXY_CONNECT_PORTS', '443,80,8443')
 
 
 # Warnings and errors of every process (Django, the DoH view, ...) on stderr with the date first, like the other logs (zones/logfmt.py, gunicorn.conf.py).

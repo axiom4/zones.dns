@@ -294,6 +294,16 @@ class MoreStepUpTests(TestCase):
         self.assertEqual(self.api.post('/api/proxy/logs/purge/', body, format='json', **self._grant('log-purge')).status_code, 200)
         self.assertEqual(ProxyLog.objects.count(), 0)
 
+    def test_proxy_changes_that_move_traffic_need_their_grant(self):
+        patch = lambda body, **kw: self.api.patch('/api/proxy/settings/', body, format='json', **kw).status_code
+        self.assertEqual(patch({'PROXY_HTTPS_MITM': True}), 403)
+        self.assertEqual(patch({'DHCP_WPAD_URL': 'http://10.9.9.9/wpad.dat'}), 403)
+        self.assertEqual(patch({'PROXY_BLOCK_ADS': False}), 200)  # filtering options need no proof
+        self.assertEqual(patch({'PROXY_HTTPS_MITM': True}, **self._grant('proxy-change')), 200)
+        self.assertEqual(patch({'PROXY_HTTPS_MITM': True}), 200)  # unchanged value: nothing to prove
+        self.assertEqual(self.api.post('/api/proxy/info/').status_code, 403)  # a new Root CA
+        self.assertEqual(self.api.post('/api/proxy/info/', **self._grant('proxy-change')).status_code, 200)
+
     def test_bulk_delete_of_most_of_a_zone_needs_the_zone_grant(self):
         ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]
         post = lambda some, **kw: self.api.post('/api/records/bulk/', {'ids': some, 'action': 'delete'}, format='json', **kw).status_code

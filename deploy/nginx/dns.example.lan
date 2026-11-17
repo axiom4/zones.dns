@@ -34,7 +34,9 @@ server {
     listen [::]:80;
     server_name dns.example.lan wpad.*;
 
-    # WPAD (Proxy Auto-Discovery), Root CA and Apple profile work over plain HTTP on port 80 (required by OS WPAD clients).
+    # WPAD (Proxy Auto-Discovery) works over plain HTTP on port 80 (required by OS WPAD clients). The Root CA and the Apple profile go to Django too,
+    # which redirects them to the https GUI (GUI_URL): over plain HTTP anyone on the path could hand out their own certificate, and the generic
+    # redirect below would send a wpad.<domain> client to an https host name the certificate does not cover.
     location ~ ^/(wpad\.dat|proxy\.pac|proxy-ca\.crt|proxy\.mobileconfig)$ {
         proxy_pass http://dns_backend;
         proxy_http_version 1.1;

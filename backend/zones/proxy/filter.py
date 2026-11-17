@@ -92,9 +92,10 @@ POPUP_BLOCKER_JS = (
     'window.addEventListener("pointerdown",recordTrust,true);'
     'window.addEventListener("keydown",recordTrust,true);'
     'var badRx=/(?:popunder|popup|popads|clickunder|tabunder|adserver|doubleclick|googlesyndication|exoclick|propellerads)/i;'
+    # sign-in popups (OAuth) open a sized window a moment after the click, once a request has answered: not blocked
     'window.open=function(u,n,f){'
     'var s=String(u||"");'
-    'if(!s||s==="about:blank"||badRx.test(s)||(Date.now()-lastTrusted>800)||(f&&/width=|height=|left=|top=/i.test(String(f)))){'
+    'if(!s||s==="about:blank"||badRx.test(s)||(Date.now()-lastTrusted>3000)){'
     'console.debug("[Zones.dns] Blocked popup:",s);'
     'return null;'
     '}'
@@ -110,7 +111,6 @@ POPUP_BLOCKER_JS = (
     'console.debug("[Zones.dns] Blocked overlay/popup link:",href);'
     '}'
     '},true);'
-    'window.addEventListener("beforeunload",function(e){e.stopImmediatePropagation();},true);'
     '})();</script>'
 )
 
@@ -232,8 +232,31 @@ def _src_is_blocked(src, page_host, s):
     return check_request(target_host, src, s=s) is not None
 
 
-def filter_html(html_bytes, content_type='', host='', s=None):
-    """Filter an HTML response body: strip blocked ad/popup scripts and iframes, inject cosmetic CSS and popup-blocker JS."""
+_UNDECODABLE_RX = re.compile('[\udc80-\udcff]')
+
+
+def csp_allows_inline(csp, directive):
+    """Whether an inline element we add (directive 'script-src' or 'style-src') may run under this Content-Security-Policy header.
+    Every policy must allow it; with a nonce, a hash or 'strict-dynamic' the browser ignores 'unsafe-inline' (CSP 3)."""
+    for policy in str(csp or '').split(','):
+        found = {}
+        for part in policy.split(';'):
+            name, _, value = part.strip().partition(' ')
+            if name:
+                found.setdefault(name.lower(), value.lower())
+        src = found.get(f'{directive}-elem', found.get(directive, found.get('default-src')))
+        if src is None:
+            continue
+        tokens = src.split()
+        if "'unsafe-inline'" not in tokens or any(t == "'strict-dynamic'" or t.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-")) for t in tokens):
+            return False
+    return True
+
+
+def filter_html(html_bytes, content_type='', host='', s=None, csp=''):
+    """Filter an HTML response body: strip blocked ad/popup scripts and iframes, inject cosmetic CSS and popup-blocker JS.
+    `csp`: the page's Content-Security-Policy header; what it would block is not injected (the browser would only report a violation).
+    shortcut: a policy in a <meta http-equiv> tag is not read, the injected script is then refused by the browser and harmless."""
     if not html_bytes:
         return html_bytes
     block_ads = True if s is None else bool(getattr(s, 'PROXY_BLOCK_ADS', True))
@@ -252,13 +275,14 @@ def filter_html(html_bytes, content_type='', host='', s=None):
 
     m_cs = _CHARSET_RX.search(content_type or '')
     charset = m_cs.group(1) if m_cs else 'utf-8'
+    # surrogateescape: bytes that are not valid in the charset (a page whose real charset is only in a <meta> tag) come back unchanged
     try:
-        text = html_bytes.decode(charset, errors='replace')
+        text = html_bytes.decode(charset, errors='surrogateescape')
     except LookupError:
         charset = 'utf-8'
-        text = html_bytes.decode('utf-8', errors='replace')
+        text = html_bytes.decode('utf-8', errors='surrogateescape')
 
-    if text.count('\ufffd') > max(8, len(text) // 20):
+    if len(_UNDECODABLE_RX.findall(text)) > max(8, len(text) // 20):
         raise ValueError('Compressed or non-text payload cannot be filtered as HTML')
 
     def _clean_script(match):
@@ -282,9 +306,9 @@ def filter_html(html_bytes, content_type='', host='', s=None):
         text = _IFRAME_TAG_RX.sub(_clean_iframe, text)
 
     injections = []
-    if block_popups and 'id="zones-popup-blocker"' not in text:
+    if block_popups and 'id="zones-popup-blocker"' not in text and csp_allows_inline(csp, 'script-src'):
         injections.append(POPUP_BLOCKER_JS)
-    if block_ads and 'id="zones-adblock-css"' not in text:
+    if block_ads and 'id="zones-adblock-css"' not in text and csp_allows_inline(csp, 'style-src'):
         selectors = list(DEFAULT_AD_SELECTORS) + global_css + ext.global_css
         if h:
             labels = h.split('.')
@@ -304,4 +328,4 @@ def filter_html(html_bytes, content_type='', host='', s=None):
         else:
             text = snippet + text
 
-    return text.encode(charset, errors='replace')
+    return text.encode(charset, errors='surrogateescape')

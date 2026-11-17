@@ -11,12 +11,18 @@ import { PatchedProxySettingsRequest } from '../../models/patched-proxy-settings
 import { ProxySettings } from '../../models/proxy-settings';
 
 export interface ProxySettingsPartialUpdate$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
       body?: PatchedProxySettingsRequest
 }
 
 export function proxySettingsPartialUpdate(http: HttpClient, rootUrl: string, params?: ProxySettingsPartialUpdate$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxySettings>> {
   const rb = new RequestBuilder(rootUrl, proxySettingsPartialUpdate.PATH, 'patch');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.body(params.body, 'application/json');
   }
 

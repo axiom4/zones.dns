@@ -1709,6 +1709,15 @@ paths:
     post:
       operationId: proxy_info_create
       description: Regenerate the local Proxy Root CA certificate and private key.
+        Needs a second-factor grant (scope proxy-change).
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       tags:
       - proxy
       security:
@@ -1855,8 +1864,17 @@ paths:
           description: ''
     patch:
       operationId: proxy_settings_partial_update
-      description: Update the proxy settings and validate them before saving. `runproxy`
-        and `rundhcp` apply them by themselves.
+      description: |-
+        Update the proxy settings and validate them before saving. `runproxy` and `rundhcp` apply them by themselves.
+        Changing HTTPS inspection, WPAD or the proxy address/port needs a second-factor grant (scope proxy-change).
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       tags:
       - proxy
       requestBody:

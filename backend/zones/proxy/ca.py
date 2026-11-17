@@ -4,6 +4,7 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import ipaddress
 import ssl
+import sys
 import tempfile
 import threading
 
@@ -11,6 +12,7 @@ from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
+from django.conf import settings
 from django.db import DatabaseError, transaction
 
 from ..models import DataVersion, Setting
@@ -24,8 +26,32 @@ _leaf_contexts = OrderedDict()  # host -> ssl.SSLContext
 _LEAF_MAX = 512
 
 
+CA_DAYS = 5 * 365  # a stolen CA key works on every device that trusts it until it expires
+
+
+def _key_password():
+    """The CA private key is stored encrypted with a password derived from SECRET_KEY: the database (or a backup of it) alone does not give it away."""
+    return hashlib.sha256(b'zones-proxy-ca:' + settings.SECRET_KEY.encode()).hexdigest().encode()
+
+
+def _encrypt_key(key):
+    return key.private_bytes(
+        serialization.Encoding.PEM,
+        serialization.PrivateFormat.PKCS8,
+        serialization.BestAvailableEncryption(_key_password()),
+    ).decode()
+
+
+def _load_key(key_pem):
+    """(key, plaintext): the stored key, and whether it was stored without encryption (before it was encrypted: it is then saved again)."""
+    try:
+        return serialization.load_pem_private_key(key_pem.encode(), password=_key_password()), False
+    except TypeError:  # not encrypted
+        return serialization.load_pem_private_key(key_pem.encode(), password=None), True
+
+
 def _generate_ca():
-    """Generate a new ECDSA P-256 Root CA certificate and private key (valid 10 years)."""
+    """Generate a new ECDSA P-256 Root CA certificate and private key (valid CA_DAYS)."""
     key = ec.generate_private_key(ec.SECP256R1())
     now = datetime.now(timezone.utc)
     subject = issuer = x509.Name([
@@ -39,7 +65,7 @@ def _generate_ca():
         .public_key(key.public_key())
         .serial_number(x509.random_serial_number())
         .not_valid_before(now - timedelta(minutes=5))
-        .not_valid_after(now + timedelta(days=3650))
+        .not_valid_after(now + timedelta(days=CA_DAYS))
         .add_extension(x509.BasicConstraints(ca=True, path_length=0), critical=True)
         .add_extension(
             x509.KeyUsage(
@@ -60,16 +86,11 @@ def _generate_ca():
         .sign(key, hashes.SHA256())
     )
     cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode()
-    key_pem = key.private_bytes(
-        serialization.Encoding.PEM,
-        serialization.PrivateFormat.PKCS8,
-        serialization.NoEncryption(),
-    ).decode()
-    return cert_pem, key_pem, cert, key
+    return cert_pem, _encrypt_key(key), cert, key
 
 
 def ensure_ca(regenerate=False):
-    """Return (cert_pem, key_pem, cert_obj, key_obj), creating and storing the CA in Setting if needed."""
+    """Return (cert_pem, encrypted key_pem, cert_obj, key_obj), creating and storing the CA in Setting if needed."""
     global _cached_ca
     with _lock:
         if not regenerate and _cached_ca is not None:
@@ -82,11 +103,18 @@ def ensure_ca(regenerate=False):
         if not regenerate and cert_pem and key_pem:
             try:
                 cert = x509.load_pem_x509_certificate(cert_pem.encode())
-                key = serialization.load_pem_private_key(key_pem.encode(), password=None)
+                key, plaintext = _load_key(key_pem)
+                if plaintext:
+                    key_pem = _encrypt_key(key)
+                    try:
+                        Setting.objects.filter(key=CA_PRIV_KEY).update(value=key_pem)
+                    except DatabaseError:
+                        pass  # encrypted at the next start
                 _cached_ca = (cert_pem, key_pem, cert, key)
                 return _cached_ca
             except ValueError:
-                pass
+                # unreadable, or SECRET_KEY changed: a new CA, that every client has to install again
+                print('Proxy: the stored Root CA key cannot be read (SECRET_KEY changed?): a new Root CA is made', file=sys.stderr, flush=True)
         cert_pem, key_pem, cert, key = _generate_ca()
         try:
             with transaction.atomic():
@@ -139,7 +167,7 @@ def build_leaf_pem(host):
             x509.KeyUsage(
                 digital_signature=True,
                 content_commitment=False,
-                key_encipherment=True,
+                key_encipherment=False,  # an EC key signs, it never encrypts a key (RFC 5480 3)
                 data_encipherment=False,
                 key_agreement=False,
                 key_cert_sign=False,

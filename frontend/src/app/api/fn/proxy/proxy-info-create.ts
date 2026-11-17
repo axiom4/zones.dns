@@ -10,11 +10,17 @@ import { RequestBuilder } from '../../request-builder';
 import { ProxyInfo } from '../../models/proxy-info';
 
 export interface ProxyInfoCreate$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
 }
 
 export function proxyInfoCreate(http: HttpClient, rootUrl: string, params?: ProxyInfoCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyInfo>> {
   const rb = new RequestBuilder(rootUrl, proxyInfoCreate.PATH, 'post');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
   }
 
   return http.request(

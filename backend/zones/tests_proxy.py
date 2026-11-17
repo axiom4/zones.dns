@@ -216,7 +216,7 @@ class ProxyAndWpadTests(TestCase):
         self.assertIn(b'X-Blocked-By: Zones.dns (blacklist:', resp)
 
         # 3. HTTP request to allowed page decompresses gzip, strips ads/popups, and injects CSS & popup blocker
-        resp = _run_proxy_session(b'GET http://127.0.0.1/gzip-page HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n', make_server_ns())
+        resp = _run_proxy_session(b'GET http://127.0.0.1/gzip-page HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n', make_server_ns())
         text = resp.decode()
         self.assertIn('200 OK', text)
         self.assertNotIn('ads.badtracker.example', text)
@@ -227,7 +227,7 @@ class ProxyAndWpadTests(TestCase):
 
         # 3b. Upstream Brotli/Zstd response or lowercase accept-encoding is never corrupted into replacement chars
         resp_br = _run_proxy_session(
-            b'GET http://127.0.0.1/br-page HTTP/1.1\r\nHost: 127.0.0.1\r\naccept-encoding: gzip, deflate, br, zstd\r\n\r\n',
+            b'GET http://127.0.0.1/br-page HTTP/1.1\r\nHost: 127.0.0.1\r\naccept-encoding: gzip, deflate, br, zstd\r\nConnection: close\r\n\r\n',
             make_server_ns(),
         )
         self.assertIn(b'Content-Encoding: br\r\n', resp_br)
@@ -577,3 +577,220 @@ class StreamingTests(TestCase):
         self.assertIn(b'200 OK', resp)
         self.assertTrue(resp.endswith(b'{"a":1}'))  # no Content-Length: the body ends with the connection
         self.assertNotIn(b'Transfer-Encoding', resp)
+
+
+class RfcAndSecurityTests(TestCase):
+    """Request smuggling, framing, CONNECT ports, headers a proxy must add or drop, logs without secrets, bounded decompression, the CA key."""
+
+    def _session(self, raw, response=None, cfg=None):
+        seen = {}
+
+        def fetcher(scheme, host, port, method, path, body, headers):
+            seen.update(body=body, headers=headers)
+            return response or (200, 'OK', [('Content-Type', 'text/plain'), ('Date', 'Tue, 17 Nov 2026 10:00:00 GMT')], b'ok')
+
+        ns = SimpleNamespace(
+            settings_getter=lambda: cfg or SimpleNamespace(PROXY_BLOCK_ADS=True, PROXY_BLOCK_POPUPS=True, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, http_fetcher=fetcher, upstream_ssl_context=None, tunnel_factory=None,
+        )
+        return _run_proxy_session(raw, ns), seen
+
+    def test_chunked_body_with_a_content_length_is_not_smuggled(self):
+        data = b'x=1GET /smuggled HTTP/1.1\r\nHost: victim\r\n\r\n'
+        resp, seen = self._session(b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\nContent-Length: 3\r\nConnection: close\r\n\r\n'
+                                   + f'{len(data):x}'.encode() + b'\r\n' + data + b'\r\n0\r\n\r\n')
+        self.assertIn(b'200 OK', resp)
+        self.assertEqual(seen['body'], data)
+        self.assertNotIn('content-length', {k.lower() for k in seen['headers']})  # http.client frames the body it sends
+
+    def test_bad_framing_is_refused(self):
+        for raw in (
+            b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n-1\r\nabc\r\n0\r\n\r\n',
+            b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n0x3\r\nabc\r\n0\r\n\r\n',
+            b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: gzip, chunked\r\nConnection: close\r\n\r\n0\r\n\r\n',
+            b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\nContent-Length: 4\r\nConnection: close\r\n\r\nabcd',
+            b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nContent-Length: -3\r\nConnection: close\r\n\r\n',
+        ):
+            resp, seen = self._session(raw)
+            self.assertIn(b' 400 ', resp.split(b'\r\n', 1)[0], raw)
+            self.assertEqual(seen, {})
+
+    def test_a_large_body_is_streamed_not_held(self):
+        from unittest import mock
+        from .proxy import server as ps
+        with mock.patch.object(ps, 'MAX_BUFFERED_BODY', 4):
+            resp, seen = self._session(b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nContent-Length: 10\r\nConnection: close\r\n\r\n0123456789')
+            self.assertEqual(seen['body'], b'0123456789')
+            self.assertEqual(seen['headers']['Content-Length'], '10')
+            resp, seen = self._session(b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n')
+            self.assertEqual(seen['body'], b'abcdef')
+            self.assertNotIn('Content-Length', seen['headers'])
+
+    def test_headers_a_proxy_adds_and_drops(self):
+        resp, seen = self._session(b'GET http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nConnection: close, X-Hop\r\nX-Hop: secret\r\nX-Keep: 1\r\n\r\n')
+        self.assertNotIn('X-Hop', seen['headers'])  # listed in Connection: hop-by-hop (RFC 9110 7.6.1)
+        self.assertEqual(seen['headers']['X-Keep'], '1')
+        self.assertEqual(seen['headers']['Via'], '1.1 zones-dns')
+        head = resp.split(b'\r\n\r\n', 1)[0]
+        self.assertEqual(head.count(b'\r\nDate:'), 1)  # the upstream's, not a second one of ours
+        self.assertNotIn(b'BaseHTTP', head)
+        self.assertIn(b'\r\nVia: 1.1 zones-dns', head)
+
+    def test_options_with_max_forwards_zero_is_answered_by_the_proxy(self):
+        resp, seen = self._session(b'OPTIONS http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nMax-Forwards: 0\r\nConnection: close\r\n\r\n')
+        self.assertIn(b'200 OK', resp)
+        self.assertIn(b'Allow:', resp)
+        self.assertEqual(seen, {})
+
+    def test_connect_only_to_allowed_ports(self):
+        with override_settings(PROXY_CONNECT_PORTS='443'):
+            resp, _ = self._session(b'CONNECT mail.example:25 HTTP/1.1\r\nHost: mail.example:25\r\n\r\n')
+        self.assertIn(b'403', resp.split(b'\r\n', 1)[0])
+
+    def test_the_server_itself_only_on_web_ports(self):
+        from .proxy import server as ps
+        with self.assertRaises(PermissionError):
+            ps._resolve_target('192.168.1.23', 5432, own_ips=frozenset({'192.168.1.23'}))
+        self.assertEqual(ps._resolve_target('192.168.1.23', 443, own_ips=frozenset({'192.168.1.23'}))[0][1], ('192.168.1.23', 443))
+
+    def test_the_log_keeps_no_query_values(self):
+        from .proxy.server import _redact_url
+        self.assertEqual(_redact_url('https://a.example/cb?code=SECRET&state=x&flag'), 'https://a.example/cb?code=…&state=…&flag=…')
+        self.assertEqual(_redact_url('https://a.example/p'), 'https://a.example/p')
+
+    def test_decompression_is_bounded(self):
+        from .proxy import server as ps
+        bomb = gzip.compress(b'\0' * (ps.MAX_HTML_BYTES + 10))
+        with self.assertRaises(ValueError):
+            ps._decompress(bomb, 'gzip')
+        self.assertEqual(ps._decompress(gzip.compress(b'<p>x</p>'), 'gzip'), b'<p>x</p>')
+
+    def test_content_security_policy_is_respected(self):
+        self.assertTrue(pfilter.csp_allows_inline('', 'script-src'))
+        self.assertTrue(pfilter.csp_allows_inline("img-src 'self'", 'script-src'))
+        self.assertTrue(pfilter.csp_allows_inline("script-src 'self' 'unsafe-inline'", 'script-src'))
+        self.assertFalse(pfilter.csp_allows_inline("default-src 'self'", 'script-src'))
+        self.assertFalse(pfilter.csp_allows_inline("script-src 'unsafe-inline' 'nonce-abc'", 'script-src'))
+        self.assertFalse(pfilter.csp_allows_inline("script-src *, script-src 'self'", 'script-src'))
+        html = pfilter.filter_html(b'<html><head></head><body></body></html>', 'text/html', host='news.example', csp="script-src 'self'").decode()
+        self.assertNotIn('zones-popup-blocker', html)
+        self.assertIn('zones-adblock-css', html)
+
+    def test_a_page_in_another_charset_is_not_damaged(self):
+        raw = '<html><head><meta charset="windows-1252"></head><body>caffè perché</body></html>'.encode('cp1252')
+        out = pfilter.filter_html(raw, 'text/html', host='news.example')
+        self.assertIn('caffè perché'.encode('cp1252'), out)
+
+    def test_two_empty_mitm_sessions_switch_to_a_tunnel(self):
+        from .proxy import server as ps
+        ps._mitm_strikes.clear()
+        _mitm_failed.clear()
+        self.assertFalse(ps.note_empty_mitm_session('10.0.0.5', 'app.example'))  # a preconnect that was never used
+        self.assertFalse(is_mitm_failed('10.0.0.5', 'app.example'))
+        self.assertTrue(ps.note_empty_mitm_session('10.0.0.5', 'app.example'))
+        self.assertTrue(is_mitm_failed('10.0.0.5', 'app.example'))
+        _mitm_failed.clear()
+
+    def test_the_ca_key_is_stored_encrypted_and_never_shown(self):
+        from cryptography.hazmat.primitives import serialization
+        ca.ensure_ca(regenerate=True)
+        stored = Setting.objects.get(key=ca.CA_PRIV_KEY).value
+        self.assertIn('ENCRYPTED', stored)
+        with self.assertRaises(TypeError):
+            serialization.load_pem_private_key(stored.encode(), password=None)
+        # a key stored in clear by an older version is read and encrypted
+        key = ca._cached_ca[3]
+        Setting.objects.filter(key=ca.CA_PRIV_KEY).update(value=key.private_bytes(
+            serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()).decode())
+        ca._cached_ca = None
+        fp = ca.ca_info()['fingerprint']
+        self.assertIn('ENCRYPTED', Setting.objects.get(key=ca.CA_PRIV_KEY).value)
+        self.assertEqual(ca.ca_info()['fingerprint'], fp)
+        admin_user = get_user_model().objects.create_superuser('root', password='x')
+        from .admin.setting import SettingAdmin
+        from django.contrib import admin as dj_admin
+        from django.test import RequestFactory
+        req = RequestFactory().get('/')
+        req.user = admin_user
+        qs = SettingAdmin(Setting, dj_admin.site).get_queryset(req)
+        self.assertFalse(qs.filter(key=ca.CA_PRIV_KEY).exists())
+
+    def test_root_ca_and_profile_only_over_https(self):
+        with override_settings(GUI_URL='https://dns.example/'):
+            r = self.client.get('/proxy-ca.crt', HTTP_HOST='wpad.example')
+            self.assertEqual((r.status_code, r['Location']), (302, 'https://dns.example/proxy-ca.crt'))
+            r = self.client.get('/proxy.mobileconfig', HTTP_HOST='wpad.example')
+            self.assertEqual(r['Location'], 'https://dns.example/proxy.mobileconfig')
+            self.assertEqual(self.client.get('/wpad.dat', HTTP_HOST='wpad.example').status_code, 200)  # OS WPAD clients: plain http
+
+
+class NoPostRetryTests(TestCase):
+    def test_a_post_never_uses_a_pooled_connection(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from .proxy import server as ps
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_POST(self):
+                self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(200)
+                self.send_header('Content-Length', '2')
+                self.send_header('Content-Type', 'text/plain')
+                self.end_headers()
+                self.wfile.write(b'ok')
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        key = ('http', '127.0.0.1', srv.server_port, '127.0.0.1')
+        stale = SimpleNamespace(close=lambda: None, sock=None)
+        ps._pool_give(key, stale)
+        self.addCleanup(lambda: ps._pool.pop(key, None))
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=False, PROXY_BLOCK_POPUPS=False, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=None,
+        )
+        resp = _run_proxy_session(f'POST http://127.0.0.1:{srv.server_port}/send HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc'.encode(), ns)
+        self.assertIn(b'200 OK', resp)
+        self.assertIs(ps._pool[key][0][0], stale)  # left alone: a POST could not be sent again if that connection had died
+
+    def test_a_real_html_page_is_filtered_and_framed(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        page = b'<html><head><title>t</title></head><body>' + b'x' * 5000 + b'</body></html>'
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_GET(self):
+                assert self.headers['Accept-Encoding'] == 'gzip, deflate' and self.headers['Via'] == '1.1 zones-dns'
+                body = gzip.compress(page)
+                self.send_response(200)
+                self.send_header('Content-Type', 'text/html; charset=utf-8')
+                self.send_header('Content-Encoding', 'gzip')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=True, PROXY_BLOCK_POPUPS=True, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=None,
+        )
+        resp = _run_proxy_session(f'GET http://127.0.0.1:{srv.server_port}/ HTTP/1.1\r\nHost: x\r\nAccept-Encoding: br\r\nConnection: close\r\n\r\n'.encode(), ns)
+        head, _, body = resp.partition(b'\r\n\r\n')
+        self.assertIn(b'zones-popup-blocker', body)
+        self.assertIn(f'Content-Length: {len(body)}'.encode(), head)
+        self.assertNotIn(b'Content-Encoding', head)
