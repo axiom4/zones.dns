@@ -11,7 +11,7 @@ from drf_spectacular.utils import OpenApiParameter, extend_schema
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from ..models import QueryLog, StatCount
+from ..models import ProxyLog, QueryLog, StatCount
 from ..stats.rollup import answer_kind, floor_hour
 from ..serializers import StatsSerializer
 
@@ -67,6 +67,26 @@ def _from_counters(start):
     }
 
 
+REASONS = ('blacklist', 'rule-list', 'popup-url', 'ad-url', 'custom-rule')  # the words before ":" in the reason of a blocked proxy request
+
+
+def _proxy(start):
+    """What the filtering proxy did in the window (its own log, kept QUERY_LOG_DAYS days). shortcut: read from the log, not from hourly counters."""
+    qs = ProxyLog.objects.filter(time__gte=start)
+    by = {r['outcome']: r['n'] for r in qs.values('outcome').annotate(n=Count('id'))}
+    blocked = qs.filter(outcome='blocked')
+    reasons = blocked.aggregate(**{k: Count('id', filter=Q(reason__startswith=k + ':')) for k in REASONS})
+    return {
+        'total': sum(by.values()),
+        'blocked': by.get('blocked', 0),
+        'filtered': by.get('filtered', 0),
+        'errors': by.get('error', 0),
+        'by_reason': sorted(({'name': k, 'count': n} for k, n in reasons.items() if n), key=lambda r: -r['count']),
+        'top_blocked': _counts(blocked, 'host', 10),
+        'top_clients': _counts(blocked, 'client', 10),
+    }
+
+
 class StatsView(APIView):
     @extend_schema(
         parameters=[OpenApiParameter('hours', int, description='Time window in hours (default 24, max 720)'),
@@ -97,6 +117,7 @@ class StatsView(APIView):
         # and start at the hour in which the window begins.
         data = (_from_log if step == 60 else _from_counters)(start)
         data['step'] = step
+        data['proxy'] = _proxy(start)
         try:
             # shortcut: numbers up to 30 s old (5 min for periods over a day, which read the hourly counters of every name), to spare the repeated scans
             cache.set(key, data, 30 if now - start <= timedelta(hours=24) else 300)

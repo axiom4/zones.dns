@@ -3,6 +3,7 @@
 
 import { Bucket } from '../models/bucket';
 import { Count } from '../models/count';
+import { ProxyStats } from '../models/proxy-stats';
 export interface Stats {
   avg_ms: number;
 
@@ -12,6 +13,11 @@ export interface Stats {
   by_answer: Array<Count>;
   by_outcome: Array<Count>;
   by_type: Array<Count>;
+
+  /**
+   * The filtering proxy in the same window
+   */
+  proxy: ProxyStats;
   series: Array<Bucket>;
 
   /**

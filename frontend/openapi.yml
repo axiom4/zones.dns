@@ -4166,6 +4166,43 @@ components:
         PROXY_CUSTOM_RULES:
           type: string
           maxLength: 8000
+    ProxyStats:
+      type: object
+      properties:
+        total:
+          type: integer
+          description: Requests the proxy handled
+        blocked:
+          type: integer
+        filtered:
+          type: integer
+          description: Pages whose ads or popups were stripped
+        errors:
+          type: integer
+        by_reason:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+          description: 'Why requests were blocked: blacklist, rule-list, popup-url,
+            ad-url, custom-rule'
+        top_blocked:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+          description: Hosts blocked most often
+        top_clients:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+          description: Clients that were blocked most often
+      required:
+      - blocked
+      - by_reason
+      - errors
+      - filtered
+      - top_blocked
+      - top_clients
+      - total
     ProxyTestRequestRequest:
       type: object
       properties:
@@ -4699,11 +4736,16 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Bucket'
+        proxy:
+          allOf:
+          - $ref: '#/components/schemas/ProxyStats'
+          description: The filtering proxy in the same window
       required:
       - avg_ms
       - by_answer
       - by_outcome
       - by_type
+      - proxy
       - series
       - step
       - top_blocked

@@ -457,3 +457,17 @@ class RuleListTests(TestCase):
             st.BLOCKLISTS = []
             call_command('import_blocklist', stdout=__import__('io').StringIO())
         self.assertEqual(Setting.objects.get(key='prl:e').value, '||ads.example^')
+
+
+class ProxyStatsTests(TestCase):
+    def test_stats_include_the_proxy(self):
+        for host, outcome, reason in [('ads.example', 'blocked', 'blacklist: ads.example (x)'), ('ads.example', 'blocked', 'rule-list: ads.example (easy)'),
+                                      ('pop.example', 'blocked', 'popup-url: /popunder'), ('ok.example', 'allowed', 'text/html'), ('pg.example', 'filtered', 'html')]:
+            ProxyLog.objects.create(client='192.168.1.9', method='GET', host=host, outcome=outcome, reason=reason)
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('admin_s', password='x', is_staff=True))
+        p = api.get('/api/stats/?hours=1').json()['proxy']
+        self.assertEqual((p['total'], p['blocked'], p['filtered'], p['errors']), (5, 3, 1, 0))
+        self.assertEqual({r['name']: r['count'] for r in p['by_reason']}, {'blacklist': 1, 'rule-list': 1, 'popup-url': 1})
+        self.assertEqual(p['top_blocked'][0], {'name': 'ads.example', 'count': 2})
+        self.assertEqual(p['top_clients'], [{'name': '192.168.1.9', 'count': 3}])

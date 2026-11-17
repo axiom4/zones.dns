@@ -83,4 +83,34 @@
       } @empty { <p class="soft">No data.</p> }
     </section>
   </div>
+
+  @if (st.proxy.total) {
+    <section class="panel">
+      <h3>Proxy <small class="soft">HTTP / HTTPS requests that went through the filtering proxy</small></h3>
+      <div class="tiles">
+        <div class="tile"><b>{{ st.proxy.total }}</b><span>Requests</span></div>
+        <div class="tile warn"><b>{{ st.proxy.blocked }}</b><span>Blocked</span></div>
+        <div class="tile"><b>{{ st.proxy.filtered }}</b><span>Pages cleaned</span></div>
+        <div class="tile"><b>{{ st.proxy.errors }}</b><span>Errors</span></div>
+      </div>
+      <h4>Why requests were blocked</h4>
+      @for (r of st.proxy.by_reason; track r.name) {
+        <div class="row"><span class="bar warn" [style.width.%]="pct(r.count, st.proxy.by_reason)"></span><span class="n" [title]="reasonHint(r.name)">{{ reasonLabel(r.name) }}</span><span class="c">{{ r.count }}</span></div>
+      } @empty { <p class="soft">Nothing blocked.</p> }
+      <div class="grid2">
+        <div>
+          <h4>Hosts blocked most often</h4>
+          @for (d of st.proxy.top_blocked; track d.name) {
+            <div class="row"><span class="bar warn" [style.width.%]="pct(d.count, st.proxy.top_blocked)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
+          } @empty { <p class="soft">No data.</p> }
+        </div>
+        <div>
+          <h4>Clients blocked most often</h4>
+          @for (d of st.proxy.top_clients; track d.name) {
+            <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.proxy.top_clients)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
+          } @empty { <p class="soft">No data.</p> }
+        </div>
+      </div>
+    </section>
+  }
 }

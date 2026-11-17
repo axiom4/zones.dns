@@ -82,6 +82,7 @@ export type { ProxyLogPurgeResult } from './models/proxy-log-purge-result';
 export type { ProxyLogsResponse } from './models/proxy-logs-response';
 export type { ProxyRuleList } from './models/proxy-rule-list';
 export type { ProxySettings } from './models/proxy-settings';
+export type { ProxyStats } from './models/proxy-stats';
 export type { ProxyTestRequestRequest } from './models/proxy-test-request-request';
 export type { ProxyTestResult } from './models/proxy-test-result';
 export type { PublicList } from './models/public-list';
