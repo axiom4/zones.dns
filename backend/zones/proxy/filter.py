@@ -59,18 +59,9 @@ INLINE_POPUP_RX = re.compile(
     re.IGNORECASE,
 )
 
-# Cosmetic CSS rules injected into HTML pages when PROXY_BLOCK_ADS is enabled
+# Cosmetic CSS rules injected into HTML pages when PROXY_BLOCK_ADS is enabled.
+# Avoids classic anti-adblock bait class names (.adsbox, .ad-banner, .advertisement) so bait offsetHeight checks do not trigger "Ad Blocker Detected" modals.
 DEFAULT_AD_SELECTORS = (
-    '.adsbox',
-    '.ad-banner',
-    '.ad-container',
-    '.ad-wrapper',
-    '.ad-slot',
-    '.ad-unit',
-    '.ad-leaderboard',
-    '.ad-sidebar',
-    '.advertisement',
-    '.sponsored-banner',
     'ins.adsbygoogle',
     '[id^="div-gpt-ad"]',
     '[id^="google_ads_iframe"]',
@@ -83,10 +74,16 @@ DEFAULT_AD_SELECTORS = (
     'iframe[src*="googlesyndication.com"]',
 )
 
-# Anti-popup & anti-popunder script injected into <head> when PROXY_BLOCK_POPUPS is enabled
+# Anti-popup & anti-popunder script (plus harmless tracker/ad global stubs to prevent anti-adblock detection)
 POPUP_BLOCKER_JS = (
     '<script id="zones-popup-blocker">(function(){'
     'var me=document.currentScript;if(me&&me.parentNode)me.parentNode.removeChild(me);'
+    'var noop=function(){};'
+    'window.adsbygoogle=window.adsbygoogle||{loaded:true,push:noop};'
+    'window.ga=window.ga||noop;window.gtag=window.gtag||noop;'
+    'window.google_tag_manager=window.google_tag_manager||{};'
+    'window.Intercom=window.Intercom||noop;'
+    'window.Appcues=window.Appcues||{identify:noop,page:noop,track:noop,on:noop,anonymous:noop,reset:noop,debug:noop};'
     'var origOpen=window.open;'
     'var lastTrusted=0;'
     'var recordTrust=function(e){if(e&&e.isTrusted)lastTrusted=Date.now();};'

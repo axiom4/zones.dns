@@ -176,6 +176,18 @@ TRANSPARENT_GIF = (
     b'GIF89a\x01\x00\x01\x00\x80\x00\x00\x00\x00\x00\xff\xff\xff!'
     b'\xf9\x04\x01\x00\x00\x00\x00,\x00\x00\x00\x00\x01\x00\x01\x00\x00\x02\x02D\x01\x00;'
 )
+SURROGATE_JS = (
+    b'/* blocked by Zones.dns */\n'
+    b'(function(w){'
+    b'var noop=function(){};'
+    b'w.adsbygoogle=w.adsbygoogle||{loaded:true,push:noop};'
+    b'w.ga=w.ga||noop;w.gtag=w.gtag||noop;w.dataLayer=w.dataLayer||[];'
+    b'w.google_tag_manager=w.google_tag_manager||{};'
+    b'w.Intercom=w.Intercom||noop;'
+    b'w.Appcues=w.Appcues||{identify:noop,page:noop,track:noop,on:noop,anonymous:noop,reset:noop,debug:noop};'
+    b'w._hsq=w._hsq||[];w.fbq=w.fbq||noop;w.lintrk=w.lintrk||noop;'
+    b'})(typeof window!=="undefined"?window:this);\n'
+)
 MAX_HTML_BYTES = 8 * 1024 * 1024  # 8 MB cap for in-memory HTML filtering
 
 
@@ -434,19 +446,34 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
     def _send_blocked(self, reason, detail, path=''):
         header_val = f'Zones.dns ({reason}: {detail})'
+        origin = self.headers.get('Origin') or '*'
+        hdrs = {
+            'X-Blocked-By': header_val,
+            'Access-Control-Allow-Origin': origin,
+            'Access-Control-Allow-Credentials': 'true',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
+            'Access-Control-Allow-Headers': '*',
+            'Cache-Control': 'no-store',
+        }
+        if self.command == 'OPTIONS':
+            self._send_bytes(204, 'text/plain; charset=utf-8', b'', hdrs)
+            return
         low_path = (path or '').lower().partition('?')[0]
         accept = (self.headers.get('Accept') or '').lower()
-        if low_path.endswith('.js') or 'javascript' in accept:
-            self._send_bytes(200, 'application/javascript; charset=utf-8', b'/* blocked by Zones.dns */\n', {'X-Blocked-By': header_val})
-        elif low_path.endswith('.css') or 'text/css' in accept:
-            self._send_bytes(200, 'text/css; charset=utf-8', b'/* blocked by Zones.dns */\n', {'X-Blocked-By': header_val})
+        sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
+        if low_path.endswith('.js') or 'javascript' in accept or sec_dest == 'script':
+            self._send_bytes(200, 'application/javascript; charset=utf-8', SURROGATE_JS, hdrs)
+        elif low_path.endswith('.css') or 'text/css' in accept or sec_dest == 'style':
+            self._send_bytes(200, 'text/css; charset=utf-8', b'/* blocked by Zones.dns */\n', hdrs)
         elif low_path.endswith('.map'):
-            self._send_bytes(200, 'application/json; charset=utf-8', b'{"version":3,"sources":[],"mappings":""}', {'X-Blocked-By': header_val})
-        elif low_path.endswith(('.gif', '.png', '.jpg', '.jpeg', '.webp', '.ico')) or accept.startswith('image/'):
-            self._send_bytes(200, 'image/gif', TRANSPARENT_GIF, {'X-Blocked-By': header_val})
+            self._send_bytes(200, 'application/json; charset=utf-8', b'{"version":3,"sources":[],"mappings":""}', hdrs)
+        elif low_path.endswith(('.gif', '.png', '.jpg', '.jpeg', '.webp', '.ico', '.svg')) or accept.startswith('image/') or sec_dest == 'image':
+            self._send_bytes(200, 'image/gif', TRANSPARENT_GIF, hdrs)
+        elif 'application/json' in accept or self.command == 'POST' or sec_dest in ('empty', 'fetch', 'xhr'):
+            self._send_bytes(200, 'application/json; charset=utf-8', b'{}', hdrs)
         else:
             body = f'<!doctype html><title>Blocked</title><!-- blocked by {header_val} -->'.encode()
-            self._send_bytes(403, 'text/html; charset=utf-8', body, {'X-Blocked-By': header_val})
+            self._send_bytes(403, 'text/html; charset=utf-8', body, hdrs)
 
     def _handle_local(self, s):
         """Serve /wpad.dat, /proxy.pac, /ca.crt (/ca.pem) and /proxy.mobileconfig when requested directly from the proxy port."""
@@ -686,22 +713,6 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 host, port = host_port.lower(), 443
 
         target_url = f'https://{host}:{port}/' if port != 443 else f'https://{host}/'
-        if hit := pfilter.check_request(host, target_url, s=s):
-            self._log('CONNECT', host, target_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Blocked by Zones.dns', {'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
-            return
-
-        try:
-            family, addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
-        except PermissionError:
-            self._log('CONNECT', host, target_url, 'error', 403, 'Forbidden target address', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
-            return
-        except OSError:
-            self._log('CONNECT', host, target_url, 'error', 502, 'DNS lookup failed', t0)
-            self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
-            return
-
         client_ip = self.client_address[0]
         allow_domains, _, _, _ = pfilter.parse_custom_rules(getattr(s, 'PROXY_CUSTOM_RULES', ''))
         mitm_bypassed_for_client = is_mitm_failed(client_ip, host)
@@ -712,6 +723,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         )
 
         if use_mitm:
+            # With MITM enabled, accept CONNECT locally (without contacting or resolving the remote host yet)
+            # so blocked tracker scripts/fetches inside the tunnel receive a stealth 200 OK surrogate from _send_blocked()
+            # instead of a hard CONNECT 403 network error that triggers "Ad Blocker Detected" walls.
             self.send_response(200, 'Connection Established')
             self.end_headers()
             self.wfile.flush()
@@ -733,6 +747,22 @@ class ProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
             self.close_connection = True
+            return
+
+        if hit := pfilter.check_request(host, target_url, s=s):
+            self._log('CONNECT', host, target_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
+            self._send_bytes(403, 'text/plain; charset=utf-8', b'Blocked by Zones.dns', {'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
+            return
+
+        try:
+            family, addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
+        except PermissionError:
+            self._log('CONNECT', host, target_url, 'error', 403, 'Forbidden target address', t0)
+            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
+            return
+        except OSError:
+            self._log('CONNECT', host, target_url, 'error', 502, 'DNS lookup failed', t0)
+            self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
             return
 
         try:
