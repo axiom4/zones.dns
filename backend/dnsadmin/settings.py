@@ -329,4 +329,5 @@ PROXY_ADDRESS = ''  # bind address of the proxy server; empty = 0.0.0.0
 PROXY_BLOCK_ADS = True  # block ad/tracker domains (from Blacklist), ad URLs, and strip ad elements/CSS in HTML pages
 PROXY_BLOCK_POPUPS = True  # block popup/popunder scripts and inject window.open / overlay popup protection in HTML pages
 PROXY_HTTPS_MITM = False  # intercept HTTPS traffic with the local Proxy Root CA to filter HTML and block popups inside HTTPS pages
+PROXY_RULE_LISTS = ''  # external ad-block lists (EasyList syntax), `name=https://…` separated by spaces or new lines; downloaded by the proxy every day, see zones/proxy/rules.py
 PROXY_CUSTOM_RULES = ''  # extra rules (one per line): URL substrings/regexes, ##.css-selector cosmetic rules, @@domain exceptions

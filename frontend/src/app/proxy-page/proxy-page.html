@@ -144,7 +144,30 @@
       </div>
     </fieldset>
 
-    <div class="actions">
+        <fieldset class="group">
+      <legend>External ad-block lists</legend>
+      <p class="soft">Lists in Adblock Plus / EasyList syntax, downloaded by the proxy every day. It applies the domain rules (<code>||domain^</code>), the exceptions (<code>&#64;&#64;||domain^</code>) and the rules that hide page elements (<code>##selector</code>); URL fragments and rules with browser-only options are skipped.</p>
+      <div class="grid">
+        <label class="f wide">
+          <span>Lists (one <code>name=https://…</code> per line)</span>
+          <textarea name="PROXY_RULE_LISTS" [(ngModel)]="cfg().PROXY_RULE_LISTS" rows="3" placeholder="easylist=https://easylist.to/easylist/easylist.txt&#10;easyprivacy=https://easylist.to/easylist/easyprivacy.txt"></textarea>
+          <small class="hint">Save, then Sync now to download at once. A list that cannot be downloaded keeps its last good rules. The proxy must be on (Ad filtering) to use them.</small>
+        </label>
+      </div>
+      @if (rules().length) {
+        <ul class="records">
+          @for (r of rules(); track r.name) {
+            <li>
+              <span class="rname">{{ r.name }}<small class="note-t">{{ r.url }}</small></span>
+              <span class="rvalue">{{ r.blocks }} domains · {{ r.allow }} exceptions · {{ r.cosmetic }} selectors<small class="note-t">{{ r.updated ? 'updated ' + when(r.updated) + ' ' + whenTime(r.updated) : 'not downloaded yet' }}</small>@if (r.error) {<small class="note-t error">{{ r.error }}</small>}</span>
+            </li>
+          }
+        </ul>
+      }
+      <div class="actions"><button class="ghost" type="button" (click)="syncRules()">Sync now</button></div>
+    </fieldset>
+
+  <div class="actions">
       @if (saved()) { <span class="soft">Saved and applied.</span> }
       <button class="primary" type="submit">Save proxy settings</button>
     </div>

@@ -1,6 +1,7 @@
 from datetime import timedelta
 import os
 import sys
+import threading
 import time
 
 from django.conf import settings
@@ -10,7 +11,7 @@ from django.utils import timezone
 
 from zones.dnsd import resolver
 from zones.models import DataVersion, ProxyLog
-from zones.proxy import ca, filter as pfilter
+from zones.proxy import ca, filter as pfilter, rules
 from zones.proxy.server import ProxyLogWriter, ProxyServer, cached_proxy_settings
 
 BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
@@ -73,11 +74,22 @@ class Command(BaseCommand):
                     self.stderr.write(f'Proxy: cannot check settings: {e!r}')
             if now - last_purge >= 3600.0:
                 last_purge = now
+                threading.Thread(target=self.sync_rules, daemon=True).start()  # a download takes seconds: not in the accept loop
                 try:
                     cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
                     pfilter.run_on_db_pool(lambda: ProxyLog.objects.filter(time__lt=cutoff).delete())
                 except Exception:
                     pass
+
+    @staticmethod
+    def sync_rules():
+        try:
+            if rules.due():
+                rules.sync_all()
+        except Exception as e:
+            print(f'Proxy: rule lists not updated: {e!r}', file=sys.stderr)
+        finally:
+            connections.close_all()
 
     def reload_if_changed(self, srv, writer=None):
         ver = pfilter.run_on_db_pool(DataVersion.version)

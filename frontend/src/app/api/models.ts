@@ -80,6 +80,7 @@ export type { ProxyLogOutcomeEnum } from './models/proxy-log-outcome-enum';
 export type { ProxyLogPurgeRequestRequest } from './models/proxy-log-purge-request-request';
 export type { ProxyLogPurgeResult } from './models/proxy-log-purge-result';
 export type { ProxyLogsResponse } from './models/proxy-logs-response';
+export type { ProxyRuleList } from './models/proxy-rule-list';
 export type { ProxySettings } from './models/proxy-settings';
 export type { ProxyTestRequestRequest } from './models/proxy-test-request-request';
 export type { ProxyTestResult } from './models/proxy-test-result';

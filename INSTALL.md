@@ -310,6 +310,7 @@ Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving
   - Blocks all domains in the Blacklist (both HTTP requests and HTTPS `CONNECT` tunnels), plus ad and popup URL patterns.
   - Filters HTML pages (`PROXY_BLOCK_ADS=true`, `PROXY_BLOCK_POPUPS=true`) by stripping ad/popup `<script>` and `<iframe>` tags, injecting cosmetic CSS rules (`##selector`), and injecting an early `window.open` / click-hijack popup blocker.
   - **HTTPS modes:** With `PROXY_HTTPS_MITM=false` (default), HTTPS connections use standard `CONNECT` and block ad/popup domains without needing any certificate on clients. With `PROXY_HTTPS_MITM=true`, the proxy intercepts HTTPS traffic using a local Proxy Root CA (downloadable from **DHCP > Proxy** or `http://<server>:8080/ca.crt` / `/proxy-ca.crt`) to filter HTML and block popups inside HTTPS pages as well.
+  - **External ad-block lists:** in *Proxy > Settings* add lists as `name=https://…` (e.g. `easylist=https://easylist.to/easylist/easylist.txt`). `manage.py import_blocklist` downloads them together with the blacklists (cron), `runproxy` also every day, and *Sync now* does it at once. Only domain rules, exceptions and element-hiding rules are applied; the rules live in the database, so a list that cannot be downloaded keeps its last good copy.
 
 Add to `/etc/supervisor/conf.d/dns.conf`:
 

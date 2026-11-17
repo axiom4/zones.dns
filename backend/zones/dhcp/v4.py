@@ -75,6 +75,7 @@ DHCP_SETTING_SPEC = (
     ('PROXY_BLOCK_ADS', bool),
     ('PROXY_BLOCK_POPUPS', bool),
     ('PROXY_HTTPS_MITM', bool),
+    ('PROXY_RULE_LISTS', str),
     ('PROXY_CUSTOM_RULES', str),
 )
 

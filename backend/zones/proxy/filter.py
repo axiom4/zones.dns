@@ -8,6 +8,7 @@ from urllib.parse import urlparse
 from django.db import connection
 
 from ..dnsd import resolver
+from . import rules
 
 _db_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='proxy-db')
 
@@ -196,12 +197,15 @@ def check_request(host, url='', s=None):
     block_popups = True if s is None else bool(getattr(s, 'PROXY_BLOCK_POPUPS', True))
     custom_raw = '' if s is None else str(getattr(s, 'PROXY_CUSTOM_RULES', '') or '')
     allow_domains, url_patterns, _, _ = parse_custom_rules(custom_raw)
-    if is_domain_allowed(h, allow_domains):
+    ext = rules.loaded()
+    if is_domain_allowed(h, allow_domains) or is_domain_allowed(h, ext.allow):
         return None
     if block_ads and h:
         hit = _check_domain_blocked(h)
         if hit:
             return ('blacklist', f'{hit[0]} ({hit[1]})')
+        if hit := rules.blocked_by(h, ext):
+            return ('rule-list', f'{hit[0]} ({hit[1]})')
     full_url = url or h
     if block_popups and full_url and (m := POPUP_URL_RX.search(full_url)):
         return ('popup-url', m.group(0))
@@ -239,7 +243,8 @@ def filter_html(html_bytes, content_type='', host='', s=None):
     custom_raw = '' if s is None else str(getattr(s, 'PROXY_CUSTOM_RULES', '') or '')
     allow_domains, _, global_css, domain_css = parse_custom_rules(custom_raw)
     h = (host or '').strip().lower().rstrip('.').partition(':')[0]
-    if is_domain_allowed(h, allow_domains) or is_domain_allowed(h, _NO_HTML_FILTER_DOMAINS):
+    ext = rules.loaded()
+    if is_domain_allowed(h, allow_domains) or is_domain_allowed(h, ext.allow) or is_domain_allowed(h, _NO_HTML_FILTER_DOMAINS):
         return html_bytes
 
     if b'\x00' in html_bytes[:1024]:
@@ -280,13 +285,13 @@ def filter_html(html_bytes, content_type='', host='', s=None):
     if block_popups and 'id="zones-popup-blocker"' not in text:
         injections.append(POPUP_BLOCKER_JS)
     if block_ads and 'id="zones-adblock-css"' not in text:
-        selectors = list(DEFAULT_AD_SELECTORS) + global_css
+        selectors = list(DEFAULT_AD_SELECTORS) + global_css + ext.global_css
         if h:
             labels = h.split('.')
             for i in range(len(labels)):
                 sub = '.'.join(labels[i:])
-                if sub in domain_css:
-                    selectors.extend(domain_css[sub])
+                selectors.extend(domain_css.get(sub, ()))
+                selectors.extend(ext.domain_css.get(sub, ()))
         css_rule = ', '.join(selectors) + ' { display: none !important; visibility: hidden !important; height: 0 !important; min-height: 0 !important; pointer-events: none !important; }'
         injections.append(f'<style id="zones-adblock-css">{css_rule}</style>')
 

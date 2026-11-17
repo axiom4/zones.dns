@@ -1793,6 +1793,41 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProxyLogPurgeResult'
           description: ''
+  /api/proxy/rules/:
+    get:
+      operationId: proxy_rules_list
+      description: The external ad-block lists of the settings and what the last download
+        of each one did.
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProxyRuleList'
+          description: ''
+    post:
+      operationId: proxy_rules_create
+      description: Download the external ad-block lists now (the proxy also does it
+        every day). A list that fails keeps its old rules and shows the error.
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ProxyRuleList'
+          description: ''
   /api/proxy/settings/:
     get:
       operationId: proxy_settings_retrieve
@@ -3891,6 +3926,9 @@ components:
           type: boolean
         PROXY_HTTPS_MITM:
           type: boolean
+        PROXY_RULE_LISTS:
+          type: string
+          maxLength: 4000
         PROXY_CUSTOM_RULES:
           type: string
           maxLength: 8000
@@ -4067,6 +4105,38 @@ components:
       - count
       - filtered_count
       - results
+    ProxyRuleList:
+      type: object
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        blocks:
+          type: integer
+          description: Domains blocked (with their subdomains)
+        allow:
+          type: integer
+          description: Domains never filtered
+        cosmetic:
+          type: integer
+          description: Selectors that hide page elements
+        updated:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last good download, null before the first
+        error:
+          type: string
+          description: Why the last download failed (the old rules stay in use)
+      required:
+      - allow
+      - blocks
+      - cosmetic
+      - error
+      - name
+      - updated
+      - url
     ProxySettings:
       type: object
       properties:
@@ -4090,6 +4160,9 @@ components:
           type: boolean
         PROXY_HTTPS_MITM:
           type: boolean
+        PROXY_RULE_LISTS:
+          type: string
+          maxLength: 4000
         PROXY_CUSTOM_RULES:
           type: string
           maxLength: 8000

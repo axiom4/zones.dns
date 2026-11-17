@@ -8,6 +8,7 @@ from django.db import transaction
 
 from zones.stats.audit import NAME_RE
 from zones.models import COUNTS_KEY, BlockedDomain, DataVersion
+from zones.proxy import rules
 
 LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
 
@@ -35,7 +36,7 @@ def parse(text):
 
 
 class Command(BaseCommand):
-    help = 'Replace the imported blacklist (source=list) with the union of public blocklists (default: BLOCKLISTS). Manual entries are untouched.'
+    help = 'Replace the imported blacklist (source=list) with the union of public blocklists (default: BLOCKLISTS). Manual entries are untouched. Without arguments it also downloads the proxy ad-block rule lists (PROXY_RULE_LISTS, Proxy page).'
 
     def add_arguments(self, p):
         p.add_argument('sources', nargs='*', help='URLs or file paths (hosts format or one domain per line); default: BLOCKLISTS')
@@ -78,3 +79,9 @@ class Command(BaseCommand):
                 transaction.on_commit(DataVersion.bump)  # after the commit, so the daemon never reloads half-way
         cache.delete(COUNTS_KEY)
         self.stdout.write(f'{len(todo)} domains imported ({len(add)} added, {sum(1 for n in drop if n not in todo)} removed)')
+        if not sources:
+            try:
+                for r in rules.sync_all():
+                    self.stdout.write(f"proxy rules {r['name']}: {r['blocks']} domains, {r['allow']} exceptions, {r['cosmetic']} selectors" + (f" (failed, old rules kept: {r['error']})" if r['error'] else ''))
+            except ValueError as e:
+                self.stderr.write(f'proxy rules not updated: {e}')

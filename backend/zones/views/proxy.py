@@ -14,12 +14,13 @@ from rest_framework.views import APIView
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit
 from ..models import DataVersion, ProxyLog, Setting
-from ..proxy import ca, filter as pfilter, pac
+from ..proxy import ca, filter as pfilter, pac, rules
 from ..serializers import (
     ProxyInfoSerializer,
     ProxyLogPurgeRequestSerializer,
     ProxyLogPurgeResultSerializer,
     ProxyLogsResponseSerializer,
+    ProxyRuleListSerializer,
     ProxySettingsSerializer,
     ProxyTestRequestSerializer,
     ProxyTestResultSerializer,
@@ -53,6 +54,7 @@ class ProxySettingsView(APIView):
                     ipaddress.ip_address(cand.PROXY_ADDRESS)
                 except ValueError:
                     raise ValueError(f'proxy settings: bad PROXY_ADDRESS {cand.PROXY_ADDRESS!r}')
+            rules.split_entries(cand.PROXY_RULE_LISTS)
             if not 1 <= int(cand.PROXY_PORT or 8080) <= 65535:
                 raise ValueError('proxy settings: PROXY_PORT must be 1-65535')
         except ValueError as e:
@@ -67,6 +69,18 @@ class ProxySettingsView(APIView):
         if ser.validated_data:
             DataVersion.bump()
         return Response(ProxySettingsSerializer(self._serialize(cand)).data)
+
+
+class ProxyRulesView(APIView):
+    @extend_schema(responses=ProxyRuleListSerializer(many=True))
+    def get(self, request):
+        """The external ad-block lists of the settings and what the last download of each one did."""
+        return Response(ProxyRuleListSerializer(rules.status(), many=True).data)
+
+    @extend_schema(request=None, responses=ProxyRuleListSerializer(many=True))
+    def post(self, request):
+        """Download the external ad-block lists now (the proxy also does it every day). A list that fails keeps its old rules and shows the error."""
+        return Response(ProxyRuleListSerializer(rules.sync_all(), many=True).data)
 
 
 class ProxyInfoView(APIView):

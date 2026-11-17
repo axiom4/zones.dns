@@ -5,13 +5,15 @@ import { Api } from '../api/api';
 import {
   proxyInfoCreate,
   proxyInfoRetrieve,
+  proxyRulesCreate,
+  proxyRulesList,
   proxyLogsPurgeCreate,
   proxyLogsRetrieve,
   proxyTestCreate,
   proxySettingsPartialUpdate,
   proxySettingsRetrieve,
 } from '../api/functions';
-import { ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
+import { ProxyRuleList, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -26,6 +28,7 @@ export class ProxyPage implements OnDestroy {
   cfg = signal<ProxySettings>({});
   info = signal<ProxyInfo | null>(null);
   saved = signal(false);
+  rules = signal<ProxyRuleList[]>([]);
   testUrl = '';
   testResult = signal<ProxyTestResult | null>(null);
 
@@ -76,12 +79,14 @@ export class ProxyPage implements OnDestroy {
 
   load() {
     return this.ui.run(async () => {
-      const [cfg, info] = await Promise.all([
+      const [cfg, info, rules] = await Promise.all([
         this.api.invoke(proxySettingsRetrieve),
         this.api.invoke(proxyInfoRetrieve),
+        this.api.invoke(proxyRulesList),
       ]);
       this.cfg.set(cfg);
       this.info.set(info);
+      this.rules.set(rules);
       if (this.mode() === 'logs') {
         await this.loadLogs();
       }
@@ -169,6 +174,13 @@ export class ProxyPage implements OnDestroy {
       this.cfg.set(updated);
       this.info.set(await this.api.invoke(proxyInfoRetrieve));
       this.saved.set(true);
+    });
+  }
+
+  syncRules() {
+    return this.ui.run(async () => {
+      this.cfg.set(await this.api.invoke(proxySettingsPartialUpdate, { body: this.cfg() }));
+      this.rules.set(await this.api.invoke(proxyRulesCreate));
     });
   }
 

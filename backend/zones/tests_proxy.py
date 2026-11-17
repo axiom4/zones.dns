@@ -391,3 +391,69 @@ class ProxyAndWpadTests(TestCase):
         with self.assertNumQueries(0):
             s2 = cached_proxy_settings()
             self.assertIs(s1, s2)
+
+
+class RuleListTests(TestCase):
+    """External ad-block lists: reduced to domain and cosmetic rules, stored, applied by the filter."""
+    LIST = '\n'.join([
+        '[Adblock Plus 2.0]', '! comment', '||ads.example^', '||tracker.example^$third-party', '||only.example^$domain=a.com', '||x.example/path^',
+        '/banner/ad-*.gif', '@@||good.ads.example^', '##.ad-box', 'news.example##.promo', 'a.example#@#.ad-box', '##+js(abort)',
+    ])
+
+    def setUp(self):
+        from .proxy import rules
+        self.rules = rules
+        rules.reset()
+        self.addCleanup(rules.reset)
+
+    def test_reduce_keeps_only_what_the_proxy_applies(self):
+        text, counts = self.rules.reduce(self.LIST)
+        self.assertEqual(text.splitlines(), ['||ads.example^', '||tracker.example^', '@@||good.ads.example^', '##.ad-box', 'news.example##.promo'])
+        self.assertEqual(counts, {'blocks': 2, 'allow': 1, 'cosmetic': 2})
+
+    def test_sync_stores_and_filter_applies(self):
+        self.rules.sync_all('easy=https://lists.example/easy.txt', fetcher=lambda url: self.LIST)
+        self.assertEqual(Setting.objects.get(key='prl:easy').value.splitlines()[0], '||ads.example^')
+        from .proxy import filter as pf
+        self.assertEqual(pf.check_request('cdn.ads.example', 'http://cdn.ads.example/a.js')[0], 'rule-list')
+        self.assertIsNone(pf.check_request('good.ads.example', 'http://good.ads.example/a.js'))
+        self.assertIsNone(pf.check_request('fine.example', 'http://fine.example/'))
+        html = pf.filter_html(b'<html><head></head><body></body></html>', 'text/html', host='news.example').decode()
+        self.assertIn('.ad-box', html)
+        self.assertIn('.promo', html)
+
+    def test_failed_list_keeps_old_rules_and_removed_list_goes(self):
+        self.rules.sync_all('a=https://l.example/a.txt b=https://l.example/b.txt', fetcher=lambda url: '||one.example^')
+
+        def boom(url):
+            raise OSError('down')
+        out = self.rules.sync_all('a=https://l.example/a.txt', fetcher=boom)
+        self.assertEqual(out[0]['error'], 'down')
+        self.assertEqual(out[0]['blocks'], 1)
+        self.assertTrue(Setting.objects.filter(key='prl:a').exists())
+        self.assertFalse(Setting.objects.filter(key__in=('prl:b', 'prm:b')).exists())
+
+    def test_entries(self):
+        self.assertEqual(self.rules.split_entries('https://easylist.to/easylist/easylist.txt'), [('easylist.txt', 'https://easylist.to/easylist/easylist.txt')])
+        with self.assertRaises(ValueError):
+            self.rules.split_entries('ftp://x/y')
+
+    def test_api(self):
+        api = APIClient()
+        api.force_authenticate(get_user_model().objects.create_user('admin_r', password='x', is_staff=True))
+        self.assertEqual(api.patch('/api/proxy/settings/', {'PROXY_RULE_LISTS': 'ftp://x'}, format='json').status_code, 400)
+        self.assertEqual(api.patch('/api/proxy/settings/', {'PROXY_RULE_LISTS': 'e=https://l.example/e.txt'}, format='json').status_code, 200)
+        self.assertEqual(api.get('/api/proxy/rules/').json()[0]['updated'], None)
+        from unittest import mock
+        with mock.patch.object(self.rules, 'fetch', return_value='||ads.example^'):
+            res = api.post('/api/proxy/rules/').json()
+        self.assertEqual(res[0]['blocks'], 1)
+
+    def test_import_blocklist_downloads_the_rule_lists(self):
+        from unittest import mock
+        from django.core.management import call_command
+        Setting.objects.update_or_create(key='dhcp:PROXY_RULE_LISTS', defaults={'value': 'e=https://l.example/e.txt'})
+        with mock.patch.object(self.rules, 'fetch', return_value='||ads.example^'), mock.patch('zones.management.commands.import_blocklist.settings') as st:
+            st.BLOCKLISTS = []
+            call_command('import_blocklist', stdout=__import__('io').StringIO())
+        self.assertEqual(Setting.objects.get(key='prl:e').value, '||ads.example^')

@@ -11,4 +11,5 @@ export interface PatchedProxySettingsRequest {
   PROXY_CUSTOM_RULES?: string;
   PROXY_HTTPS_MITM?: boolean;
   PROXY_PORT?: number;
+  PROXY_RULE_LISTS?: string;
 }

@@ -149,6 +149,10 @@ export type { ProxyLogsRetrieve$Params as ProxyLogsRetrieve$Params } from './fn/
 export { proxyLogsRetrieve as proxyLogsRetrieve } from './fn/proxy/proxy-logs-retrieve';
 export type { ProxyLogsPurgeCreate$Params as ProxyLogsPurgeCreate$Params } from './fn/proxy/proxy-logs-purge-create';
 export { proxyLogsPurgeCreate as proxyLogsPurgeCreate } from './fn/proxy/proxy-logs-purge-create';
+export type { ProxyRulesList$Params as ProxyRulesList$Params } from './fn/proxy/proxy-rules-list';
+export { proxyRulesList as proxyRulesList } from './fn/proxy/proxy-rules-list';
+export type { ProxyRulesCreate$Params as ProxyRulesCreate$Params } from './fn/proxy/proxy-rules-create';
+export { proxyRulesCreate as proxyRulesCreate } from './fn/proxy/proxy-rules-create';
 export type { ProxySettingsRetrieve$Params as ProxySettingsRetrieve$Params } from './fn/proxy/proxy-settings-retrieve';
 export { proxySettingsRetrieve as proxySettingsRetrieve } from './fn/proxy/proxy-settings-retrieve';
 export type { ProxySettingsPartialUpdate$Params as ProxySettingsPartialUpdate$Params } from './fn/proxy/proxy-settings-partial-update';

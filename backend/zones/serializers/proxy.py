@@ -10,6 +10,7 @@ class ProxySettingsSerializer(serializers.Serializer):
     PROXY_BLOCK_ADS = serializers.BooleanField(required=False)
     PROXY_BLOCK_POPUPS = serializers.BooleanField(required=False)
     PROXY_HTTPS_MITM = serializers.BooleanField(required=False)
+    PROXY_RULE_LISTS = serializers.CharField(required=False, allow_blank=True, max_length=4000)
     PROXY_CUSTOM_RULES = serializers.CharField(required=False, allow_blank=True, max_length=8000)
 
 
@@ -61,3 +62,13 @@ class ProxyLogPurgeRequestSerializer(serializers.Serializer):
 
 class ProxyLogPurgeResultSerializer(serializers.Serializer):
     deleted = serializers.IntegerField()
+
+
+class ProxyRuleListSerializer(serializers.Serializer):
+    name = serializers.CharField()
+    url = serializers.CharField()
+    blocks = serializers.IntegerField(help_text='Domains blocked (with their subdomains)')
+    allow = serializers.IntegerField(help_text='Domains never filtered')
+    cosmetic = serializers.IntegerField(help_text='Selectors that hide page elements')
+    updated = serializers.DateTimeField(allow_null=True, help_text='Last good download, null before the first')
+    error = serializers.CharField(allow_blank=True, help_text='Why the last download failed (the old rules stay in use)')
