@@ -183,11 +183,13 @@ SURROGATE_JS = (
     b'w.adsbygoogle=w.adsbygoogle||{loaded:true,push:noop};'
     b'w.ga=w.ga||noop;w.gtag=w.gtag||noop;w.dataLayer=w.dataLayer||[];'
     b'w.google_tag_manager=w.google_tag_manager||{};'
-    b'w.Intercom=w.Intercom||noop;'
+    b'w.Intercom=w.Intercom||function(){(w.Intercom.q=w.Intercom.q||[]).push(arguments);};'
+    b'w.Intercom.booted=true;'
     b'w.Appcues=w.Appcues||{identify:noop,page:noop,track:noop,on:noop,anonymous:noop,reset:noop,debug:noop};'
     b'w._hsq=w._hsq||[];w.fbq=w.fbq||noop;w.lintrk=w.lintrk||noop;'
     b'})(typeof window!=="undefined"?window:this);\n'
 )
+SURROGATE_JSON = b'{"integrations":{"Segment.io":{}},"plan":{},"status":"ok"}'
 MAX_HTML_BYTES = 8 * 1024 * 1024  # 8 MB cap for in-memory HTML filtering
 
 
@@ -461,7 +463,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
         low_path = (path or '').lower().partition('?')[0]
         accept = (self.headers.get('Accept') or '').lower()
         sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
-        if low_path.endswith('.js') or 'javascript' in accept or sec_dest == 'script':
+        sec_mode = (self.headers.get('Sec-Fetch-Mode') or '').strip().lower()
+        if (
+            low_path.endswith('.js')
+            or low_path.endswith('/gtag/js')
+            or '/widget/' in low_path
+            or 'javascript' in accept
+            or sec_dest == 'script'
+        ):
             self._send_bytes(200, 'application/javascript; charset=utf-8', SURROGATE_JS, hdrs)
         elif low_path.endswith('.css') or 'text/css' in accept or sec_dest == 'style':
             self._send_bytes(200, 'text/css; charset=utf-8', b'/* blocked by Zones.dns */\n', hdrs)
@@ -469,11 +478,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_bytes(200, 'application/json; charset=utf-8', b'{"version":3,"sources":[],"mappings":""}', hdrs)
         elif low_path.endswith(('.gif', '.png', '.jpg', '.jpeg', '.webp', '.ico', '.svg')) or accept.startswith('image/') or sec_dest == 'image':
             self._send_bytes(200, 'image/gif', TRANSPARENT_GIF, hdrs)
-        elif 'application/json' in accept or self.command == 'POST' or sec_dest in ('empty', 'fetch', 'xhr'):
-            self._send_bytes(200, 'application/json; charset=utf-8', b'{}', hdrs)
-        else:
+        elif (
+            low_path.endswith(('.html', '.htm'))
+            or sec_dest in ('document', 'iframe')
+            or ('text/html' in accept and sec_mode in ('', 'navigate'))
+            or (not accept and sec_dest == '' and self.command == 'GET' and not low_path.endswith('.json') and '/settings' not in low_path)
+        ):
             body = f'<!doctype html><title>Blocked</title><!-- blocked by {header_val} -->'.encode()
             self._send_bytes(403, 'text/html; charset=utf-8', body, hdrs)
+        else:
+            self._send_bytes(200, 'application/json; charset=utf-8', SURROGATE_JSON, hdrs)
 
     def _handle_local(self, s):
         """Serve /wpad.dat, /proxy.pac, /ca.crt (/ca.pem) and /proxy.mobileconfig when requested directly from the proxy port."""
