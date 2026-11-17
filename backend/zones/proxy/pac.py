@@ -4,6 +4,7 @@ import ipaddress
 import json
 import plistlib
 import re
+import sys
 import uuid
 
 from django.conf import settings
@@ -158,4 +159,28 @@ def build_mobileconfig(s, ca_cert_pem='', request_host=None):
         'PayloadScope': 'System',
         'PayloadContent': payloads,
     }
-    return plistlib.dumps(profile)
+    return sign_profile(plistlib.dumps(profile))
+
+
+def sign_profile(data):
+    """The profile signed (CMS / PKCS#7, the profile embedded) with PROFILE_SIGN_CERT and PROFILE_SIGN_KEY, e.g. the https certificate of the GUI:
+    macOS and iOS then show it as "Verified" and nobody can change it on the way. Unsigned when they are not set or cannot be read."""
+    cert_path = getattr(settings, 'PROFILE_SIGN_CERT', '')
+    key_path = getattr(settings, 'PROFILE_SIGN_KEY', '')
+    if not (cert_path and key_path):
+        return data
+    from cryptography import x509
+    from cryptography.hazmat.primitives import hashes, serialization
+    from cryptography.hazmat.primitives.serialization import pkcs7
+    try:
+        with open(cert_path, 'rb') as f:
+            certs = x509.load_pem_x509_certificates(f.read())  # the certificate first, then its chain (fullchain.pem)
+        with open(key_path, 'rb') as f:
+            key = serialization.load_pem_private_key(f.read(), password=None)
+        builder = pkcs7.PKCS7SignatureBuilder().set_data(data).add_signer(certs[0], key, hashes.SHA256())
+        for c in certs[1:]:
+            builder = builder.add_certificate(c)
+        return builder.sign(serialization.Encoding.DER, [pkcs7.PKCS7Options.Binary])
+    except (OSError, ValueError, TypeError, IndexError) as e:
+        print(f'Proxy: the profile is not signed, cannot use PROFILE_SIGN_CERT / PROFILE_SIGN_KEY: {e!r}', file=sys.stderr, flush=True)
+        return data

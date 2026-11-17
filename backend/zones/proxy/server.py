@@ -24,7 +24,7 @@ from dnslib import DNSRecord, QTYPE
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit, resolver
 from ..models import DataVersion, ProxyLog
-from . import ca, filter as pfilter, pac
+from . import ca, filter as pfilter, pac, revocation
 
 _cfg_lock = threading.Lock()
 _cfg_data = None
@@ -175,6 +175,9 @@ class _ResolvedHTTPSConnection(HTTPSConnection):
         sock = _connect_any(self._addrs, self.timeout)
         server_hostname = self._tunnel_host if self._tunnel_host else self.host
         self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
+        if revocation.is_revoked(self.sock.get_verified_chain()):
+            self.sock.close()
+            raise ssl.SSLCertVerificationError(f'the certificate of {server_hostname} is revoked')
 
 
 _default_ssl_context = ssl.create_default_context()  # building one loads the CA store (tens of ms): once, not per request
@@ -418,6 +421,13 @@ try:
 except ImportError:
     _zstandard = None
 
+try:
+    import brotli as _brotli
+    if not hasattr(_brotli.Decompressor(), 'can_accept_more_data'):
+        _brotli = None  # before 1.2 there is no output limit (CVE-2025-6176): br pages pass unfiltered
+except ImportError:
+    _brotli = None
+
 
 def _bounded(d, data):
     """Decompress with a zlib-style decompressor, at most MAX_HTML_BYTES: a few MB of gzip can expand to gigabytes (a decompression bomb)."""
@@ -442,7 +452,14 @@ def _decompress_single(data, enc):
             return _bounded(_zstd_stdlib.ZstdDecompressor(), data)
         if _zstandard is not None:
             return _zstandard.ZstdDecompressor().decompress(data, max_output_size=MAX_HTML_BYTES)
-    # br: the brotli module has no output limit, so it is not decompressed (the page passes unfiltered); documents are asked for as gzip anyway
+    if enc == 'br' and _brotli is not None:
+        d = _brotli.Decompressor()
+        out = d.process(data, output_buffer_limit=MAX_HTML_BYTES + 1)
+        if len(out) > MAX_HTML_BYTES:
+            raise ValueError('Decompressed HTML is too large to filter')
+        if not d.is_finished():
+            raise ValueError('Truncated br body')
+        return out
     raise ValueError(f'Unsupported Content-Encoding: {enc}')
 
 

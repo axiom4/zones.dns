@@ -50,6 +50,10 @@
   - Proxy Root CA: the private key is stored encrypted with a key derived from `SECRET_KEY` (an existing key is encrypted at the next start) and is no longer listed in the Django admin; new CAs last 5 years instead of 10. Changing `SECRET_KEY` now makes a new CA, to install again on the clients. `/proxy-ca.crt` and `/proxy.mobileconfig` are redirected to the https GUI (over plain http anyone on the path could swap the certificate); `/wpad.dat` stays on http.
   - Changing HTTPS inspection, WPAD (`DHCP_WPAD`, `DHCP_WPAD_URL`) or the proxy address or port, and making a new Root CA, need the second factor (new step-up scope `proxy-change`).
   - External ad-block lists: https only (also after a redirect).
+  - Proxy with HTTPS inspection: upstream certificates are checked for revocation (the browser sees only the proxy's certificate and cannot). CRL first (it does not tell the CA which site is visited), OCSP when there is no CRL; soft-fail like browsers and never delaying a connection: the answer is fetched in the background and a revoked certificate is refused from the next connection on (`PROXY_REVOCATION`, default on).
+  - `/proxy.mobileconfig` can be signed (`PROFILE_SIGN_CERT`, `PROFILE_SIGN_KEY`, e.g. the GUI's https certificate): macOS and iOS show it as verified and a changed profile is refused.
+- **Added** (proxy)
+  - The HTML filter reads the policies of `<meta http-equiv="Content-Security-Policy">` too, and decompresses `br` pages (brotli 1.2 or later, with the same 8 MB limit).
 - **Fixed** (proxy)
   - RFC 9110: `Via` is added both ways; fields named in `Connection` are dropped; no second `Date` / `Server` on relayed answers; `Cache-Control: no-transform` pages are not filtered; no `100 Continue` to HTTP/1.0 clients; `OPTIONS` with `Max-Forwards: 0` is answered by the proxy. An upstream `Content-Length` next to `Transfer-Encoding` is dropped.
   - Plain HTTP clients keep their connection (keep-alive). Tunnels stay open through 30 minutes of silence (was 2), with TCP keep-alive: IMAP IDLE, push and WebSockets are no longer cut.

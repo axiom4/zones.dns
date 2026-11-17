@@ -334,6 +334,11 @@ PROXY_CUSTOM_RULES = ''  # extra rules (one per line): URL substrings/regexes, #
 # Ports a CONNECT tunnel through the proxy may reach (comma separated, * = any). Not in the GUI: a tunnel to any port lets clients reach
 # mail relays (25) and internal services through the proxy, past the firewall (RFC 9110 9.3.6).
 PROXY_CONNECT_PORTS = os.environ.get('PROXY_CONNECT_PORTS', '443,80,8443')
+# Sign /proxy.mobileconfig (macOS / iOS show it as "Verified"): a certificate the devices trust, e.g. the https one of the GUI. Empty = unsigned.
+PROFILE_SIGN_CERT = os.environ.get('PROFILE_SIGN_CERT', '').strip()  # PEM, the certificate first then its chain (fullchain.pem)
+PROFILE_SIGN_KEY = os.environ.get('PROFILE_SIGN_KEY', '').strip()  # PEM private key, readable by the user that runs gunicorn
+# Check upstream certificates for revocation (CRL, else OCSP) when the proxy inspects HTTPS: the browser cannot, it sees the proxy's certificate.
+PROXY_REVOCATION = os.environ.get('PROXY_REVOCATION', 'true').lower() in ('1', 'true', 'yes', 'on')
 
 
 # Warnings and errors of every process (Django, the DoH view, ...) on stderr with the date first, like the other logs (zones/logfmt.py, gunicorn.conf.py).

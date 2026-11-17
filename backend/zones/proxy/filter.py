@@ -1,6 +1,7 @@
 """Content, URL, and domain filtering for the HTTP/HTTPS proxy: ad blocking, cosmetic CSS, and popup/popunder blocking."""
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
+import html
 import re
 import time
 from urllib.parse import urlparse
@@ -233,6 +234,18 @@ def _src_is_blocked(src, page_host, s):
 
 
 _UNDECODABLE_RX = re.compile('[\udc80-\udcff]')
+_META_RX = re.compile(r'<meta\b[^>]*>', re.IGNORECASE)
+_HTTP_EQUIV_CSP_RX = re.compile(r'''\bhttp-equiv\s*=\s*["']?content-security-policy["'\s>]''', re.IGNORECASE)
+_CONTENT_ATTR_RX = re.compile(r'''\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')''', re.IGNORECASE)
+
+
+def meta_csp(text):
+    """The policies a page declares in <meta http-equiv="Content-Security-Policy" content="..."> (the browser applies them like the header)."""
+    out = []
+    for tag in _META_RX.findall(text):
+        if _HTTP_EQUIV_CSP_RX.search(tag) and (m := _CONTENT_ATTR_RX.search(tag)):
+            out.append(html.unescape(m.group(1) if m.group(1) is not None else m.group(2)))
+    return out
 
 
 def csp_allows_inline(csp, directive):
@@ -255,8 +268,8 @@ def csp_allows_inline(csp, directive):
 
 def filter_html(html_bytes, content_type='', host='', s=None, csp=''):
     """Filter an HTML response body: strip blocked ad/popup scripts and iframes, inject cosmetic CSS and popup-blocker JS.
-    `csp`: the page's Content-Security-Policy header; what it would block is not injected (the browser would only report a violation).
-    shortcut: a policy in a <meta http-equiv> tag is not read, the injected script is then refused by the browser and harmless."""
+    `csp`: the page's Content-Security-Policy header; with the policies of its <meta http-equiv> tags, what they would block is not injected
+    (the browser would only report a violation)."""
     if not html_bytes:
         return html_bytes
     block_ads = True if s is None else bool(getattr(s, 'PROXY_BLOCK_ADS', True))
@@ -305,6 +318,7 @@ def filter_html(html_bytes, content_type='', host='', s=None, csp=''):
     if block_ads:
         text = _IFRAME_TAG_RX.sub(_clean_iframe, text)
 
+    csp = ', '.join(p for p in [csp, *meta_csp(text)] if p)
     injections = []
     if block_popups and 'id="zones-popup-blocker"' not in text and csp_allows_inline(csp, 'script-src'):
         injections.append(POPUP_BLOCKER_JS)

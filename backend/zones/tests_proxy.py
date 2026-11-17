@@ -794,3 +794,117 @@ class NoPostRetryTests(TestCase):
         self.assertIn(b'zones-popup-blocker', body)
         self.assertIn(f'Content-Length: {len(body)}'.encode(), head)
         self.assertNotIn(b'Content-Encoding', head)
+
+
+class RevocationAndProfileTests(TestCase):
+    """Upstream certificates checked for revocation (CRL, OCSP), the signed Apple profile, a CSP in <meta>, bounded br."""
+
+    def setUp(self):
+        from .proxy import revocation
+        self.rv = revocation
+        revocation.reset()
+        self.addCleanup(revocation.reset)
+
+    def _pki(self, crl_url=None, ocsp_url=None):
+        from datetime import datetime, timedelta, timezone
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import ec
+        from cryptography.x509.oid import AuthorityInformationAccessOID, NameOID
+        now = datetime.now(timezone.utc)
+        ca_key = ec.generate_private_key(ec.SECP256R1())
+        ca_name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'Test CA')])
+        ca_cert = (x509.CertificateBuilder().subject_name(ca_name).issuer_name(ca_name).public_key(ca_key.public_key())
+                   .serial_number(1).not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=30))
+                   .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True).sign(ca_key, hashes.SHA256()))
+        b = (x509.CertificateBuilder().subject_name(x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'site.example')])).issuer_name(ca_name)
+             .public_key(ec.generate_private_key(ec.SECP256R1()).public_key()).serial_number(4242)
+             .not_valid_before(now - timedelta(days=1)).not_valid_after(now + timedelta(days=30)))
+        if crl_url:
+            b = b.add_extension(x509.CRLDistributionPoints([x509.DistributionPoint([x509.UniformResourceIdentifier(crl_url)], None, None, None)]), critical=False)
+        if ocsp_url:
+            b = b.add_extension(x509.AuthorityInformationAccess([x509.AccessDescription(AuthorityInformationAccessOID.OCSP, x509.UniformResourceIdentifier(ocsp_url))]), critical=False)
+        return ca_key, ca_cert, b.sign(ca_key, hashes.SHA256())
+
+    def _crl(self, ca_key, ca_cert, serials):
+        from datetime import datetime, timedelta, timezone
+        from cryptography import x509
+        from cryptography.hazmat.primitives import hashes, serialization
+        now = datetime.now(timezone.utc)
+        b = x509.CertificateRevocationListBuilder().issuer_name(ca_cert.subject).last_update(now).next_update(now + timedelta(days=1))
+        for sn in serials:
+            b = b.add_revoked_certificate(x509.RevokedCertificateBuilder().serial_number(sn).revocation_date(now).build())
+        return b.sign(ca_key, hashes.SHA256()).public_bytes(serialization.Encoding.DER)
+
+    def test_a_certificate_on_the_crl_is_refused_from_the_next_connection(self):
+        from unittest import mock
+        from cryptography.hazmat.primitives import serialization
+        ca_key, ca_cert, leaf = self._pki(crl_url='http://crl.test/ca.crl')
+        chain = [c.public_bytes(serialization.Encoding.DER) for c in (leaf, ca_cert)]
+        with mock.patch.object(self.rv, 'fetch', return_value=self._crl(ca_key, ca_cert, [4242])) as f, \
+                mock.patch.object(self.rv._pool, 'submit', side_effect=lambda fn, *a: fn(*a)):
+            self.assertFalse(self.rv.is_revoked(chain))  # the first connection does not wait
+            self.assertTrue(self.rv.is_revoked(chain))
+            self.assertEqual(f.call_count, 1)  # the CRL is kept until its nextUpdate
+
+    def test_a_good_certificate_and_a_crl_signed_by_someone_else(self):
+        from unittest import mock
+        ca_key, ca_cert, leaf = self._pki(crl_url='http://crl.test/ca.crl')
+        with mock.patch.object(self.rv, 'fetch', return_value=self._crl(ca_key, ca_cert, [1])):
+            self.assertFalse(self.rv.lookup(leaf, ca_cert))
+        self.rv.reset()
+        other_key, _, _ = self._pki()
+        with mock.patch.object(self.rv, 'fetch', return_value=self._crl(other_key, ca_cert, [4242])):
+            self.assertIsNone(self.rv.lookup(leaf, ca_cert))  # forged list: ignored, soft-fail
+
+    def test_ocsp_when_there_is_no_crl(self):
+        from datetime import datetime, timedelta, timezone
+        from unittest import mock
+        from cryptography.hazmat.primitives import hashes, serialization
+        from cryptography.x509 import ocsp
+        ca_key, ca_cert, leaf = self._pki(ocsp_url='http://ocsp.test/')
+        now = datetime.now(timezone.utc)
+        resp = (ocsp.OCSPResponseBuilder()
+                .add_response(cert=leaf, issuer=ca_cert, algorithm=hashes.SHA1(), cert_status=ocsp.OCSPCertStatus.REVOKED, this_update=now,
+                              next_update=now + timedelta(hours=1), revocation_time=now, revocation_reason=None)
+                .responder_id(ocsp.OCSPResponderEncoding.HASH, ca_cert).sign(ca_key, hashes.SHA256()))
+        with mock.patch.object(self.rv, 'fetch', return_value=resp.public_bytes(serialization.Encoding.DER)):
+            self.assertTrue(self.rv.lookup(leaf, ca_cert))
+        self.rv.reset()
+        with mock.patch.object(self.rv, 'fetch', side_effect=OSError('down')):
+            self.assertIsNone(self.rv.lookup(leaf, ca_cert))
+
+    def test_the_profile_is_signed_when_a_certificate_is_given(self):
+        import os
+        import tempfile
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.serialization import pkcs7
+        from .proxy import pac
+        ca_key, ca_cert, _ = self._pki()
+        d = tempfile.mkdtemp()
+        self.addCleanup(lambda: [os.remove(os.path.join(d, n)) for n in os.listdir(d)] and os.rmdir(d))
+        cert_path, key_path = os.path.join(d, 'c.pem'), os.path.join(d, 'k.pem')
+        with open(cert_path, 'wb') as f:
+            f.write(ca_cert.public_bytes(serialization.Encoding.PEM))
+        with open(key_path, 'wb') as f:
+            f.write(ca_key.private_bytes(serialization.Encoding.PEM, serialization.PrivateFormat.PKCS8, serialization.NoEncryption()))
+        s = SimpleNamespace(DHCP_SERVER='192.168.1.2', PROXY_PORT=8080, DHCP_WPAD_URL='')
+        with override_settings(PROFILE_SIGN_CERT=cert_path, PROFILE_SIGN_KEY=key_path):
+            signed = pac.build_mobileconfig(s)
+        self.assertEqual(pkcs7.load_der_pkcs7_certificates(signed)[0], ca_cert)
+        self.assertIn(b'ProxyAutoConfigURLString', signed)  # the profile is inside the signature
+        with override_settings(PROFILE_SIGN_CERT=cert_path, PROFILE_SIGN_KEY=os.path.join(d, 'missing')):
+            self.assertTrue(pac.build_mobileconfig(s).startswith(b'<?xml'))  # unsigned rather than no profile
+
+    def test_a_csp_in_a_meta_tag_is_respected(self):
+        page = b'<html><head><meta http-equiv="Content-Security-Policy" content="script-src &#39;self&#39;"></head><body></body></html>'
+        html = pfilter.filter_html(page, 'text/html', host='news.example').decode()
+        self.assertNotIn('zones-popup-blocker', html)
+        self.assertIn('zones-adblock-css', html)
+
+    def test_br_is_decompressed_with_a_limit(self):
+        import brotli
+        from .proxy import server as ps
+        self.assertEqual(ps._decompress(brotli.compress(b'<p>x</p>'), 'br'), b'<p>x</p>')
+        with self.assertRaises(ValueError):
+            ps._decompress(brotli.compress(b'\0' * (ps.MAX_HTML_BYTES + 10)), 'br')
