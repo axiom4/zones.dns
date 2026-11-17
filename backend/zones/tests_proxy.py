@@ -517,3 +517,29 @@ class UpstreamPoolTests(TestCase):
         with ps._pool_lock:
             ps._pool[key][0] = (conn, 0)  # idle for longer than _POOL_IDLE
         self.assertIsNone(ps._pool_take(key))
+
+
+class UploadBodyTests(TestCase):
+    def _post(self, raw):
+        seen = {}
+
+        def fetcher(scheme, host, port, method, path, body, headers):
+            seen.update(body=body, headers=headers)
+            return 200, 'OK', [('Content-Type', 'text/plain')], b'ok'
+
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=True, PROXY_BLOCK_POPUPS=True, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, http_fetcher=fetcher, upstream_ssl_context=None,
+        )
+        return _run_proxy_session(raw, ns), seen
+
+    def test_a_chunked_post_is_forwarded_whole(self):
+        resp, seen = self._post(b'POST http://127.0.0.1/ews HTTP/1.1\r\nHost: 127.0.0.1\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5\r\nhello\r\n6;x=1\r\n world\r\n0\r\n\r\n')
+        self.assertIn(b'200 OK', resp)
+        self.assertEqual(seen['body'], b'hello world')
+
+    def test_expect_100_continue_is_answered_and_not_forwarded(self):
+        resp, seen = self._post(b'POST http://127.0.0.1/ews HTTP/1.1\r\nHost: 127.0.0.1\r\nExpect: 100-continue\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc')
+        self.assertTrue(resp.startswith(b'HTTP/1.0 100') or resp.startswith(b'HTTP/1.1 100'))
+        self.assertEqual(seen['body'], b'abc')
+        self.assertNotIn('expect', {k.lower() for k in seen['headers']})

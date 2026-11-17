@@ -9,6 +9,7 @@ import select
 import socket
 from socketserver import ThreadingMixIn
 import ssl
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -203,6 +204,8 @@ def cached_proxy_settings(base=None, force=False):
             _cfg_lock.release()
     return _cfg_data
 
+MAX_REQUEST_BYTES = 150 * 1024 * 1024  # held in memory: Exchange accepts messages up to 150 MB
+
 HOP_BY_HOP = frozenset({
     'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
     'proxy-connection', 'te', 'trailers', 'transfer-encoding', 'upgrade',
@@ -348,6 +351,15 @@ def _decompress(data, encoding):
     return data
 
 
+def _why(e):
+    """One line for the log and stderr: the exception class and its text."""
+    return f'{type(e).__name__}: {e}'[:200]
+
+
+def _warn(msg):
+    print(f'Proxy: {msg}', file=sys.stderr, flush=True)
+
+
 class ProxyLogWriter:
     """Writes ProxyLog entries in batches on a background thread so logging never slows down proxy requests or opens per-request DB connections."""
 
@@ -366,7 +378,7 @@ class ProxyLogWriter:
         try:
             self.queue.put_nowait(entry)
         except queue.Full:
-            pass
+            _warn('log queue full, an entry was dropped')
 
     def stop(self):
         self._stop.set()
@@ -390,8 +402,8 @@ class ProxyLogWriter:
             close_old_connections()
             for i in range(0, len(rows), self.batch_max):
                 ProxyLog.objects.bulk_create(rows[i:i + self.batch_max])
-        except Exception:
-            pass
+        except Exception as e:
+            _warn(f'cannot save {len(rows)} log entries: {_why(e)}')
 
 
 class ProxyServer(ThreadingMixIn, HTTPServer):
@@ -466,8 +478,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         elif logger is True:
             try:
                 pfilter.run_on_db_pool(entry.save)
-            except Exception:
-                pass
+            except Exception as e:
+                _warn(f'cannot save a log entry: {_why(e)}')
 
     def _send_bytes(self, status_code, content_type, body, extra_headers=None):
         self.send_response(status_code)
@@ -553,9 +565,31 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return True
         return False
 
+    def _read_body(self):
+        """The request body: Content-Length bytes or a chunked body (Outlook, Office and any streaming upload send POSTs chunked, with no length). None when empty, False when over MAX_REQUEST_BYTES."""
+        if 'chunked' in (self.headers.get('Transfer-Encoding') or '').lower():
+            out, total = [], 0
+            while True:
+                size = int((self.rfile.readline(1025).split(b';')[0].strip() or b'0'), 16)
+                if size == 0:
+                    while self.rfile.readline(65537).strip():  # trailers, up to the blank line
+                        pass
+                    break
+                total += size
+                if total > MAX_REQUEST_BYTES:
+                    return False
+                out.append(self.rfile.read(size))
+                self.rfile.readline(3)  # the CRLF after the chunk
+            return b''.join(out) or None
+        n = int(self.headers.get('Content-Length', '0') or 0)
+        if n > MAX_REQUEST_BYTES:
+            return False
+        return self.rfile.read(n) if n > 0 else None
+
     def _proxy_http(self, scheme=None, default_host=None, default_port=None, keep_alive=False):
         t0 = time.monotonic()
         if not self._client_allowed():
+            self._log(self.command, '', self.path, 'error', 403, 'Client refused (DNS_ALLOW_QUERY or rate limit)', t0)
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden')
             return
         s = self._cfg()
@@ -564,6 +598,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 return
             host_hdr = self.headers.get('Host', '')
             if not host_hdr:
+                self._log(self.command, '', self.path, 'error', 400, 'No Host header', t0)
                 self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad Request')
                 return
             full_url = f'http://{host_hdr}{self.path}'
@@ -573,6 +608,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             port_part = f':{default_port}' if default_port and default_port not in (80, 443) else ''
             full_url = f'{scheme}://{default_host}{port_part}{self.path}'
         else:
+            self._log(self.command, '', self.path, 'error', 400, 'Unusable request target', t0)
             self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad Request')
             return
 
@@ -584,6 +620,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         log_method = f'MITM {self.command}' if scheme == 'https' else self.command
 
         if not host:
+            self._log(log_method, '', full_url, 'error', 400, 'Missing target host', t0)
             self._send_bytes(400, 'text/plain; charset=utf-8', b'Missing target host')
             return
 
@@ -603,14 +640,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
             return
 
-        content_len = int(self.headers.get('Content-Length', '0') or 0)
-        req_body = self.rfile.read(content_len) if content_len > 0 else None
+        if (self.headers.get('Expect') or '').lower() == '100-continue':
+            self.send_response_only(100)  # the client holds back the body until it hears this (mail clients upload attachments this way)
+            self.end_headers()
+        try:
+            req_body = self._read_body()
+        except (ValueError, OSError) as e:
+            self._log(log_method, host, full_url, 'error', 400, f'Bad request body: {_why(e)}', t0)
+            self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad request body')
+            self.close_connection = True
+            return
+        if req_body is False:
+            self._log(log_method, host, full_url, 'error', 413, 'Request body too large', t0)
+            self._send_bytes(413, 'text/plain; charset=utf-8', b'Request body too large')
+            self.close_connection = True
+            return
 
         filter_enabled = bool(getattr(s, 'PROXY_BLOCK_ADS', True) or getattr(s, 'PROXY_BLOCK_POPUPS', True))
         fwd_headers = {}
         for k, v in self.headers.items():
             kl = k.lower()
-            if kl in HOP_BY_HOP or kl == 'host':
+            if kl in HOP_BY_HOP or kl in ('host', 'expect'):
                 continue
             if kl == 'accept-encoding' and filter_enabled:
                 continue
@@ -685,8 +735,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     (k, v) for k, v in resp.getheaders()
                     if k.lower() not in HOP_BY_HOP and k.lower() not in ('content-length', 'content-encoding')
                 ]
-        except Exception:
-            self._log(log_method, host, full_url, 'error', 502, 'Bad Gateway', t0)
+        except Exception as e:
+            self._log(log_method, host, full_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway')
             return
         finally:
@@ -805,11 +855,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                         tls_client.unwrap()
                     except Exception:
                         pass
-            except (ssl.SSLError, OSError):
+            except (ssl.SSLError, OSError) as e:
                 record_mitm_failure(client_ip, host)
-                self._log('MITM', host, target_url, 'allowed', 200, 'TLS pin/CA fallback -> CONNECT', t0)
-            except Exception:
-                pass
+                self._log('MITM', host, target_url, 'allowed', 200, f'TLS pin/CA fallback -> CONNECT ({_why(e)})', t0)
+            except Exception as e:
+                _warn(f'MITM {host}: {_why(e)}')
+                self._log('MITM', host, target_url, 'error', 500, f'Internal error: {_why(e)}', t0)
             self.close_connection = True
             return
 
@@ -838,8 +889,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 _set_nodelay(upstream)
                 upstream.settimeout(15)
                 upstream.connect(addr)
-        except OSError:
-            self._log('CONNECT', host, target_url, 'error', 502, 'Bad Gateway', t0)
+        except OSError as e:
+            self._log('CONNECT', host, target_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway')
             return
 
@@ -928,8 +979,11 @@ class _MitmHandler(ProxyHandler):
                     keep_alive=keep_alive,
                 )
                 self.wfile.flush()
-        except Exception:
-            pass
+        except (OSError, ssl.SSLError):
+            pass  # the client went away or timed out: normal at the end of a keep-alive connection
+        except Exception as e:
+            _warn(f'MITM {self._mitm_host}: {_why(e)}')
+            self._log('MITM', self._mitm_host, f'https://{self._mitm_host}/', 'error', 500, f'Internal error: {_why(e)}')
         finally:
             if self.handled_requests == 0:
                 self.tls_handshake_failed = True
