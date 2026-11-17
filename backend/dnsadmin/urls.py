@@ -4,7 +4,7 @@ from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from zones.security import admin_sso
 from zones import views as v
 from zones.views import EncryptedTokenView, LoginKeyView, TokenView
-from zones.views.dhcp import ProxyCaCertView, ProxyMobileConfigView, WpadView
+from zones.views.proxy import ProxyCaCertView, ProxyMobileConfigView, WpadView
 from zones.views.doh import DohView
 
 urlpatterns = [

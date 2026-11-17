@@ -3,27 +3,27 @@ import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import {
-  dhcpProxyInfoCreate,
-  dhcpProxyInfoRetrieve,
-  dhcpProxyLogsPurgeCreate,
-  dhcpProxyLogsRetrieve,
-  dhcpProxyTestCreate,
-  dhcpSettingsPartialUpdate,
-  dhcpSettingsRetrieve,
+  proxyInfoCreate,
+  proxyInfoRetrieve,
+  proxyLogsPurgeCreate,
+  proxyLogsRetrieve,
+  proxyTestCreate,
+  proxySettingsPartialUpdate,
+  proxySettingsRetrieve,
 } from '../api/functions';
-import { DhcpSettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
+import { ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
 import { Ui } from '../services/ui';
 
 @Component({
-  selector: 'app-dhcp-proxy',
+  selector: 'app-proxy-page',
   imports: [FormsModule, RouterLink],
-  templateUrl: './dhcp-proxy.html',
+  templateUrl: './proxy-page.html',
 })
-export class DhcpProxy implements OnDestroy {
+export class ProxyPage implements OnDestroy {
   private api = inject(Api);
   private ui = inject(Ui);
-  mode = input<'settings' | 'logs'>('settings');
-  cfg = signal<DhcpSettings>({});
+  mode = input<'settings' | 'logs'>('settings', { alias: 'tab' }); // the :tab of the route /proxy/:tab
+  cfg = signal<ProxySettings>({});
   info = signal<ProxyInfo | null>(null);
   saved = signal(false);
   testUrl = '';
@@ -77,8 +77,8 @@ export class DhcpProxy implements OnDestroy {
   load() {
     return this.ui.run(async () => {
       const [cfg, info] = await Promise.all([
-        this.api.invoke(dhcpSettingsRetrieve),
-        this.api.invoke(dhcpProxyInfoRetrieve),
+        this.api.invoke(proxySettingsRetrieve),
+        this.api.invoke(proxyInfoRetrieve),
       ]);
       this.cfg.set(cfg);
       this.info.set(info);
@@ -90,7 +90,7 @@ export class DhcpProxy implements OnDestroy {
 
   async loadLogs() {
     try {
-      const res = await this.api.invoke(dhcpProxyLogsRetrieve, {
+      const res = await this.api.invoke(proxyLogsRetrieve, {
         q: this.logQ.trim() || undefined,
         outcome: this.logOutcome || undefined,
         client: this.logClient.trim() || undefined,
@@ -133,7 +133,7 @@ export class DhcpProxy implements OnDestroy {
       'This removes all recorded HTTP/HTTPS proxy log entries.',
       () =>
         this.ui.run(async () => {
-          await this.api.invoke(dhcpProxyLogsPurgeCreate, { body: { older_than_hours: 0 } });
+          await this.api.invoke(proxyLogsPurgeCreate, { body: { older_than_hours: 0 } });
           await this.loadLogs();
         }),
     );
@@ -155,7 +155,7 @@ export class DhcpProxy implements OnDestroy {
     return this.ui.run(async () => {
       const cur = (this.cfg().PROXY_CUSTOM_RULES || '').trim();
       const nextRules = cur ? `${cur}\n@@${host}` : `@@${host}`;
-      const updated = await this.api.invoke(dhcpSettingsPartialUpdate, {
+      const updated = await this.api.invoke(proxySettingsPartialUpdate, {
         body: { PROXY_CUSTOM_RULES: nextRules },
       });
       this.cfg.set(updated);
@@ -165,9 +165,9 @@ export class DhcpProxy implements OnDestroy {
   save() {
     this.saved.set(false);
     return this.ui.run(async () => {
-      const updated = await this.api.invoke(dhcpSettingsPartialUpdate, { body: this.cfg() });
+      const updated = await this.api.invoke(proxySettingsPartialUpdate, { body: this.cfg() });
       this.cfg.set(updated);
-      this.info.set(await this.api.invoke(dhcpProxyInfoRetrieve));
+      this.info.set(await this.api.invoke(proxyInfoRetrieve));
       this.saved.set(true);
     });
   }
@@ -190,7 +190,7 @@ export class DhcpProxy implements OnDestroy {
       'Clients using HTTPS MITM inspection will need to install the new Root CA certificate.',
       () =>
         this.ui.run(async () => {
-          this.info.set(await this.api.invoke(dhcpProxyInfoCreate));
+          this.info.set(await this.api.invoke(proxyInfoCreate));
         }),
     );
   }
@@ -199,7 +199,7 @@ export class DhcpProxy implements OnDestroy {
     const u = this.testUrl.trim();
     if (!u) return;
     return this.ui.run(async () => {
-      this.testResult.set(await this.api.invoke(dhcpProxyTestCreate, { body: { url: u } }));
+      this.testResult.set(await this.api.invoke(proxyTestCreate, { body: { url: u } }));
     });
   }
 

@@ -303,7 +303,7 @@ Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving
 
 ### Optional: HTTP/HTTPS Ad-blocking & Popup-blocking Proxy (`runproxy`)
 
-`runproxy` is an HTTP and HTTPS forward proxy integrated with the Zones.dns Blacklist (Personal blocks and Public lists), configurable in the GUI under **DHCP > Proxy**:
+`runproxy` is an HTTP and HTTPS forward proxy integrated with the Zones.dns Blacklist (Personal blocks and Public lists), configurable in the GUI under **Proxy** (own section: Settings and Logs; the WPAD announcement is there too):
 
 - **DHCP WPAD auto-assignment (`DHCP_WPAD=true`):** DHCPv4 automatically sends Option 252 (`http://<DHCP_SERVER>:<PROXY_PORT>/wpad.dat`) and the DNS daemon answers `wpad.<DHCP_DOMAIN>` with `DHCP_SERVER`. Clients with automatic proxy discovery enabled configure themselves without manual setup.
 - **HTTP & HTTPS filtering:**

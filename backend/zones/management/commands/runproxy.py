@@ -19,7 +19,7 @@ BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
 class Command(BaseCommand):
     help = (
         'Run the HTTP/HTTPS ad-blocking and popup-filtering proxy server (settings PROXY_*). '
-        'Configured in the GUI (DHCP > Proxy or DHCP settings) and announced to DHCP clients via WPAD (option 252 + wpad.<domain>).'
+        'Configured in the GUI (Proxy page) and announced to DHCP clients via WPAD (option 252 + wpad.<domain>).'
     )
 
     def add_arguments(self, p):

@@ -1,3 +1,7 @@
+<nav class="subtabs" aria-label="Proxy">
+  <a routerLink="/proxy/settings" [class.on]="mode() !== 'logs'">Settings</a>
+  <a routerLink="/proxy/logs" [class.on]="mode() === 'logs'">Logs</a>
+</nav>
 @if (mode() === 'logs') {
   <header>
     <div>
@@ -8,7 +12,6 @@
     </div>
     <div class="actions">
       <label class="check"><input type="checkbox" name="live" [(ngModel)]="live" (ngModelChange)="toggleLive()"> Refresh automatically</label>
-      <a class="ghost" routerLink="/dhcp/proxy">Proxy settings</a>
       <button class="ghost" type="button" (click)="purgeLogs()">Clear logs…</button>
       <button class="ghost" type="button" (click)="loadLogs()">Refresh</button>
     </div>
@@ -78,7 +81,6 @@
       <p class="soft">Built-in filtering proxy (<code>manage.py runproxy</code>) assigned automatically to clients via DHCP WPAD (option 252 + <code>wpad.&lt;domain&gt;</code>). Blocks ad and tracker domains from the Blacklist, strips ad banners and popup scripts, and supports both standard HTTPS <code>CONNECT</code> and optional HTTPS MITM page inspection.</p>
     </div>
     <div class="actions">
-      <a class="ghost" routerLink="/dhcp/proxy-logs">Proxy logs</a>
       @if (info()?.pem) {
         <a class="ghost" href="/proxy.mobileconfig" download="zones-proxy.mobileconfig">Apple Profile (.mobileconfig)</a>
         <button class="ghost" type="button" (click)="downloadCa()">Download Root CA (.crt)</button>
@@ -167,7 +169,7 @@
     <fieldset class="group">
       <legend>WPAD PAC preview &amp; Root CA details</legend>
       <p class="soft">
-        WPAD URL: <code>{{ i.wpad_url || 'http://' + (cfg().DHCP_SERVER || 'server-ip') + ':' + (cfg().PROXY_PORT || 8080) + '/wpad.dat' }}</code> ·
+        WPAD URL: <code>{{ i.wpad_url || 'http://' + 'server-ip' + ':' + (cfg().PROXY_PORT || 8080) + '/wpad.dat' }}</code> ·
         Root CA: <b>{{ i.subject }}</b> (valid until {{ when(i.expires) }}, SHA-256: <code>{{ i.fingerprint }}</code>)
       </p>
       <pre class="code-box">{{ i.pac }}</pre>

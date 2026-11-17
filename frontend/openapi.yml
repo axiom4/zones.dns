@@ -416,131 +416,6 @@ paths:
                 items:
                   $ref: '#/components/schemas/DhcpPingResult'
           description: ''
-  /api/dhcp/proxy/info/:
-    get:
-      operationId: dhcp_proxy_info_retrieve
-      description: Return Proxy Root CA certificate info, active WPAD URL, and generated
-        PAC script.
-      tags:
-      - dhcp
-      security:
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProxyInfo'
-          description: ''
-    post:
-      operationId: dhcp_proxy_info_create
-      description: Regenerate the local Proxy Root CA certificate and private key.
-      tags:
-      - dhcp
-      security:
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProxyInfo'
-          description: ''
-  /api/dhcp/proxy/logs/:
-    get:
-      operationId: dhcp_proxy_logs_retrieve
-      description: Return recent HTTP/HTTPS proxy log entries with filters and summary
-        counts.
-      parameters:
-      - in: query
-        name: client
-        schema:
-          type: string
-        description: Filter by client IP
-      - in: query
-        name: hours
-        schema:
-          type: integer
-        description: Only the last N hours (0 = all)
-      - in: query
-        name: limit
-        schema:
-          type: integer
-        description: Maximum rows returned (default 150, max 500)
-      - in: query
-        name: method
-        schema:
-          type: string
-        description: Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)
-      - in: query
-        name: outcome
-        schema:
-          type: string
-          enum:
-          - allowed
-          - blocked
-          - error
-          - filtered
-        description: Filter by outcome
-      - in: query
-        name: q
-        schema:
-          type: string
-        description: Search host, URL or reason (case-insensitive)
-      tags:
-      - dhcp
-      security:
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProxyLogsResponse'
-          description: ''
-  /api/dhcp/proxy/logs/purge/:
-    post:
-      operationId: dhcp_proxy_logs_purge_create
-      description: Delete proxy log entries older than `older_than_hours` (0 = delete
-        all).
-      tags:
-      - dhcp
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProxyLogPurgeRequestRequest'
-      security:
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProxyLogPurgeResult'
-          description: ''
-  /api/dhcp/proxy/test/:
-    post:
-      operationId: dhcp_proxy_test_create
-      description: Test whether a URL or domain would be blocked by the proxy (Blacklist,
-        ad URL rules, popup rules, or custom rules).
-      tags:
-      - dhcp
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: '#/components/schemas/ProxyTestRequestRequest'
-        required: true
-      security:
-      - tokenAuth: []
-      responses:
-        '200':
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/ProxyTestResult'
-          description: ''
   /api/dhcp/reservations/:
     get:
       operationId: dhcp_reservations_list
@@ -1815,6 +1690,167 @@ paths:
               schema:
                 $ref: '#/components/schemas/TotpSetup'
           description: ''
+  /api/proxy/info/:
+    get:
+      operationId: proxy_info_retrieve
+      description: Return Proxy Root CA certificate info, active WPAD URL, and generated
+        PAC script.
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyInfo'
+          description: ''
+    post:
+      operationId: proxy_info_create
+      description: Regenerate the local Proxy Root CA certificate and private key.
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyInfo'
+          description: ''
+  /api/proxy/logs/:
+    get:
+      operationId: proxy_logs_retrieve
+      description: Return recent HTTP/HTTPS proxy log entries with filters and summary
+        counts.
+      parameters:
+      - in: query
+        name: client
+        schema:
+          type: string
+        description: Filter by client IP
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours (0 = all)
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum rows returned (default 150, max 500)
+      - in: query
+        name: method
+        schema:
+          type: string
+        description: Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)
+      - in: query
+        name: outcome
+        schema:
+          type: string
+          enum:
+          - allowed
+          - blocked
+          - error
+          - filtered
+        description: Filter by outcome
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Search host, URL or reason (case-insensitive)
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyLogsResponse'
+          description: ''
+  /api/proxy/logs/purge/:
+    post:
+      operationId: proxy_logs_purge_create
+      description: Delete proxy log entries older than `older_than_hours` (0 = delete
+        all).
+      tags:
+      - proxy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyLogPurgeRequestRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyLogPurgeResult'
+          description: ''
+  /api/proxy/settings/:
+    get:
+      operationId: proxy_settings_retrieve
+      description: 'Current proxy configuration: the filtering proxy (`runproxy`)
+        and its announcement to DHCP clients (WPAD).'
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxySettings'
+          description: ''
+    patch:
+      operationId: proxy_settings_partial_update
+      description: Update the proxy settings and validate them before saving. `runproxy`
+        and `rundhcp` apply them by themselves.
+      tags:
+      - proxy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedProxySettingsRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxySettings'
+          description: ''
+  /api/proxy/test/:
+    post:
+      operationId: proxy_test_create
+      description: Test whether a URL or domain would be blocked by the proxy (Blacklist,
+        ad URL rules, popup rules, or custom rules).
+      tags:
+      - proxy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyTestRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyTestResult'
+          description: ''
   /api/records/:
     get:
       operationId: records_list
@@ -3076,29 +3112,6 @@ components:
           minimum: 0
         DHCP_RA_SLAAC:
           type: boolean
-        DHCP_WPAD:
-          type: boolean
-        DHCP_WPAD_URL:
-          type: string
-          maxLength: 255
-        PROXY:
-          type: boolean
-        PROXY_PORT:
-          type: integer
-          maximum: 65535
-          minimum: 1
-        PROXY_ADDRESS:
-          type: string
-          maxLength: 64
-        PROXY_BLOCK_ADS:
-          type: boolean
-        PROXY_BLOCK_POPUPS:
-          type: boolean
-        PROXY_HTTPS_MITM:
-          type: boolean
-        PROXY_CUSTOM_RULES:
-          type: string
-          maxLength: 8000
     Dmarc:
       type: object
       properties:
@@ -3850,6 +3863,14 @@ components:
           minimum: 0
         DHCP_RA_SLAAC:
           type: boolean
+    PatchedPersonalSwitchRequest:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+    PatchedProxySettingsRequest:
+      type: object
+      properties:
         DHCP_WPAD:
           type: boolean
         DHCP_WPAD_URL:
@@ -3873,11 +3894,6 @@ components:
         PROXY_CUSTOM_RULES:
           type: string
           maxLength: 8000
-    PatchedPersonalSwitchRequest:
-      type: object
-      properties:
-        enabled:
-          type: boolean
     PatchedRecordRequest:
       type: object
       properties:
@@ -4051,6 +4067,32 @@ components:
       - count
       - filtered_count
       - results
+    ProxySettings:
+      type: object
+      properties:
+        DHCP_WPAD:
+          type: boolean
+        DHCP_WPAD_URL:
+          type: string
+          maxLength: 255
+        PROXY:
+          type: boolean
+        PROXY_PORT:
+          type: integer
+          maximum: 65535
+          minimum: 1
+        PROXY_ADDRESS:
+          type: string
+          maxLength: 64
+        PROXY_BLOCK_ADS:
+          type: boolean
+        PROXY_BLOCK_POPUPS:
+          type: boolean
+        PROXY_HTTPS_MITM:
+          type: boolean
+        PROXY_CUSTOM_RULES:
+          type: string
+          maxLength: 8000
     ProxyTestRequestRequest:
       type: object
       properties:

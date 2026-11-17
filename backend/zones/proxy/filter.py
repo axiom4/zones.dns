@@ -124,39 +124,55 @@ _NO_HTML_FILTER_DOMAINS = frozenset({'challenges.cloudflare.com', 'hcaptcha.com'
 
 @lru_cache(maxsize=32)
 def parse_custom_rules(raw_rules):
-    """Parse PROXY_CUSTOM_RULES into (allow_domains, url_patterns, global_css, domain_css)."""
+    """Parse PROXY_CUSTOM_RULES (including Adblock Plus / EasyList / uBlock syntax) into (allow_domains, url_patterns, global_css, domain_css)."""
     allow_domains = set()
     url_patterns = []
     global_css = []
     domain_css = {}
     for line in re.split(r'[\r\n]+', str(raw_rules or '')):
         line = line.strip()
-        if not line or (line.startswith('#') and not line.startswith('##')) or line.startswith('!'):
+        if not line or (line.startswith('#') and not line.startswith('##')) or line.startswith(('!', '[')):
             continue
+        if '#@#' in line or '#?#' in line or '#$#' in line:
+            continue  # advanced cosmetic exceptions/procedural filters ignored safely
         if line.startswith('@@'):
-            dom = line[2:].strip().lstrip('|').rstrip('^/').lower().strip('.')
+            rule = line[2:].split('$', 1)[0].strip().lstrip('|')
+            if rule.startswith(('http://', 'https://')):
+                rule = rule.split('://', 1)[1]
+            dom = rule.split('/', 1)[0].split('^', 1)[0].lower().strip('.')
             if dom:
                 allow_domains.add(dom)
         elif '##' in line:
             dom_part, _, sel = line.partition('##')
             sel = sel.strip()
-            if not sel or '</style' in sel.lower():
+            if not sel or '</style' in sel.lower() or sel.startswith(('+js(', '^', 'script:inject')):
                 continue
             if not dom_part.strip():
                 global_css.append(sel)
             else:
                 for d in dom_part.split(','):
                     d = d.strip().lower().strip('.')
-                    if d:
+                    if d and not d.startswith('~'):
                         domain_css.setdefault(d, []).append(sel)
         else:
-            if len(line) >= 2 and line.startswith('/') and line.endswith('/'):
+            rule = line.split('$', 1)[0].strip()
+            if not rule:
+                continue
+            if len(rule) >= 2 and rule.startswith('/') and rule.endswith('/'):
                 try:
-                    url_patterns.append((line, re.compile(line[1:-1], re.IGNORECASE)))
+                    url_patterns.append((line, re.compile(rule[1:-1], re.IGNORECASE)))
+                except re.error:
+                    pass
+            elif rule.startswith('||'):
+                body = rule[2:].rstrip('^')
+                pat = r'(?:^|[/.])' + r'.*'.join(re.escape(p) for p in body.split('*')).replace(r'\^', r'(?:[/?#:]|$)')
+                try:
+                    url_patterns.append((line, re.compile(pat, re.IGNORECASE)))
                 except re.error:
                     pass
             else:
-                url_patterns.append((line, re.compile(re.escape(line), re.IGNORECASE)))
+                pat = r'.*'.join(re.escape(p) for p in rule.split('*')).replace(r'\^', r'(?:[/?#:]|$)')
+                url_patterns.append((line, re.compile(pat, re.IGNORECASE)))
     return allow_domains, url_patterns, global_css, domain_css
 
 

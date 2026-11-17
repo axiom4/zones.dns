@@ -330,7 +330,7 @@ class ProxyAndWpadTests(TestCase):
         api = APIClient()
         api.force_authenticate(user)
 
-        res = api.patch('/api/dhcp/settings/', {
+        res = api.patch('/api/proxy/settings/', {
             'DHCP_WPAD': True,
             'PROXY': True,
             'PROXY_PORT': 8123,
@@ -342,15 +342,15 @@ class ProxyAndWpadTests(TestCase):
         self.assertTrue(res.json()['PROXY'])
         self.assertEqual(res.json()['PROXY_PORT'], 8123)
 
-        info = api.get('/api/dhcp/proxy/info/').json()
+        info = api.get('/api/proxy/info/').json()
         self.assertIn('BEGIN CERTIFICATE', info['pem'])
         self.assertIn('8123', info['pac'])
 
-        t1 = api.post('/api/dhcp/proxy/test/', {'url': 'https://sub.badtracker.example/script.js'}, format='json').json()
+        t1 = api.post('/api/proxy/test/', {'url': 'https://sub.badtracker.example/script.js'}, format='json').json()
         self.assertTrue(t1['blocked'])
         self.assertEqual(t1['reason'], 'blacklist')
 
-        t2 = api.post('/api/dhcp/proxy/test/', {'url': 'https://example.org/index.html'}, format='json').json()
+        t2 = api.post('/api/proxy/test/', {'url': 'https://example.org/index.html'}, format='json').json()
         self.assertFalse(t2['blocked'])
 
         ProxyLog.objects.create(
@@ -373,13 +373,13 @@ class ProxyAndWpadTests(TestCase):
             reason='HTML filtered',
             ms=14,
         )
-        logs_res = api.get('/api/dhcp/proxy/logs/?outcome=blocked').json()
+        logs_res = api.get('/api/proxy/logs/?outcome=blocked').json()
         self.assertEqual(logs_res['count'], 1)
         self.assertEqual(logs_res['blocked_count'], 1)
         self.assertEqual(logs_res['results'][0]['host'], 'ads.badtracker.example')
         self.assertIn('192.168.1.50', logs_res['clients'])
 
-        purge_res = api.post('/api/dhcp/proxy/logs/purge/', {'older_than_hours': 0}, format='json').json()
+        purge_res = api.post('/api/proxy/logs/purge/', {'older_than_hours': 0}, format='json').json()
         self.assertEqual(purge_res['deleted'], 2)
         self.assertEqual(ProxyLog.objects.count(), 0)
 

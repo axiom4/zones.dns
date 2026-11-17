@@ -69,6 +69,7 @@ export type { PatchedDhcp6ReservationRequest } from './models/patched-dhcp-6-res
 export type { PatchedDhcpReservationRequest } from './models/patched-dhcp-reservation-request';
 export type { PatchedDhcpSettingsRequest } from './models/patched-dhcp-settings-request';
 export type { PatchedPersonalSwitchRequest } from './models/patched-personal-switch-request';
+export type { PatchedProxySettingsRequest } from './models/patched-proxy-settings-request';
 export type { PatchedRecordRequest } from './models/patched-record-request';
 export type { PatchedStaticHostRequest } from './models/patched-static-host-request';
 export type { PatchedZoneRequest } from './models/patched-zone-request';
@@ -79,6 +80,7 @@ export type { ProxyLogOutcomeEnum } from './models/proxy-log-outcome-enum';
 export type { ProxyLogPurgeRequestRequest } from './models/proxy-log-purge-request-request';
 export type { ProxyLogPurgeResult } from './models/proxy-log-purge-result';
 export type { ProxyLogsResponse } from './models/proxy-logs-response';
+export type { ProxySettings } from './models/proxy-settings';
 export type { ProxyTestRequestRequest } from './models/proxy-test-request-request';
 export type { ProxyTestResult } from './models/proxy-test-result';
 export type { PublicList } from './models/public-list';

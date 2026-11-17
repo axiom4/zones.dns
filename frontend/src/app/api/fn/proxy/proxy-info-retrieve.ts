@@ -9,11 +9,11 @@ import { RequestBuilder } from '../../request-builder';
 
 import { ProxyInfo } from '../../models/proxy-info';
 
-export interface DhcpProxyInfoCreate$Params {
+export interface ProxyInfoRetrieve$Params {
 }
 
-export function dhcpProxyInfoCreate(http: HttpClient, rootUrl: string, params?: DhcpProxyInfoCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyInfo>> {
-  const rb = new RequestBuilder(rootUrl, dhcpProxyInfoCreate.PATH, 'post');
+export function proxyInfoRetrieve(http: HttpClient, rootUrl: string, params?: ProxyInfoRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyInfo>> {
+  const rb = new RequestBuilder(rootUrl, proxyInfoRetrieve.PATH, 'get');
   if (params) {
   }
 
@@ -27,4 +27,4 @@ export function dhcpProxyInfoCreate(http: HttpClient, rootUrl: string, params?: 
   );
 }
 
-dhcpProxyInfoCreate.PATH = '/api/dhcp/proxy/info/';
+proxyInfoRetrieve.PATH = '/api/proxy/info/';

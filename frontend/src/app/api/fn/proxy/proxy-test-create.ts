@@ -7,15 +7,15 @@ import { filter, map } from 'rxjs/operators';
 import { StrictHttpResponse } from '../../strict-http-response';
 import { RequestBuilder } from '../../request-builder';
 
-import { ProxyLogPurgeRequestRequest } from '../../models/proxy-log-purge-request-request';
-import { ProxyLogPurgeResult } from '../../models/proxy-log-purge-result';
+import { ProxyTestRequestRequest } from '../../models/proxy-test-request-request';
+import { ProxyTestResult } from '../../models/proxy-test-result';
 
-export interface DhcpProxyLogsPurgeCreate$Params {
-      body?: ProxyLogPurgeRequestRequest
+export interface ProxyTestCreate$Params {
+      body: ProxyTestRequestRequest
 }
 
-export function dhcpProxyLogsPurgeCreate(http: HttpClient, rootUrl: string, params?: DhcpProxyLogsPurgeCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyLogPurgeResult>> {
-  const rb = new RequestBuilder(rootUrl, dhcpProxyLogsPurgeCreate.PATH, 'post');
+export function proxyTestCreate(http: HttpClient, rootUrl: string, params: ProxyTestCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyTestResult>> {
+  const rb = new RequestBuilder(rootUrl, proxyTestCreate.PATH, 'post');
   if (params) {
     rb.body(params.body, 'application/json');
   }
@@ -25,9 +25,9 @@ export function dhcpProxyLogsPurgeCreate(http: HttpClient, rootUrl: string, para
   ).pipe(
     filter((r: any): r is HttpResponse<any> => r instanceof HttpResponse),
     map((r: HttpResponse<any>) => {
-      return r as StrictHttpResponse<ProxyLogPurgeResult>;
+      return r as StrictHttpResponse<ProxyTestResult>;
     })
   );
 }
 
-dhcpProxyLogsPurgeCreate.PATH = '/api/dhcp/proxy/logs/purge/';
+proxyTestCreate.PATH = '/api/proxy/test/';

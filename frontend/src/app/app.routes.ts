@@ -14,7 +14,11 @@ export const routes: Routes = [
       { path: 'zones/:id', loadComponent: () => import('./zone-page/zone-page').then(m => m.ZonePage) },
       { path: 'hosts', loadComponent: () => import('./hosts-page/hosts-page').then(m => m.HostsPage) },
       { path: 'dhcp', pathMatch: 'full', redirectTo: 'dhcp/leases' },
+      { path: 'dhcp/proxy', redirectTo: 'proxy/settings' }, // the proxy has a section of its own
+      { path: 'dhcp/proxy-logs', redirectTo: 'proxy/logs' },
       { path: 'dhcp/:tab', loadComponent: () => import('./dhcp-page/dhcp-page').then(m => m.DhcpPage) },
+      { path: 'proxy', pathMatch: 'full', redirectTo: 'proxy/settings' },
+      { path: 'proxy/:tab', loadComponent: () => import('./proxy-page/proxy-page').then(m => m.ProxyPage) },
       { path: 'blacklist', pathMatch: 'full', redirectTo: 'blacklist/manual' },
       { path: 'blacklist/manual', loadComponent: () => import('./blocked-page/blocked-page').then(m => m.BlockedPage) },
       { path: 'blacklist/lists', loadComponent: () => import('./blocked-lists-page/blocked-lists-page').then(m => m.BlockedListsPage) },

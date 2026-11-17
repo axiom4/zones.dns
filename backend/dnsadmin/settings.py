@@ -57,7 +57,7 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
-    'zones.views.dhcp.WpadMiddleware',  # /wpad.dat, /proxy.pac, /proxy-ca.crt, /proxy.mobileconfig work on plain HTTP and any Host: wpad.<domain>
+    'zones.views.proxy.WpadMiddleware',  # /wpad.dat, /proxy.pac, /proxy-ca.crt, /proxy.mobileconfig work on plain HTTP and any Host: wpad.<domain>
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',

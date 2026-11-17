@@ -38,13 +38,4 @@ export interface DhcpSettings {
   DHCP_SERVER?: string;
   DHCP_SUBNETS?: string;
   DHCP_UNICAST?: boolean;
-  DHCP_WPAD?: boolean;
-  DHCP_WPAD_URL?: string;
-  PROXY?: boolean;
-  PROXY_ADDRESS?: string;
-  PROXY_BLOCK_ADS?: boolean;
-  PROXY_BLOCK_POPUPS?: boolean;
-  PROXY_CUSTOM_RULES?: string;
-  PROXY_HTTPS_MITM?: boolean;
-  PROXY_PORT?: number;
 }

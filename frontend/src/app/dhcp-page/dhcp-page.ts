@@ -7,7 +7,6 @@ import { DhcpLease, DhcpSettings } from '../api/models';
 import { byIp } from '../lib/ip';
 import { DhcpReservations } from '../dhcp-reservations/dhcp-reservations';
 import { DhcpNeighbors } from '../dhcp-neighbors/dhcp-neighbors';
-import { DhcpProxy } from '../dhcp-proxy/dhcp-proxy';
 import { DhcpReservations6 } from '../dhcp-reservations6/dhcp-reservations6';
 import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
@@ -15,7 +14,7 @@ import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-dhcp-page',
-  imports: [FormsModule, RouterLink, DhcpReservations, DhcpReservations6, DhcpNeighbors, DhcpProxy, PingLive],
+  imports: [FormsModule, RouterLink, DhcpReservations, DhcpReservations6, DhcpNeighbors, PingLive],
   templateUrl: './dhcp-page.html',
 })
 export class DhcpPage {
@@ -28,7 +27,7 @@ export class DhcpPage {
   saved = signal(false);
   private router = inject(Router);
   section = input('leases', { alias: 'tab' }); // the :tab of the route /dhcp/:tab
-  tab = computed(() => (['leases', 'leases6', 'reservations', 'reservations6', 'neighbors', 'proxy', 'proxy-logs'].includes(this.section()) ? this.section() : 'leases'));
+  tab = computed(() => (['leases', 'leases6', 'reservations', 'reservations6', 'neighbors'].includes(this.section()) ? this.section() : 'leases'));
   shown = computed(() => this.leases().filter(l => l.family === (this.tab() === 'leases6' ? 6 : 4)));
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
   reserve6 = signal<{ duid: string; ip: string } | null>(null);

@@ -662,10 +662,10 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
   .records.leases li > .icon { order: 3; flex: none; margin-left: auto; }
 }
 /* Proxy tab: nothing may be wider than the screen (a fieldset grows to its content unless min-width is 0; the PAC and the fingerprint are long lines) */
-app-dhcp-proxy { display: block; min-width: 0; }
-app-dhcp-proxy header > div { min-width: 0; flex: 1 1 24rem; }
+app-proxy-page { display: block; min-width: 0; }
+app-proxy-page header > div { min-width: 0; flex: 1 1 24rem; }
 fieldset.group { min-width: 0; }
 fieldset.group p, fieldset.group code, .settings .hint code { overflow-wrap: anywhere; }
 .settings .f textarea { width: 100%; box-sizing: border-box; }
 .code-box { margin: .5rem 0 0; padding: .7rem; max-width: 100%; overflow-x: auto; white-space: pre; font: 12px/1.45 var(--mono); background: #14111f; color: #d9f2d9; border-radius: 12px; }
-@media (max-width: 600px) { app-dhcp-proxy header .actions > * { flex: 1 1 100%; text-align: center; } }
+@media (max-width: 600px) { app-proxy-page header .actions > * { flex: 1 1 100%; text-align: center; } }

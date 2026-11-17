@@ -9,7 +9,7 @@ import { RequestBuilder } from '../../request-builder';
 
 import { ProxyLogsResponse } from '../../models/proxy-logs-response';
 
-export interface DhcpProxyLogsRetrieve$Params {
+export interface ProxyLogsRetrieve$Params {
 
 /**
  * Filter by client IP
@@ -42,8 +42,8 @@ export interface DhcpProxyLogsRetrieve$Params {
   q?: string;
 }
 
-export function dhcpProxyLogsRetrieve(http: HttpClient, rootUrl: string, params?: DhcpProxyLogsRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyLogsResponse>> {
-  const rb = new RequestBuilder(rootUrl, dhcpProxyLogsRetrieve.PATH, 'get');
+export function proxyLogsRetrieve(http: HttpClient, rootUrl: string, params?: ProxyLogsRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyLogsResponse>> {
+  const rb = new RequestBuilder(rootUrl, proxyLogsRetrieve.PATH, 'get');
   if (params) {
     rb.query('client', params.client, {});
     rb.query('hours', params.hours, {});
@@ -63,4 +63,4 @@ export function dhcpProxyLogsRetrieve(http: HttpClient, rootUrl: string, params?
   );
 }
 
-dhcpProxyLogsRetrieve.PATH = '/api/dhcp/proxy/logs/';
+proxyLogsRetrieve.PATH = '/api/proxy/logs/';
