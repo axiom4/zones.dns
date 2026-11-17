@@ -1,6 +1,7 @@
 import base64
 import binascii
 import ipaddress
+import logging
 import re
 import socket
 import struct
@@ -15,6 +16,7 @@ from dnslib import DNSRecord
 from .token import client_ip
 
 MAX_QUERY = 4096
+log = logging.getLogger(__name__)
 _B64URL_RE = re.compile(r'^[A-Za-z0-9_-]+$')
 
 
@@ -79,10 +81,12 @@ class DohView(View):
             if q.header.qr or q.header.opcode != 0:  # only queries: DoH clients reach the daemon from 127.0.0.1, so an UPDATE would look local
                 return HttpResponse(status=400)
             out = _exchange(wire, client_ip(request))
-        except OSError:
+        except OSError as e:  # the daemon is down, or not listening on DNS_DOH_BACKEND, or too slow (5 s)
+            log.warning('DoH: cannot reach the DNS daemon at %s: %r', settings.DNS_DOH_BACKEND, e)
             return HttpResponse(status=502)
         except Exception:
             return HttpResponse(status=400)
         if out is None:
+            log.warning('DoH: the DNS daemon at %s closed the connection without an answer (client %s not in DNS_ALLOW_QUERY, or DNS_PROXY_PROTOCOL set on one side only)', settings.DNS_DOH_BACKEND, client_ip(request))
             return HttpResponse(status=502)
         return HttpResponse(out, content_type='application/dns-message', headers={'Cache-Control': 'max-age=0'})
