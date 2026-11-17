@@ -16,9 +16,10 @@ export const routes: Routes = [
       { path: 'hosts', redirectTo: 'zones/hosts' },
       { path: 'dhcp', pathMatch: 'full', redirectTo: 'dhcp/leases' },
       { path: 'dhcp/proxy', redirectTo: 'proxy/settings' }, // the proxy has a section of its own
-      { path: 'dhcp/proxy-logs', redirectTo: 'proxy/logs' },
+      { path: 'dhcp/proxy-logs', redirectTo: 'logs/proxy' },
       { path: 'dhcp/:tab', loadComponent: () => import('./dhcp-page/dhcp-page').then(m => m.DhcpPage) },
       { path: 'proxy', pathMatch: 'full', redirectTo: 'proxy/settings' },
+      { path: 'proxy/logs', redirectTo: 'logs/proxy' },
       { path: 'proxy/:tab', loadComponent: () => import('./proxy-page/proxy-page').then(m => m.ProxyPage) },
       { path: 'blacklist', pathMatch: 'full', redirectTo: 'blacklist/manual' },
       { path: 'blacklist/manual', loadComponent: () => import('./blocked-page/blocked-page').then(m => m.BlockedPage) },
@@ -26,7 +27,9 @@ export const routes: Routes = [
       { path: 'blocked', redirectTo: 'blacklist/manual' },
       { path: 'geo', loadComponent: () => import('./geo-page/geo-page').then(m => m.GeoPage) }, // lazy: pulls in the map libraries
       { path: 'audit', loadComponent: () => import('./audit-page/audit-page').then(m => m.AuditPage) },
-      { path: 'logs', loadComponent: () => import('./logs-page/logs-page').then(m => m.LogsPage) },
+      { path: 'logs', pathMatch: 'full', redirectTo: 'logs/dns' },
+      { path: 'logs/dns', loadComponent: () => import('./logs-page/logs-page').then(m => m.LogsPage) },
+      { path: 'logs/proxy', data: { tab: 'logs' }, loadComponent: () => import('./proxy-page/proxy-page').then(m => m.ProxyPage) },
       { path: 'security', loadComponent: () => import('./security-page/security-page').then(m => m.SecurityPage) },
       { path: 'stats', loadComponent: () => import('./stats-page/stats-page').then(m => m.StatsPage) },
     ],

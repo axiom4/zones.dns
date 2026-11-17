@@ -1,8 +1,8 @@
-<nav class="subtabs" aria-label="Proxy">
-  <a routerLink="/proxy/settings" [class.on]="mode() !== 'logs'">Settings</a>
-  <a routerLink="/proxy/logs" [class.on]="mode() === 'logs'">Logs</a>
-</nav>
 @if (mode() === 'logs') {
+<nav class="subtabs" aria-label="Logs">
+  <a routerLink="/logs/dns" [class.on]="false">DNS queries</a>
+  <a routerLink="/logs/proxy" [class.on]="true">Proxy requests</a>
+</nav>
   <header>
     <div>
       <h2>Proxy logs</h2>
