@@ -665,7 +665,7 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 }
 /* Proxy tab: nothing may be wider than the screen (a fieldset grows to its content unless min-width is 0; the PAC and the fingerprint are long lines) */
 app-proxy-page { display: block; min-width: 0; }
-app-proxy-page header > div { min-width: 0; flex: 1 1 24rem; }
+app-proxy-page header > div:first-child { min-width: 0; flex: 1 1 24rem; }
 fieldset.group { min-width: 0; }
 fieldset.group p, fieldset.group code, .settings .hint code { overflow-wrap: anywhere; }
 .settings .f textarea { width: 100%; box-sizing: border-box; }
