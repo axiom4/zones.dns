@@ -694,9 +694,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if conn.sock is not None:
                         _set_nodelay(conn.sock)
                     resp = conn.getresponse()
-                except (OSError, HTTPException):
+                except (OSError, HTTPException) as e:
                     conn.close()
-                    if not reused:
+                    if not reused or isinstance(e, TimeoutError):  # a timeout is an answer too slow, not a closed connection: retrying doubled the wait
                         raise
                     # the server closed the idle connection: one retry on a new one (the request was not answered)
                     conn = _open_upstream(target_scheme, host, port, resolved_family, resolved_addr, ctx)
@@ -709,23 +709,46 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 cenc = resp.getheader('Content-Encoding', '') or ''
                 clen_hdr = resp.getheader('Content-Length')
                 low_ctype = ctype.lower()
-                if 'text/html' not in low_ctype and (
-                    (clen_hdr and clen_hdr.isdigit()) or 'text/event-stream' in low_ctype
-                ):
-                    # Stream non-HTML responses with known Content-Length and real-time SSE streams directly
-                    stream_keep_alive = keep_alive and bool(clen_hdr and clen_hdr.isdigit())
+                if 'text/html' not in low_ctype:
+                    # Everything but HTML is relayed as it arrives: long polls and streams (Exchange EWS streaming notifications, Teams trouter,
+                    # SSE) never end, and a buffered copy made the client wait until its own timeout
+                    no_body = self.command == 'HEAD' or status_code in (204, 304)
+                    framed = bool(clen_hdr and clen_hdr.isdigit()) or no_body  # the client can tell where the body ends
+                    chunk_out = not framed and keep_alive  # otherwise the end of the body is the end of the connection
+                    stream_keep_alive = keep_alive
                     self.send_response(status_code, reason)
                     for k, v in resp.getheaders():
                         if k.lower() not in HOP_BY_HOP:
                             self.send_header(k, v)
-                    self.send_header('Connection', 'keep-alive' if stream_keep_alive else 'close')
+                    if chunk_out:
+                        self.send_header('Transfer-Encoding', 'chunked')
+                    self.send_header('Connection', 'keep-alive' if (framed or chunk_out) and keep_alive else 'close')
                     self.end_headers()
-                    if self.command != 'HEAD':
+                    if not framed and conn.sock is not None:
+                        conn.sock.settimeout(120)  # a long poll is silent for tens of seconds
+                    client_gone = False
+                    if not no_body:
                         read_fn = getattr(resp, 'read1', None) or resp.read
-                        while chunk := read_fn(65536):
-                            self.wfile.write(chunk)
-                            if 'text/event-stream' in low_ctype:
-                                self.wfile.flush()
+                        try:
+                            while chunk := read_fn(65536):
+                                try:
+                                    self.wfile.write(f'{len(chunk):x}\r\n'.encode() + chunk + b'\r\n' if chunk_out else chunk)
+                                    if chunk_out or 'text/event-stream' in low_ctype:
+                                        self.wfile.flush()
+                                except OSError:
+                                    client_gone = True  # the client gave up (a video seek, a closed tab): not an error of ours
+                                    break
+                            if chunk_out and not client_gone:
+                                self.wfile.write(b'0\r\n\r\n')
+                        except Exception as e:
+                            # the headers are gone: all we can do is cut the connection
+                            self._log(log_method, host, full_url, 'error', status_code, f'Upstream failed while streaming: {_why(e)}', t0)
+                            self.close_connection = True
+                            return
+                    if client_gone:
+                        self._log(log_method, host, full_url, 'allowed', status_code, 'client closed the connection', t0)
+                        self.close_connection = True
+                        return
                     pool_key = key if resp.isclosed() and not resp.will_close else None  # body read to its end: the connection is reusable
                     self._log(log_method, host, full_url, 'allowed', status_code, ctype.partition(';')[0] or 'stream', t0)
                     self.close_connection = not stream_keep_alive

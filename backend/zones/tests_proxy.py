@@ -543,3 +543,37 @@ class UploadBodyTests(TestCase):
         self.assertTrue(resp.startswith(b'HTTP/1.0 100') or resp.startswith(b'HTTP/1.1 100'))
         self.assertEqual(seen['body'], b'abc')
         self.assertNotIn('expect', {k.lower() for k in seen['headers']})
+
+
+class StreamingTests(TestCase):
+    def test_a_chunked_json_response_is_relayed_without_buffering_the_whole_body(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.send_header('Transfer-Encoding', 'chunked')
+                self.end_headers()
+                for part in (b'{"a":', b'1}'):
+                    self.wfile.write(f'{len(part):x}\r\n'.encode() + part + b'\r\n')
+                self.wfile.write(b'0\r\n\r\n')
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=False, PROXY_BLOCK_POPUPS=False, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=None,
+        )
+        resp = _run_proxy_session(f'GET http://127.0.0.1:{srv.server_port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n'.encode(), ns)
+        self.assertIn(b'200 OK', resp)
+        self.assertTrue(resp.endswith(b'{"a":1}'))  # no Content-Length: the body ends with the connection
+        self.assertNotIn(b'Transfer-Encoding', resp)
