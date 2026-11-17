@@ -1,4 +1,4 @@
-import { AfterViewInit, Component, ElementRef, inject, signal, viewChild } from '@angular/core';
+import { AfterViewInit, Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
@@ -26,6 +26,7 @@ export class Shell implements AfterViewInit {
   private router = inject(Router);
   private dlg = viewChild.required<ElementRef<HTMLDialogElement>>('dlg');
   private stepDlg = viewChild.required<ElementRef<HTMLDialogElement>>('step');
+  private nzDlg = viewChild.required<ElementRef<HTMLDialogElement>>('nz');
   private revDlg = viewChild.required<ElementRef<HTMLDialogElement>>('rev');
   superuser = signal(false); // the Django admin link is for superusers
   newZone = '';
@@ -47,7 +48,9 @@ export class Shell implements AfterViewInit {
   ngAfterViewInit() { this.ui.dlg = this.dlg().nativeElement; this.stepUp.dlg = this.stepDlg().nativeElement; }
   async confirmCode() { await this.stepUp.code(this.code); this.code = ''; }
 
-  async addZone() { if (await this.store.add(this.newZone)) this.newZone = ''; }
+  zoneList = computed(() => this.store.groups().flatMap(g => g.zones));
+  openZone() { this.newZone = ''; this.ui.error.set(''); this.nzDlg().nativeElement.showModal(); }
+  async addZone() { if (await this.store.add(this.newZone)) { this.newZone = ''; this.nzDlg().nativeElement.close(); } }
   zonePreview = () => cidrToZone(this.cidr);
   openReverse() { this.cidr = ''; this.ui.error.set(''); this.revDlg().nativeElement.showModal(); }
   async addReverse() { if (await this.store.addReverse(this.cidr)) this.revDlg().nativeElement.close(); }

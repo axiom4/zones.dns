@@ -13,39 +13,43 @@
       <a routerLink="/stats" routerLinkActive="on">Statistics</a>
       <a routerLink="/security" routerLinkActive="on">Security</a>
     </div>
-    @if (inZones()) {
-      <nav aria-label="Zones">
-        @for (g of store.groups(); track g.title) {
-          @if (g.zones.length || g.title === 'Your zones') {
-            <p class="label">{{ g.title }}</p>
-            @for (z of g.zones; track z.id) {
-              <div class="zone" routerLinkActive="active" [class.off]="z.enabled === false">
-                <a class="zname" [routerLink]="['/zones', z.id]" [title]="z.cidr ? z.name : ''">{{ z.cidr ?? z.name }}</a>
-                <button class="icon" (click)="store.del(z)" [attr.aria-label]="'Delete ' + z.name">✕</button>
-              </div>
-            } @empty {
-              <p class="soft">No zones yet. Create one below.</p>
-            }
-          }
-        }
-      </nav>
-      <form class="addzone" (ngSubmit)="addZone()">
-        <input name="z" [(ngModel)]="newZone" placeholder="New zone, e.g. corp.lan" autocomplete="off" aria-label="New zone name" required>
-        <button class="primary">+</button>
-      </form>
-      <button class="link small-l" (click)="openReverse()">+ New reverse zone…</button>
-    } @else {
-      <div class="grow"></div>
-    }
+    <div class="grow"></div>
     @if (superuser()) { <button class="link" (click)="openAdmin()">Django Admin ↗</button> }
     <button class="link" (click)="logout()">Sign out</button>
   </aside>
 
   <main>
+    @if (inZones()) {
+      <nav class="subtabs" aria-label="Zones">
+        @for (z of zoneList(); track z.id) {
+          <span class="zt" [class.off]="z.enabled === false">
+            <a [routerLink]="['/zones', z.id]" routerLinkActive="on" [title]="z.cidr ? z.name : ''">{{ z.cidr ?? z.name }}</a>
+            <button type="button" class="icon" (click)="store.del(z)" [attr.aria-label]="'Delete ' + z.name">✕</button>
+          </span>
+        }
+        <button type="button" (click)="openZone()">+ New zone</button>
+        <button type="button" (click)="openReverse()">+ New reverse zone…</button>
+      </nav>
+    }
     @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
     <router-outlet />
   </main>
 </div>
+
+<dialog #nz class="confirm" (click)="$event.target === nz ? nz.close() : null">
+  <form (ngSubmit)="addZone()">
+    <h3>New zone</h3>
+    <label class="field">
+      <span class="lbl">Zone name</span>
+      <input name="z" [(ngModel)]="newZone" placeholder="corp.lan" autocomplete="off" required>
+    </label>
+    @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+    <div class="actions">
+      <button type="button" class="ghost" (click)="nz.close()">Cancel</button>
+      <button class="primary">Create zone</button>
+    </div>
+  </form>
+</dialog>
 
 <dialog #rev class="confirm" (click)="$event.target === rev ? rev.close() : null">
   <form (ngSubmit)="addReverse()">

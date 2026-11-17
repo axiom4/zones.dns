@@ -607,7 +607,9 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 }
 .confirm.detail .actions { position: sticky; bottom: -1.75rem; margin: 0 -1.75rem -1.75rem; padding: .75rem 1.75rem 1.75rem; background: var(--surface); }  /* Close stays in view under a long WHOIS record */
 
-.subtabs { display: flex; gap: .5rem; margin-bottom: 1rem; }
+.subtabs { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1rem; }
+.subtabs .zt { display: inline-flex; align-items: center; } .subtabs .zt.off a { text-decoration: line-through; }
+.subtabs .zt .icon { padding: .2rem .4rem; margin-left: -.3rem; opacity: 0; } .subtabs .zt:hover .icon, .subtabs .zt .icon:focus-visible { opacity: .8; }
 .subtabs :is(button, a) { display: inline-block; background: none; text-decoration: none; cursor: pointer; border: 1px solid transparent; border-radius: 999px; padding: .4rem .9rem; font-weight: 700; color: inherit; opacity: .7; }
 .subtabs :is(button, a).on { opacity: 1; border-color: currentColor; }
 
