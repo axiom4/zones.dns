@@ -481,3 +481,39 @@ class ProxyStatsTests(TestCase):
         prx = api.get('/api/stats/?hours=1&source=proxy').json()
         self.assertEqual((prx['total'], {c['name']: c['count'] for c in prx['by_answer']}), (4, {'blocked': 2, 'proxied': 2}))
         self.assertEqual(api.get('/api/stats/?hours=1&source=zzz').json()['total'], 6)
+
+
+class UpstreamPoolTests(TestCase):
+    def test_a_kept_alive_connection_is_reused_and_a_stale_one_is_dropped(self):
+        from http.client import HTTPConnection
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+        from .proxy import server as ps
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Length', '2')
+                self.end_headers()
+                self.wfile.write(b'ok')
+
+            def log_message(self, *a):
+                pass
+
+        srv = HTTPServer(('127.0.0.1', 0), H)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        key = ('http', 'x', srv.server_port, '127.0.0.1')
+        conn = HTTPConnection('127.0.0.1', srv.server_port)
+        conn.request('GET', '/')
+        resp = conn.getresponse()
+        resp.read()
+        ps._pool_give(key, conn)
+        self.assertIs(ps._pool_take(key), conn)  # same connection, no new handshake
+        self.assertIsNone(ps._pool_take(key))
+        ps._pool_give(key, conn)
+        with ps._pool_lock:
+            ps._pool[key][0] = (conn, 0)  # idle for longer than _POOL_IDLE
+        self.assertIsNone(ps._pool_take(key))

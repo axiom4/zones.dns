@@ -1,7 +1,7 @@
 """Multi-threaded HTTP and HTTPS ad/popup-filtering forward proxy server."""
 from collections import OrderedDict
 import gzip
-from http.client import HTTPConnection, HTTPSConnection
+from http.client import HTTPConnection, HTTPException, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import ipaddress
 import queue
@@ -121,6 +121,42 @@ class _ResolvedHTTPSConnection(HTTPSConnection):
         sock.connect(self._resolved_addr)
         server_hostname = self._tunnel_host if self._tunnel_host else self.host
         self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
+
+
+_default_ssl_context = ssl.create_default_context()  # building one loads the CA store (tens of ms): once, not per request
+
+_pool_lock = threading.Lock()
+_pool = {}  # (scheme, host, port, ip) -> [(conn, idle_since)]: kept-alive upstream connections, the TCP+TLS handshake is most of a request's time
+_POOL_IDLE = 20.0  # most servers close an idle connection after 30-60 s; a stale one is retried on a new connection anyway
+_POOL_PER_KEY = 4
+
+
+def _pool_take(key):
+    now = time.monotonic()
+    with _pool_lock:
+        lst = _pool.get(key)
+        while lst:
+            conn, since = lst.pop()
+            if now - since < _POOL_IDLE:
+                return conn
+            conn.close()
+    return None
+
+
+def _pool_give(key, conn):
+    with _pool_lock:
+        lst = _pool.setdefault(key, [])
+        if len(lst) < _POOL_PER_KEY:
+            lst.append((conn, time.monotonic()))
+            return
+    conn.close()
+    # shortcut: idle connections are dropped only when the same key is used again, no sweeper; add one if the number of hosts grows
+
+
+def _open_upstream(scheme, host, port, family, addr, ctx):
+    if scheme == 'https':
+        return _ResolvedHTTPSConnection(host, port, resolved_addr=addr, family=family, timeout=20, context=ctx)
+    return HTTPConnection(addr[0], addr[1], timeout=20)
 
 
 def _set_nodelay(sock):
@@ -584,7 +620,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             fwd_headers['Accept-Encoding'] = 'gzip, deflate'
 
         conn_header_val = 'keep-alive' if keep_alive else 'close'
-        conn = None
+        conn = pool_key = None
         try:
             fetcher = getattr(self.server, 'http_fetcher', None)
             if fetcher is not None:
@@ -596,15 +632,27 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k.lower() not in HOP_BY_HOP and k.lower() not in ('content-length', 'content-encoding')
                 ]
             else:
-                if target_scheme == 'https':
-                    ctx = self.server.upstream_ssl_context or ssl.create_default_context()
-                    conn = _ResolvedHTTPSConnection(host, port, resolved_addr=resolved_addr, family=resolved_family, timeout=20, context=ctx)
-                else:
-                    conn = HTTPConnection(resolved_addr[0], resolved_addr[1], timeout=20)
-                conn.request(self.command, path_query, body=req_body, headers=fwd_headers)
-                if conn.sock is not None:
-                    _set_nodelay(conn.sock)
-                resp = conn.getresponse()
+                ctx = self.server.upstream_ssl_context or _default_ssl_context
+                key = (target_scheme, host, port, resolved_addr[0])
+                conn = _pool_take(key)
+                reused = conn is not None
+                if conn is None:
+                    conn = _open_upstream(target_scheme, host, port, resolved_family, resolved_addr, ctx)
+                try:
+                    conn.request(self.command, path_query, body=req_body, headers=fwd_headers)
+                    if conn.sock is not None:
+                        _set_nodelay(conn.sock)
+                    resp = conn.getresponse()
+                except (OSError, HTTPException):
+                    conn.close()
+                    if not reused:
+                        raise
+                    # the server closed the idle connection: one retry on a new one (the request was not answered)
+                    conn = _open_upstream(target_scheme, host, port, resolved_family, resolved_addr, ctx)
+                    conn.request(self.command, path_query, body=req_body, headers=fwd_headers)
+                    if conn.sock is not None:
+                        _set_nodelay(conn.sock)
+                    resp = conn.getresponse()
                 status_code, reason = resp.status, resp.reason
                 ctype = resp.getheader('Content-Type', '') or ''
                 cenc = resp.getheader('Content-Encoding', '') or ''
@@ -627,10 +675,12 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             self.wfile.write(chunk)
                             if 'text/event-stream' in low_ctype:
                                 self.wfile.flush()
+                    pool_key = key if resp.isclosed() and not resp.will_close else None  # body read to its end: the connection is reusable
                     self._log(log_method, host, full_url, 'allowed', status_code, ctype.partition(';')[0] or 'stream', t0)
                     self.close_connection = not stream_keep_alive
                     return
                 raw_body = resp.read()
+                pool_key = key if resp.isclosed() and not resp.will_close else None
                 out_headers = [
                     (k, v) for k, v in resp.getheaders()
                     if k.lower() not in HOP_BY_HOP and k.lower() not in ('content-length', 'content-encoding')
@@ -641,7 +691,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
             return
         finally:
             if conn:
-                conn.close()
+                _pool_give(pool_key, conn) if pool_key and conn.sock else conn.close()
 
         html_filtered = False
         sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
