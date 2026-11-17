@@ -1775,8 +1775,17 @@ paths:
   /api/proxy/logs/purge/:
     post:
       operationId: proxy_logs_purge_create
-      description: Delete proxy log entries older than `older_than_hours` (0 = delete
-        all).
+      description: 'Delete proxy log entries older than `older_than_hours` (0 = delete
+        all). Like the query log: `dry_run` only counts; deleting needs a second-factor
+        grant (scope log-purge).'
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log). Required when the user has a second factor.
       tags:
       - proxy
       requestBody:
@@ -4093,13 +4102,21 @@ components:
           type: integer
           minimum: 0
           default: 0
+        dry_run:
+          type: boolean
+          default: false
+          description: Only count what would be deleted
     ProxyLogPurgeResult:
       type: object
       properties:
         deleted:
           type: integer
+          description: Entries deleted (or that would be, with dry_run)
+        dry_run:
+          type: boolean
       required:
       - deleted
+      - dry_run
     ProxyLogsResponse:
       type: object
       properties:

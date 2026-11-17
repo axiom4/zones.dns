@@ -258,11 +258,14 @@ export class LogsPage implements OnDestroy {
   }
 
   doPurge() {
+    const dlg = this.pg().nativeElement;
     return this.ui.run(async () => {
-      const grant = await this.stepUp.request('log-purge'); // the history is erased only by whoever proves a second factor
-      if (grant === null) return;
-      await this.api.invoke(logsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: false }, 'X-MFA-Grant': grant || undefined });
-      this.pg().nativeElement.close();
+      dlg.close(); // no modal over a modal: the second factor is asked on its own
+      try {
+        const grant = await this.stepUp.request('log-purge'); // the history is erased only by whoever proves a second factor
+        if (grant === null) { dlg.showModal(); return; }
+        await this.api.invoke(logsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: false }, 'X-MFA-Grant': grant || undefined });
+      } catch (e) { dlg.showModal(); throw e; } // the error is shown in the dialog
       this.domains.set({}); this.names.set({});
       await this.reset();
     });

@@ -12,7 +12,7 @@
     </div>
     <div class="actions">
       <label class="check"><input type="checkbox" name="live" [(ngModel)]="live" (ngModelChange)="toggleLive()"> Refresh automatically</label>
-      <button class="ghost" type="button" (click)="purgeLogs()">Clear logs…</button>
+      <button class="ghost" type="button" (click)="purgeLogs()">Purge log…</button>
       <button class="ghost" type="button" (click)="loadLogs()">Refresh</button>
     </div>
   </header>
@@ -199,3 +199,24 @@
     </fieldset>
   }
 }
+
+<dialog #pg class="confirm" (click)="$event.target === pg ? pg.close() : null">
+  <h3>Purge the proxy log</h3>
+  <p class="soft pl">Permanently deletes proxy requests older than the chosen period.</p>
+  <label class="field">
+    <span class="lbl">Delete requests older than</span>
+    <select name="ph" [(ngModel)]="purgeHours" (ngModelChange)="previewPurge()" aria-label="Period to keep">
+      <option [ngValue]="24">1 day</option>
+      <option [ngValue]="168">7 days</option>
+      <option [ngValue]="720">30 days</option>
+      <option [ngValue]="2160">90 days</option>
+      <option [ngValue]="0">Everything: empty the log</option>
+    </select>
+  </label>
+  <p class="purgecount">@if (purgeCount() === null) { Counting requests… } @else { <b>{{ purgeCount() }}</b> requests will be deleted. This cannot be undone. }</p>
+  @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+  <div class="actions">
+    <button class="ghost" (click)="pg.close()">Cancel</button>
+    <button class="danger" (click)="doPurge()" [disabled]="!purgeCount()">Delete</button>
+  </div>
+</dialog>

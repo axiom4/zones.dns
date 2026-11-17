@@ -14,7 +14,7 @@ from rest_framework.test import APIClient
 from .dnsd import ddns, ratelimit, resolver, suspicious, zonefile
 from .dnsd.dnsserver import Handler, PooledTCPServer, logger
 from .management.commands.rundns import Command as RunDns
-from .models import QueryLog, Record, TotpDevice, Zone
+from .models import ProxyLog, QueryLog, Record, TotpDevice, Zone
 
 
 class DohAcceptTests(TestCase):
@@ -284,6 +284,15 @@ class MoreStepUpTests(TestCase):
         self.assertEqual(QueryLog.objects.count(), 1)
         self.assertEqual(self.api.post('/api/logs/purge/', body, format='json', **self._grant('log-purge')).status_code, 200)
         self.assertEqual(QueryLog.objects.count(), 0)
+
+    def test_purging_the_proxy_log_needs_its_grant(self):
+        ProxyLog.objects.create(client='10.0.0.1', method='GET', host='a.example', url='http://a.example/', outcome='allowed')
+        body = {'older_than_hours': 0}
+        self.assertEqual(self.api.post('/api/proxy/logs/purge/', {**body, 'dry_run': True}, format='json').json()['deleted'], 1)
+        self.assertEqual(self.api.post('/api/proxy/logs/purge/', body, format='json').status_code, 403)
+        self.assertEqual(ProxyLog.objects.count(), 1)
+        self.assertEqual(self.api.post('/api/proxy/logs/purge/', body, format='json', **self._grant('log-purge')).status_code, 200)
+        self.assertEqual(ProxyLog.objects.count(), 0)
 
     def test_bulk_delete_of_most_of_a_zone_needs_the_zone_grant(self):
         ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]

@@ -58,10 +58,12 @@ class ProxyLogsResponseSerializer(serializers.Serializer):
 
 class ProxyLogPurgeRequestSerializer(serializers.Serializer):
     older_than_hours = serializers.IntegerField(required=False, default=0, min_value=0)
+    dry_run = serializers.BooleanField(default=False, help_text='Only count what would be deleted')
 
 
 class ProxyLogPurgeResultSerializer(serializers.Serializer):
-    deleted = serializers.IntegerField()
+    deleted = serializers.IntegerField(help_text='Entries deleted (or that would be, with dry_run)')
+    dry_run = serializers.BooleanField()
 
 
 class ProxyRuleListSerializer(serializers.Serializer):

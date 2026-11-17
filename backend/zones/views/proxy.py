@@ -14,6 +14,7 @@ from rest_framework.views import APIView
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit
 from ..models import DataVersion, ProxyLog, Setting
+from .zone import GRANT, need_grant
 from ..proxy import ca, filter as pfilter, pac, rules
 from ..serializers import (
     ProxyInfoSerializer,
@@ -171,15 +172,21 @@ class ProxyLogsView(APIView):
 
 
 class ProxyLogsPurgeView(APIView):
-    @extend_schema(request=ProxyLogPurgeRequestSerializer, responses=ProxyLogPurgeResultSerializer)
+    @extend_schema(request=ProxyLogPurgeRequestSerializer, responses=ProxyLogPurgeResultSerializer, parameters=[GRANT])
     def post(self, request):
-        """Delete proxy log entries older than `older_than_hours` (0 = delete all)."""
+        """Delete proxy log entries older than `older_than_hours` (0 = delete all). Like the query log: `dry_run` only counts; deleting needs a second-factor grant (scope log-purge)."""
         ser = ProxyLogPurgeRequestSerializer(data=request.data or {})
         ser.is_valid(raise_exception=True)
         hours = ser.validated_data.get('older_than_hours', 0)
         qs = ProxyLog.objects.filter(time__lt=timezone.now() - timedelta(hours=hours)) if hours > 0 else ProxyLog.objects.all()
-        deleted, _ = qs.delete()
-        return Response(ProxyLogPurgeResultSerializer({'deleted': deleted}).data)
+        dry = ser.validated_data['dry_run']
+        if dry:
+            deleted = qs.count()
+        elif (denied := need_grant(request, scope='log-purge')) is not None:
+            return denied
+        else:
+            deleted, _ = qs.delete()
+        return Response(ProxyLogPurgeResultSerializer({'deleted': deleted, 'dry_run': dry}).data)
 
 
 class WpadView(View):

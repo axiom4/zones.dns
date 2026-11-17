@@ -11,12 +11,18 @@ import { ProxyLogPurgeRequestRequest } from '../../models/proxy-log-purge-reques
 import { ProxyLogPurgeResult } from '../../models/proxy-log-purge-result';
 
 export interface ProxyLogsPurgeCreate$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
       body?: ProxyLogPurgeRequestRequest
 }
 
 export function proxyLogsPurgeCreate(http: HttpClient, rootUrl: string, params?: ProxyLogsPurgeCreate$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyLogPurgeResult>> {
   const rb = new RequestBuilder(rootUrl, proxyLogsPurgeCreate.PATH, 'post');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.body(params.body, 'application/json');
   }
 

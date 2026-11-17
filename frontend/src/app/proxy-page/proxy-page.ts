@@ -1,4 +1,4 @@
-import { Component, OnDestroy, computed, effect, inject, input, signal } from '@angular/core';
+import { Component, ElementRef, OnDestroy, computed, effect, inject, input, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
@@ -14,6 +14,7 @@ import {
   proxySettingsRetrieve,
 } from '../api/functions';
 import { ProxyRuleList, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
+import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -23,7 +24,11 @@ import { Ui } from '../services/ui';
 })
 export class ProxyPage implements OnDestroy {
   private api = inject(Api);
-  private ui = inject(Ui);
+  ui = inject(Ui);
+  private stepUp = inject(StepUp);
+  private pg = viewChild<ElementRef<HTMLDialogElement>>('pg');
+  purgeHours = 24;
+  purgeCount = signal<number | null>(null);
   mode = input<'settings' | 'logs'>('settings', { alias: 'tab' }); // the :tab of the route /proxy/:tab
   cfg = signal<ProxySettings>({});
   info = signal<ProxyInfo | null>(null);
@@ -132,16 +137,27 @@ export class ProxyPage implements OnDestroy {
     }
   }
 
-  purgeLogs() {
-    this.ui.ask(
-      'Clear proxy logs?',
-      'This removes all recorded HTTP/HTTPS proxy log entries.',
-      () =>
-        this.ui.run(async () => {
-          await this.api.invoke(proxyLogsPurgeCreate, { body: { older_than_hours: 0 } });
-          await this.loadLogs();
-        }),
-    );
+  purgeLogs() { this.ui.error.set(''); this.pg()!.nativeElement.showModal(); this.previewPurge(); }
+
+  previewPurge() {
+    this.purgeCount.set(null);
+    return this.ui.run(async () => {
+      const r = await this.api.invoke(proxyLogsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: true } });
+      this.purgeCount.set(r.deleted);
+    });
+  }
+
+  doPurge() {
+    const dlg = this.pg()!.nativeElement;
+    return this.ui.run(async () => {
+      dlg.close(); // no modal over a modal: the second factor is asked on its own
+      try {
+        const grant = await this.stepUp.request('log-purge');
+        if (grant === null) { dlg.showModal(); return; }
+        await this.api.invoke(proxyLogsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: false }, 'X-MFA-Grant': grant || undefined });
+      } catch (e) { dlg.showModal(); throw e; }
+      await this.loadLogs();
+    });
   }
 
   isHostAllowed(host: string) {
