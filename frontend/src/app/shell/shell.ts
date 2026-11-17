@@ -36,7 +36,6 @@ export class Shell implements AfterViewInit {
     { initialValue: this.router.url },
   );
   inZones = () => this.url().startsWith('/zones');
-  inBlacklist = () => this.url().startsWith('/blacklist');
 
   constructor() {
     this.store.load();

@@ -34,13 +34,6 @@
         <button class="primary">+</button>
       </form>
       <button class="link small-l" (click)="openReverse()">+ New reverse zone…</button>
-    } @else if (inBlacklist()) {
-      <nav aria-label="Blacklist">
-        <p class="label">Blacklist</p>
-        <div class="zone" routerLinkActive="active"><a class="zname" routerLink="/blacklist/manual">Personal blocks</a></div>
-        <div class="zone" routerLinkActive="active"><a class="zname" routerLink="/blacklist/lists">Public lists</a></div>
-      </nav>
-      <div class="grow"></div>
     } @else {
       <div class="grow"></div>
     }

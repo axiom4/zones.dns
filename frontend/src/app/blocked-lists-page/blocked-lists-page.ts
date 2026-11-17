@@ -1,3 +1,4 @@
+import { RouterLink } from '@angular/router';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
@@ -7,7 +8,7 @@ import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-blocked-lists-page',
-  imports: [FormsModule],
+  imports: [FormsModule, RouterLink],
   templateUrl: './blocked-lists-page.html',
 })
 export class BlockedListsPage {
