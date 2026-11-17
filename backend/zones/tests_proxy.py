@@ -13,7 +13,7 @@ from rest_framework.test import APIClient
 from .dhcp import names, v4 as dhcp
 from .dnsd import resolver
 from .dnsd.resolver import Resolver
-from .models import BlockedDomain, DataVersion, Setting
+from .models import BlockedDomain, DataVersion, ProxyLog, Setting
 from .proxy import ca, filter as pfilter
 from .proxy.server import ProxyHandler, _mitm_failed, cached_proxy_settings, is_mitm_failed
 
@@ -352,6 +352,36 @@ class ProxyAndWpadTests(TestCase):
 
         t2 = api.post('/api/dhcp/proxy/test/', {'url': 'https://example.org/index.html'}, format='json').json()
         self.assertFalse(t2['blocked'])
+
+        ProxyLog.objects.create(
+            client='192.168.1.50',
+            method='CONNECT',
+            host='ads.badtracker.example',
+            url='https://ads.badtracker.example/',
+            outcome='blocked',
+            status=403,
+            reason='blacklist: badtracker.example (personal)',
+            ms=2,
+        )
+        ProxyLog.objects.create(
+            client='192.168.1.50',
+            method='MITM GET',
+            host='news.example',
+            url='https://news.example/index.html',
+            outcome='filtered',
+            status=200,
+            reason='HTML filtered',
+            ms=14,
+        )
+        logs_res = api.get('/api/dhcp/proxy/logs/?outcome=blocked').json()
+        self.assertEqual(logs_res['count'], 1)
+        self.assertEqual(logs_res['blocked_count'], 1)
+        self.assertEqual(logs_res['results'][0]['host'], 'ads.badtracker.example')
+        self.assertIn('192.168.1.50', logs_res['clients'])
+
+        purge_res = api.post('/api/dhcp/proxy/logs/purge/', {'older_than_hours': 0}, format='json').json()
+        self.assertEqual(purge_res['deleted'], 2)
+        self.assertEqual(ProxyLog.objects.count(), 0)
 
     def test_cached_proxy_settings_avoids_per_request_db_queries(self):
         Setting.objects.update_or_create(key='dhcp:PROXY_PORT', defaults={'value': '8999'})

@@ -28,7 +28,7 @@ export class DhcpPage {
   saved = signal(false);
   private router = inject(Router);
   section = input('leases', { alias: 'tab' }); // the :tab of the route /dhcp/:tab
-  tab = computed(() => (['leases', 'leases6', 'reservations', 'reservations6', 'neighbors', 'proxy'].includes(this.section()) ? this.section() : 'leases'));
+  tab = computed(() => (['leases', 'leases6', 'reservations', 'reservations6', 'neighbors', 'proxy', 'proxy-logs'].includes(this.section()) ? this.section() : 'leases'));
   shown = computed(() => this.leases().filter(l => l.family === (this.tab() === 'leases6' ? 6 : 4)));
   reserve = signal<{ mac: string; ip: string; hostname: string } | null>(null);
   reserve6 = signal<{ duid: string; ip: string } | null>(null);

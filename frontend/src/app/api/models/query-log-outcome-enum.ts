@@ -8,5 +8,5 @@
  * * `blocked` - blocked
  * * `error` - error
  */
-export type OutcomeEnum = 'local' | 'forwarded' | 'blocked' | 'error';
+export type QueryLogOutcomeEnum = 'local' | 'forwarded' | 'blocked' | 'error';
 

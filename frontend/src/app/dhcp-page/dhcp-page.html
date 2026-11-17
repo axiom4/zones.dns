@@ -5,13 +5,14 @@
   <a routerLink="/dhcp/reservations6" [class.on]="tab() === 'reservations6'" (click)="reserve6.set(null)">Reservations 6</a>
   <a routerLink="/dhcp/neighbors" [class.on]="tab() === 'neighbors'">Neighbours</a>
   <a routerLink="/dhcp/proxy" [class.on]="tab() === 'proxy'">Proxy</a>
+  <a routerLink="/dhcp/proxy-logs" [class.on]="tab() === 'proxy-logs'">Proxy logs</a>
 </nav>
 @if (tab() === 'reservations') {
   @for (r of [reserve()]; track r) { <app-dhcp-reservations [prefill]="r" /> }
 } @else if (tab() === 'neighbors') {
   <app-dhcp-neighbors />
-} @else if (tab() === 'proxy') {
-  <app-dhcp-proxy />
+} @else if (tab() === 'proxy' || tab() === 'proxy-logs') {
+  <app-dhcp-proxy [mode]="tab() === 'proxy-logs' ? 'logs' : 'settings'" />
 } @else if (tab() === 'reservations6') {
   @for (r of [reserve6()]; track r) { <app-dhcp-reservations6 [prefill]="r" /> }
 } @else {

@@ -4,6 +4,7 @@ import gzip
 from http.client import HTTPConnection, HTTPSConnection
 from http.server import BaseHTTPRequestHandler, HTTPServer
 import ipaddress
+import queue
 import select
 import socket
 from socketserver import ThreadingMixIn
@@ -14,12 +15,12 @@ from urllib.parse import urlsplit
 import zlib
 
 from django.conf import settings
-from django.db import DatabaseError, connections
+from django.db import DatabaseError, close_old_connections, connections
 from dnslib import DNSRecord, QTYPE
 
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit, resolver
-from ..models import DataVersion
+from ..models import DataVersion, ProxyLog
 from . import ca, filter as pfilter, pac
 
 _cfg_lock = threading.Lock()
@@ -297,18 +298,65 @@ def _decompress(data, encoding):
     return data
 
 
+class ProxyLogWriter:
+    """Writes ProxyLog entries in batches on a background thread so logging never slows down proxy requests or opens per-request DB connections."""
+
+    def __init__(self, interval=1.0, queue_max=20000, batch_max=500):
+        self.interval = interval
+        self.queue_max = queue_max
+        self.batch_max = batch_max
+        self.queue = queue.Queue(maxsize=queue_max)
+        self._stop = threading.Event()
+        self._thread = threading.Thread(target=self._run, name='proxy-logwriter', daemon=True)
+
+    def start(self):
+        self._thread.start()
+
+    def add(self, entry):
+        try:
+            self.queue.put_nowait(entry)
+        except queue.Full:
+            pass
+
+    def stop(self):
+        self._stop.set()
+        self._thread.join(timeout=10)
+
+    def _run(self):
+        while not self._stop.wait(self.interval):
+            self._flush()
+        self._flush()
+
+    def _flush(self):
+        rows = []
+        try:
+            while True:
+                rows.append(self.queue.get_nowait())
+        except queue.Empty:
+            pass
+        if not rows:
+            return
+        try:
+            close_old_connections()
+            for i in range(0, len(rows), self.batch_max):
+                ProxyLog.objects.bulk_create(rows[i:i + self.batch_max])
+        except Exception:
+            pass
+
+
 class ProxyServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
     request_queue_size = 256
     max_threads = 512
 
-    def __init__(self, server_address, RequestHandlerClass=None, settings_getter=None, allow_loopback=False, upstream_ssl_context=None):
+    def __init__(self, server_address, RequestHandlerClass=None, settings_getter=None, allow_loopback=False, upstream_ssl_context=None, log=None):
         if ':' in server_address[0]:
             self.address_family = socket.AF_INET6
         self.settings_getter = settings_getter or cached_proxy_settings
         self.allow_loopback = allow_loopback
         self.upstream_ssl_context = upstream_ssl_context
+        self.log = log
         self._thread_sem = threading.BoundedSemaphore(self.max_threads)
         super().__init__(server_address, RequestHandlerClass or ProxyHandler)
 
@@ -347,6 +395,29 @@ class ProxyHandler(BaseHTTPRequestHandler):
     def _client_allowed(self):
         client_ip = self.client_address[0]
         return ratelimit.allowed(client_ip)
+
+    def _log(self, method, host, url, outcome, status_code=200, reason='', t0=None):
+        logger = getattr(self.server, 'log', None)
+        if not logger:
+            return
+        ms = max(0, int((time.monotonic() - t0) * 1000)) if t0 is not None else 0
+        entry = ProxyLog(
+            client=str(self.client_address[0] or '')[:45],
+            method=str(method or '')[:12],
+            host=str(host or '').lower()[:253],
+            url=str(url or '')[:500],
+            outcome=outcome,
+            status=int(status_code or 0),
+            reason=str(reason or '')[:255],
+            ms=ms,
+        )
+        if hasattr(logger, 'add'):
+            logger.add(entry)
+        elif logger is True:
+            try:
+                pfilter.run_on_db_pool(entry.save)
+            except Exception:
+                pass
 
     def _send_bytes(self, status_code, content_type, body, extra_headers=None):
         self.send_response(status_code)
@@ -406,6 +477,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         return False
 
     def _proxy_http(self, scheme=None, default_host=None, default_port=None, keep_alive=False):
+        t0 = time.monotonic()
         if not self._client_allowed():
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden')
             return
@@ -432,21 +504,25 @@ class ProxyHandler(BaseHTTPRequestHandler):
         host = (parts.hostname or default_host or '').lower()
         port = parts.port or default_port or (443 if target_scheme == 'https' else 80)
         path_query = (parts.path or '/') + (f'?{parts.query}' if parts.query else '')
+        log_method = f'MITM {self.command}' if scheme == 'https' else self.command
 
         if not host:
             self._send_bytes(400, 'text/plain; charset=utf-8', b'Missing target host')
             return
 
         if hit := pfilter.check_request(host, full_url, s=s):
+            self._log(log_method, host, full_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
             self._send_blocked(hit[0], hit[1], path=parts.path)
             return
 
         try:
             resolved_family, resolved_addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
         except PermissionError:
+            self._log(log_method, host, full_url, 'error', 403, 'Forbidden target address', t0)
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
             return
         except OSError:
+            self._log(log_method, host, full_url, 'error', 502, 'DNS lookup failed', t0)
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
             return
 
@@ -510,6 +586,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
                             self.wfile.write(chunk)
                             if 'text/event-stream' in low_ctype:
                                 self.wfile.flush()
+                    self._log(log_method, host, full_url, 'allowed', status_code, ctype.partition(';')[0] or 'stream', t0)
                     self.close_connection = not stream_keep_alive
                     return
                 raw_body = resp.read()
@@ -518,12 +595,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     if k.lower() not in HOP_BY_HOP and k.lower() not in ('content-length', 'content-encoding')
                 ]
         except Exception:
+            self._log(log_method, host, full_url, 'error', 502, 'Bad Gateway', t0)
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway')
             return
         finally:
             if conn:
                 conn.close()
 
+        html_filtered = False
         sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
         is_bg_fetch = (sec_dest and sec_dest != 'document') or (
             (self.headers.get('X-Requested-With') or '').strip().lower() == 'xmlhttprequest'
@@ -537,11 +616,23 @@ class ProxyHandler(BaseHTTPRequestHandler):
         ):
             try:
                 plain = _decompress(raw_body, cenc)
-                raw_body = pfilter.filter_html(plain, content_type=ctype, host=host, s=s)
+                filtered_body = pfilter.filter_html(plain, content_type=ctype, host=host, s=s)
+                html_filtered = filtered_body != plain
+                raw_body = filtered_body
                 cenc = ''
                 out_headers = [(k, v) for k, v in out_headers if k.lower() != 'etag']
             except Exception:
                 pass
+
+        self._log(
+            log_method,
+            host,
+            full_url,
+            'filtered' if html_filtered else 'allowed',
+            status_code,
+            'HTML filtered' if html_filtered else (ctype.partition(';')[0] or 'HTTP'),
+            t0,
+        )
 
         self.send_response(status_code, reason)
         for k, v in out_headers:
@@ -577,6 +668,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._proxy_http()
 
     def do_CONNECT(self):
+        t0 = time.monotonic()
         if not self._client_allowed():
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden')
             return
@@ -593,25 +685,30 @@ class ProxyHandler(BaseHTTPRequestHandler):
             else:
                 host, port = host_port.lower(), 443
 
-        if hit := pfilter.check_request(host, f'https://{host}:{port}/', s=s):
+        target_url = f'https://{host}:{port}/' if port != 443 else f'https://{host}/'
+        if hit := pfilter.check_request(host, target_url, s=s):
+            self._log('CONNECT', host, target_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Blocked by Zones.dns', {'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
             return
 
         try:
             family, addr = _resolve_target(host, port, allow_loopback=self.server.allow_loopback)
         except PermissionError:
+            self._log('CONNECT', host, target_url, 'error', 403, 'Forbidden target address', t0)
             self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
             return
         except OSError:
+            self._log('CONNECT', host, target_url, 'error', 502, 'DNS lookup failed', t0)
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
             return
 
         client_ip = self.client_address[0]
         allow_domains, _, _, _ = pfilter.parse_custom_rules(getattr(s, 'PROXY_CUSTOM_RULES', ''))
+        mitm_bypassed_for_client = is_mitm_failed(client_ip, host)
         use_mitm = (
             bool(getattr(s, 'PROXY_HTTPS_MITM', False))
             and not pfilter.is_domain_allowed(host, allow_domains)
-            and not is_mitm_failed(client_ip, host)
+            and not mitm_bypassed_for_client
         )
 
         if use_mitm:
@@ -625,12 +722,14 @@ class ProxyHandler(BaseHTTPRequestHandler):
                     mitm_handler.handle_requests()
                     if mitm_handler.tls_handshake_failed:
                         record_mitm_failure(client_ip, host)
+                        self._log('MITM', host, target_url, 'allowed', 200, 'TLS pin/CA fallback -> CONNECT', t0)
                     try:
                         tls_client.unwrap()
                     except Exception:
                         pass
             except (ssl.SSLError, OSError):
                 record_mitm_failure(client_ip, host)
+                self._log('MITM', host, target_url, 'allowed', 200, 'TLS pin/CA fallback -> CONNECT', t0)
             except Exception:
                 pass
             self.close_connection = True
@@ -646,9 +745,19 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 upstream.settimeout(15)
                 upstream.connect(addr)
         except OSError:
+            self._log('CONNECT', host, target_url, 'error', 502, 'Bad Gateway', t0)
             self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway')
             return
 
+        self._log(
+            'CONNECT',
+            host,
+            target_url,
+            'allowed',
+            200,
+            'CONNECT tunnel (MITM auto-bypass)' if mitm_bypassed_for_client else 'CONNECT tunnel',
+            t0,
+        )
         try:
             self.send_response(200, 'Connection Established')
             self.end_headers()

@@ -1,3 +1,4 @@
+from datetime import timedelta
 import os
 import sys
 import time
@@ -5,11 +6,12 @@ import time
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import DatabaseError, close_old_connections, connections
+from django.utils import timezone
 
 from zones.dnsd import resolver
-from zones.models import DataVersion
+from zones.models import DataVersion, ProxyLog
 from zones.proxy import ca, filter as pfilter
-from zones.proxy.server import ProxyServer, cached_proxy_settings
+from zones.proxy.server import ProxyLogWriter, ProxyServer, cached_proxy_settings
 
 BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
 
@@ -39,9 +41,12 @@ class Command(BaseCommand):
             raise CommandError(f'Invalid proxy port {bind_port} (must be 1-65535).')
         if s.PROXY_HTTPS_MITM:
             ca.ensure_ca()
+        writer = ProxyLogWriter()
+        writer.start()
         try:
-            srv = ProxyServer((bind_addr, bind_port), settings_getter=cached_proxy_settings)
+            srv = ProxyServer((bind_addr, bind_port), settings_getter=cached_proxy_settings, log=writer)
         except OSError as e:
+            writer.stop()
             raise CommandError(f'Cannot bind TCP {bind_addr}:{bind_port} ({e}).')
         srv.timeout = 2
         pfilter.run_on_db_pool(resolver._snapshot)
@@ -56,17 +61,25 @@ class Command(BaseCommand):
         )
         self.stdout.flush()
         last_check = time.monotonic()
+        last_purge = 0.0
         while True:
             srv.handle_request()
             now = time.monotonic()
             if now - last_check >= 2.0:
                 last_check = now
                 try:
-                    self.reload_if_changed(srv)
+                    self.reload_if_changed(srv, writer)
                 except DatabaseError as e:
                     self.stderr.write(f'Proxy: cannot check settings: {e!r}')
+            if now - last_purge >= 3600.0:
+                last_purge = now
+                try:
+                    cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
+                    pfilter.run_on_db_pool(lambda: ProxyLog.objects.filter(time__lt=cutoff).delete())
+                except Exception:
+                    pass
 
-    def reload_if_changed(self, srv):
+    def reload_if_changed(self, srv, writer=None):
         ver = pfilter.run_on_db_pool(DataVersion.version)
         if ver == self.seen:
             return
@@ -78,6 +91,8 @@ class Command(BaseCommand):
         if snap == self.snap:
             return
         srv.server_close()
+        if writer:
+            writer.stop()
         if not new.PROXY:
             self.stdout.write('Proxy switched off in the settings: stopping.')
             raise SystemExit(0)

@@ -446,6 +446,79 @@ paths:
               schema:
                 $ref: '#/components/schemas/ProxyInfo'
           description: ''
+  /api/dhcp/proxy/logs/:
+    get:
+      operationId: dhcp_proxy_logs_retrieve
+      description: Return recent HTTP/HTTPS proxy log entries with filters and summary
+        counts.
+      parameters:
+      - in: query
+        name: client
+        schema:
+          type: string
+        description: Filter by client IP
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours (0 = all)
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum rows returned (default 150, max 500)
+      - in: query
+        name: method
+        schema:
+          type: string
+        description: Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)
+      - in: query
+        name: outcome
+        schema:
+          type: string
+          enum:
+          - allowed
+          - blocked
+          - error
+          - filtered
+        description: Filter by outcome
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Search host, URL or reason (case-insensitive)
+      tags:
+      - dhcp
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyLogsResponse'
+          description: ''
+  /api/dhcp/proxy/logs/purge/:
+    post:
+      operationId: dhcp_proxy_logs_purge_create
+      description: Delete proxy log entries older than `older_than_hours` (0 = delete
+        all).
+      tags:
+      - dhcp
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyLogPurgeRequestRequest'
+      security:
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyLogPurgeResult'
+          description: ''
   /api/dhcp/proxy/test/:
     post:
       operationId: dhcp_proxy_test_create
@@ -3558,18 +3631,6 @@ components:
       - name
       - responds
       - serial
-    OutcomeEnum:
-      enum:
-      - local
-      - forwarded
-      - blocked
-      - error
-      type: string
-      description: |-
-        * `local` - local
-        * `forwarded` - forwarded
-        * `blocked` - blocked
-        * `error` - error
     PaginatedQueryLogGroupList:
       type: object
       required:
@@ -3906,6 +3967,90 @@ components:
       - pem
       - subject
       - wpad_url
+    ProxyLog:
+      type: object
+      properties:
+        id:
+          type: integer
+        time:
+          type: string
+          format: date-time
+        client:
+          type: string
+        method:
+          type: string
+        host:
+          type: string
+        url:
+          type: string
+        outcome:
+          $ref: '#/components/schemas/ProxyLogOutcomeEnum'
+        status:
+          type: integer
+        reason:
+          type: string
+        ms:
+          type: integer
+      required:
+      - client
+      - host
+      - id
+      - method
+      - ms
+      - outcome
+      - reason
+      - status
+      - time
+      - url
+    ProxyLogOutcomeEnum:
+      enum:
+      - allowed
+      - filtered
+      - blocked
+      - error
+      type: string
+      description: |-
+        * `allowed` - allowed
+        * `filtered` - filtered
+        * `blocked` - blocked
+        * `error` - error
+    ProxyLogPurgeRequestRequest:
+      type: object
+      properties:
+        older_than_hours:
+          type: integer
+          minimum: 0
+          default: 0
+    ProxyLogPurgeResult:
+      type: object
+      properties:
+        deleted:
+          type: integer
+      required:
+      - deleted
+    ProxyLogsResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+        blocked_count:
+          type: integer
+        filtered_count:
+          type: integer
+        clients:
+          type: array
+          items:
+            type: string
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProxyLog'
+      required:
+      - blocked_count
+      - clients
+      - count
+      - filtered_count
+      - results
     ProxyTestRequestRequest:
       type: object
       properties:
@@ -3990,7 +4135,7 @@ components:
           type: string
           maxLength: 10
         outcome:
-          $ref: '#/components/schemas/OutcomeEnum'
+          $ref: '#/components/schemas/QueryLogOutcomeEnum'
         client:
           type: string
           maxLength: 45
@@ -4085,6 +4230,18 @@ components:
       - local
       - name
       - names
+    QueryLogOutcomeEnum:
+      enum:
+      - local
+      - forwarded
+      - blocked
+      - error
+      type: string
+      description: |-
+        * `local` - local
+        * `forwarded` - forwarded
+        * `blocked` - blocked
+        * `error` - error
     Record:
       type: object
       properties:

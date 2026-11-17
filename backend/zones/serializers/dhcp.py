@@ -93,6 +93,35 @@ class ProxyTestResultSerializer(serializers.Serializer):
     detail = serializers.CharField(allow_blank=True)
 
 
+class ProxyLogSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    time = serializers.DateTimeField()
+    client = serializers.CharField()
+    method = serializers.CharField()
+    host = serializers.CharField()
+    url = serializers.CharField(allow_blank=True)
+    outcome = serializers.ChoiceField(choices=['allowed', 'filtered', 'blocked', 'error'])
+    status = serializers.IntegerField()
+    reason = serializers.CharField(allow_blank=True)
+    ms = serializers.IntegerField()
+
+
+class ProxyLogsResponseSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    blocked_count = serializers.IntegerField()
+    filtered_count = serializers.IntegerField()
+    clients = serializers.ListField(child=serializers.CharField())
+    results = ProxyLogSerializer(many=True)
+
+
+class ProxyLogPurgeRequestSerializer(serializers.Serializer):
+    older_than_hours = serializers.IntegerField(required=False, default=0, min_value=0)
+
+
+class ProxyLogPurgeResultSerializer(serializers.Serializer):
+    deleted = serializers.IntegerField()
+
+
 class DhcpPingRequestSerializer(serializers.Serializer):
     addresses = serializers.ListField(child=serializers.CharField(max_length=64), max_length=64, help_text='IP addresses of the local network (at most 64)')
 

@@ -1,6 +1,8 @@
+from datetime import timedelta
 import ipaddress
 from urllib.parse import urlsplit
 
+from django.db.models import Q
 from django.http import Http404, HttpResponse, HttpResponseForbidden
 from django.utils import timezone
 from django.views import View
@@ -14,9 +16,22 @@ from ..dhcp import v4 as dhcp, v6 as dhcp6, ra
 from ..dhcp.neighbors import neighbors
 from ..dhcp.v6 import duid_mac
 from ..dnsd import ratelimit
-from ..models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, Setting
+from ..models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, ProxyLog, Setting
 from ..proxy import ca, filter as pfilter, pac
-from ..serializers import DhcpLeaseSerializer, DhcpNeighborSerializer, DhcpPingRequestSerializer, DhcpPingResultSerializer, DhcpSettingsSerializer, MacVendorSerializer, ProxyInfoSerializer, ProxyTestRequestSerializer, ProxyTestResultSerializer
+from ..serializers import (
+    DhcpLeaseSerializer,
+    DhcpNeighborSerializer,
+    DhcpPingRequestSerializer,
+    DhcpPingResultSerializer,
+    DhcpSettingsSerializer,
+    MacVendorSerializer,
+    ProxyInfoSerializer,
+    ProxyLogPurgeRequestSerializer,
+    ProxyLogPurgeResultSerializer,
+    ProxyLogsResponseSerializer,
+    ProxyTestRequestSerializer,
+    ProxyTestResultSerializer,
+)
 
 LIMIT = 1000
 
@@ -173,6 +188,62 @@ class ProxyTestView(APIView):
             'reason': hit[0] if hit else '',
             'detail': hit[1] if hit else '',
         }).data)
+
+
+class ProxyLogsView(APIView):
+    @extend_schema(
+        parameters=[
+            OpenApiParameter('q', str, description='Search host, URL or reason (case-insensitive)'),
+            OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error'], description='Filter by outcome'),
+            OpenApiParameter('client', str, description='Filter by client IP'),
+            OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
+            OpenApiParameter('hours', int, description='Only the last N hours (0 = all)'),
+            OpenApiParameter('limit', int, description='Maximum rows returned (default 150, max 500)'),
+        ],
+        responses=ProxyLogsResponseSerializer,
+    )
+    def get(self, request):
+        """Return recent HTTP/HTTPS proxy log entries with filters and summary counts."""
+        p = request.query_params
+        qs = ProxyLog.objects.order_by('-time', '-id')
+        hours_str = p.get('hours', '24').strip()
+        hours = int(hours_str) if hours_str.isdigit() else 24
+        if hours > 0:
+            qs = qs.filter(time__gte=timezone.now() - timedelta(hours=min(hours, 24 * 365)))
+        clients = list(qs.order_by('client').values_list('client', flat=True).distinct()[:200])
+        if q := p.get('q', '').strip().lower():
+            qs = qs.filter(Q(host__icontains=q) | Q(url__icontains=q) | Q(reason__icontains=q))
+        if outcome := p.get('outcome', '').strip().lower():
+            qs = qs.filter(outcome=outcome)
+        if client := p.get('client', '').strip():
+            qs = qs.filter(client=client)
+        if method := p.get('method', '').strip().upper():
+            qs = qs.filter(method__icontains=method)
+        lim_str = p.get('limit', '150').strip()
+        limit = min(max(int(lim_str) if lim_str.isdigit() else 150, 1), 500)
+        total = qs.count()
+        blocked_count = qs.filter(outcome='blocked').count()
+        filtered_count = qs.filter(outcome='filtered').count()
+        rows = list(qs[:limit])
+        return Response(ProxyLogsResponseSerializer({
+            'count': total,
+            'blocked_count': blocked_count,
+            'filtered_count': filtered_count,
+            'clients': clients,
+            'results': rows,
+        }).data)
+
+
+class ProxyLogsPurgeView(APIView):
+    @extend_schema(request=ProxyLogPurgeRequestSerializer, responses=ProxyLogPurgeResultSerializer)
+    def post(self, request):
+        """Delete proxy log entries older than `older_than_hours` (0 = delete all)."""
+        ser = ProxyLogPurgeRequestSerializer(data=request.data or {})
+        ser.is_valid(raise_exception=True)
+        hours = ser.validated_data.get('older_than_hours', 0)
+        qs = ProxyLog.objects.filter(time__lt=timezone.now() - timedelta(hours=hours)) if hours > 0 else ProxyLog.objects.all()
+        deleted, _ = qs.delete()
+        return Response(ProxyLogPurgeResultSerializer({'deleted': deleted}).data)
 
 
 class WpadView(View):

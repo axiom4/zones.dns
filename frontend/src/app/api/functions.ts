@@ -43,6 +43,10 @@ export type { DhcpProxyInfoRetrieve$Params as DhcpProxyInfoRetrieve$Params } fro
 export { dhcpProxyInfoRetrieve as dhcpProxyInfoRetrieve } from './fn/dhcp/dhcp-proxy-info-retrieve';
 export type { DhcpProxyInfoCreate$Params as DhcpProxyInfoCreate$Params } from './fn/dhcp/dhcp-proxy-info-create';
 export { dhcpProxyInfoCreate as dhcpProxyInfoCreate } from './fn/dhcp/dhcp-proxy-info-create';
+export type { DhcpProxyLogsRetrieve$Params as DhcpProxyLogsRetrieve$Params } from './fn/dhcp/dhcp-proxy-logs-retrieve';
+export { dhcpProxyLogsRetrieve as dhcpProxyLogsRetrieve } from './fn/dhcp/dhcp-proxy-logs-retrieve';
+export type { DhcpProxyLogsPurgeCreate$Params as DhcpProxyLogsPurgeCreate$Params } from './fn/dhcp/dhcp-proxy-logs-purge-create';
+export { dhcpProxyLogsPurgeCreate as dhcpProxyLogsPurgeCreate } from './fn/dhcp/dhcp-proxy-logs-purge-create';
 export type { DhcpProxyTestCreate$Params as DhcpProxyTestCreate$Params } from './fn/dhcp/dhcp-proxy-test-create';
 export { dhcpProxyTestCreate as dhcpProxyTestCreate } from './fn/dhcp/dhcp-proxy-test-create';
 export type { DhcpReservationsList$Params as DhcpReservationsList$Params } from './fn/dhcp/dhcp-reservations-list';
