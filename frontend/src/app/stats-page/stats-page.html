@@ -2,9 +2,14 @@
   <header>
     <div>
       <h2>Statistics</h2>
-      <p class="soft">Queries received by the DNS daemon.</p>
+      <p class="soft">Queries received by the DNS daemon and requests handled by the filtering proxy.</p>
     </div>
     <div class="actions">
+      <select [(ngModel)]="source" name="src" (ngModelChange)="load()" aria-label="What is counted">
+        <option value="all">DNS + proxy</option>
+        <option value="dns">DNS only (blacklist)</option>
+        <option value="proxy">Proxy only</option>
+      </select>
       <select [(ngModel)]="hours" name="h" (ngModelChange)="load()" aria-label="Period">
         <option [ngValue]="1">Last hour</option>
         <option [ngValue]="24">Last 24 hours</option>
@@ -16,9 +21,13 @@
   </header>
 
   <div class="tiles">
-    <div class="tile"><b>{{ st.total }}</b><span>Query</span></div>
+    <div class="tile"><b>{{ st.total }}</b><span>Queries and requests</span></div>
     <div class="tile"><b>{{ outcome('local') }}</b><span>From internal zones</span></div>
     <div class="tile"><b>{{ outcome('forwarded') }}</b><span>Forwarded</span></div>
+    @if (outcome('proxied') + outcome('filtered')) {
+      <div class="tile"><b>{{ outcome('proxied') }}</b><span>Through the proxy</span></div>
+      <div class="tile"><b>{{ outcome('filtered') }}</b><span>Pages cleaned</span></div>
+    }
     <div class="tile warn"><b>{{ outcome('blocked') }}</b><span>Blocked</span></div>
     <div class="tile"><b>{{ outcome('error') }}</b><span>Errors</span></div>
     <div class="tile"><b>{{ st.avg_ms | number: '1.0-0' }} ms</b><span>Average time</span></div>
@@ -54,7 +63,7 @@
 
   <div class="grid2">
     <section class="panel">
-      <h3>Most requested domains</h3>
+      <h3>Most requested domains and hosts</h3>
       @for (d of st.top_domains; track d.name) {
         <div class="row">
           <span class="bar" [style.width.%]="pct(d.count, st.top_domains)"></span>
@@ -77,40 +86,10 @@
       } @empty { <p class="soft">No data.</p> }
     </section>
     <section class="panel">
-      <h3>Query types</h3>
+      <h3>Query types and proxy methods</h3>
       @for (d of st.by_type; track d.name) {
         <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.by_type)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
       } @empty { <p class="soft">No data.</p> }
     </section>
   </div>
-
-  @if (st.proxy.total) {
-    <section class="panel">
-      <h3>Proxy <small class="soft">HTTP / HTTPS requests that went through the filtering proxy</small></h3>
-      <div class="tiles">
-        <div class="tile"><b>{{ st.proxy.total }}</b><span>Requests</span></div>
-        <div class="tile warn"><b>{{ st.proxy.blocked }}</b><span>Blocked</span></div>
-        <div class="tile"><b>{{ st.proxy.filtered }}</b><span>Pages cleaned</span></div>
-        <div class="tile"><b>{{ st.proxy.errors }}</b><span>Errors</span></div>
-      </div>
-      <h4>Why requests were blocked</h4>
-      @for (r of st.proxy.by_reason; track r.name) {
-        <div class="row"><span class="bar warn" [style.width.%]="pct(r.count, st.proxy.by_reason)"></span><span class="n" [title]="reasonHint(r.name)">{{ reasonLabel(r.name) }}</span><span class="c">{{ r.count }}</span></div>
-      } @empty { <p class="soft">Nothing blocked.</p> }
-      <div class="grid2">
-        <div>
-          <h4>Hosts blocked most often</h4>
-          @for (d of st.proxy.top_blocked; track d.name) {
-            <div class="row"><span class="bar warn" [style.width.%]="pct(d.count, st.proxy.top_blocked)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
-          } @empty { <p class="soft">No data.</p> }
-        </div>
-        <div>
-          <h4>Clients blocked most often</h4>
-          @for (d of st.proxy.top_clients; track d.name) {
-            <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.proxy.top_clients)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
-          } @empty { <p class="soft">No data.</p> }
-        </div>
-      </div>
-    </section>
-  }
 }

@@ -20,6 +20,11 @@ export interface StatsRetrieve$Params {
  * Start of the window (at most 720 hours back); replaces hours. For windows that begin at a local midnight
  */
   since?: string;
+
+/**
+ * What is counted: the DNS daemon (blacklist included), the filtering proxy, or both (default)
+ */
+  source?: 'all' | 'dns' | 'proxy';
 }
 
 export function statsRetrieve(http: HttpClient, rootUrl: string, params?: StatsRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<Stats>> {
@@ -27,6 +32,7 @@ export function statsRetrieve(http: HttpClient, rootUrl: string, params?: StatsR
   if (params) {
     rb.query('hours', params.hours, {});
     rb.query('since', params.since, {});
+    rb.query('source', params.source, {});
   }
 
   return http.request(

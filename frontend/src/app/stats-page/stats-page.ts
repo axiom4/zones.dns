@@ -22,15 +22,8 @@ const ANSWERS: Record<string, { label: string; hint: string }> = {
   nxdomain: { label: 'Name does not exist', hint: 'NXDOMAIN from a zone or upstream (blocked names are counted apart)' },
   blocked: { label: 'Blocked', hint: 'Blacklist, suspicious name or rate limit' },
   error: { label: 'Failed', hint: 'SERVFAIL, REFUSED, upstream not answering' },
+  proxied: { label: 'Through the proxy', hint: 'Web requests the filtering proxy let through (pages cleaned included)' },
   uncounted: { label: 'Not split yet', hint: 'Hours saved before this counter existed: manage.py rebuild_stats splits them' },
-};
-
-const REASONS: Record<string, { label: string; hint: string }> = {
-  blacklist: { label: 'Blacklist', hint: 'The domain is in the Blacklist (manual or public lists)' },
-  'rule-list': { label: 'External rule lists', hint: 'A domain rule of an ad-block list (EasyList...) downloaded in Proxy > Settings' },
-  'popup-url': { label: 'Popup address', hint: 'A built-in popup / popunder URL pattern' },
-  'ad-url': { label: 'Ad address', hint: 'A built-in ad URL pattern' },
-  'custom-rule': { label: 'Custom rule', hint: 'A rule typed in Proxy > Settings > Custom rules' },
 };
 
 @Component({
@@ -44,6 +37,7 @@ export class StatsPage {
   stats = signal<Stats | null>(null);
   done = signal(new Set<string>());
   hours = 24;
+  source: 'all' | 'dns' | 'proxy' = 'all';
   private period = signal(24); // the period the shown data was loaded for (the chart follows it, not the select while it is changing)
   private from = signal(Date.now()); // where the shown window starts
 
@@ -77,7 +71,7 @@ export class StatsPage {
         const first = new Date(); first.setHours(0, 0, 0, 0); first.setDate(first.getDate() - hours / 24 + 1);
         from = first.getTime(); hours = Math.min(Math.ceil((Date.now() - from) / 3_600_000), 720); since = first.toISOString();
       }
-      const st = await this.api.invoke(statsRetrieve, { hours, since });
+      const st = await this.api.invoke(statsRetrieve, { hours, since, source: this.source });
       this.period.set(hours); this.from.set(from); this.stats.set(st);
     });
   }
@@ -94,8 +88,6 @@ export class StatsPage {
     const rest = st.total - st.by_answer.reduce((a, c) => a + c.count, 0);
     return Object.entries(ANSWERS).map(([name, v]) => ({ name, ...v, count: name === 'uncounted' ? Math.max(rest, 0) : n(name) })).filter(a => a.count);
   });
-  reasonLabel(name: string) { return REASONS[name]?.label ?? name; }
-  reasonHint(name: string) { return REASONS[name]?.hint ?? ''; }
   share(c: number) { const t = this.stats()?.total; return t ? Math.round((c / t) * 100) : 0; }
   outcome(name: string) { return this.stats()?.by_outcome.find(c => c.name === name)?.count ?? 0; }
   pct(c: number, list: { count: number }[]) { return Math.round((c / Math.max(...list.map(x => x.count), 1)) * 100); }

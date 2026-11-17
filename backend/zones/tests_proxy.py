@@ -460,14 +460,22 @@ class RuleListTests(TestCase):
 
 
 class ProxyStatsTests(TestCase):
-    def test_stats_include_the_proxy(self):
+    def test_stats_join_dns_and_proxy(self):
+        from .models import QueryLog
         for host, outcome, reason in [('ads.example', 'blocked', 'blacklist: ads.example (x)'), ('ads.example', 'blocked', 'rule-list: ads.example (easy)'),
-                                      ('pop.example', 'blocked', 'popup-url: /popunder'), ('ok.example', 'allowed', 'text/html'), ('pg.example', 'filtered', 'html')]:
+                                      ('ok.example', 'allowed', 'text/html'), ('pg.example', 'filtered', 'html')]:
             ProxyLog.objects.create(client='192.168.1.9', method='GET', host=host, outcome=outcome, reason=reason)
+        QueryLog.objects.create(client='192.168.1.9', name='ads.example', type='A', outcome='blocked', rcode='NOERROR', answers=[], ms=2)
+        QueryLog.objects.create(client='192.168.1.8', name='x.example', type='A', outcome='forwarded', rcode='NOERROR', answers=[], ms=4)
         api = APIClient()
         api.force_authenticate(get_user_model().objects.create_user('admin_s', password='x', is_staff=True))
-        p = api.get('/api/stats/?hours=1').json()['proxy']
-        self.assertEqual((p['total'], p['blocked'], p['filtered'], p['errors']), (5, 3, 1, 0))
-        self.assertEqual({r['name']: r['count'] for r in p['by_reason']}, {'blacklist': 1, 'rule-list': 1, 'popup-url': 1})
-        self.assertEqual(p['top_blocked'][0], {'name': 'ads.example', 'count': 2})
-        self.assertEqual(p['top_clients'], [{'name': '192.168.1.9', 'count': 3}])
+        both = api.get('/api/stats/?hours=1').json()
+        self.assertEqual(both['total'], 6)
+        self.assertEqual({c['name']: c['count'] for c in both['by_outcome']}, {'blocked': 3, 'forwarded': 1, 'proxied': 1, 'filtered': 1})
+        self.assertEqual(both['top_blocked'][0], {'name': 'ads.example', 'count': 3})
+        self.assertEqual(sum(b['count'] for b in both['series']), 6)
+        dns = api.get('/api/stats/?hours=1&source=dns').json()
+        self.assertEqual(dns['total'], 2)
+        prx = api.get('/api/stats/?hours=1&source=proxy').json()
+        self.assertEqual((prx['total'], {c['name']: c['count'] for c in prx['by_answer']}), (4, {'blocked': 2, 'proxied': 2}))
+        self.assertEqual(api.get('/api/stats/?hours=1&source=zzz').json()['total'], 6)
