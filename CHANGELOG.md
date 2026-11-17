@@ -52,6 +52,11 @@
   - External ad-block lists: https only (also after a redirect).
   - Proxy with HTTPS inspection: upstream certificates are checked for revocation (the browser sees only the proxy's certificate and cannot). CRL first (it does not tell the CA which site is visited), OCSP when there is no CRL; soft-fail like browsers and never delaying a connection: the answer is fetched in the background and a revoked certificate is refused from the next connection on (`PROXY_REVOCATION`, default on).
   - `/proxy.mobileconfig` can be signed (`PROFILE_SIGN_CERT`, `PROFILE_SIGN_KEY`, e.g. the GUI's https certificate): macOS and iOS show it as verified and a changed profile is refused.
+- **Changed** (proxy)
+  - `runproxy` is asynchronous (asyncio, one event loop): a connection no longer holds a thread, so the 512-connection ceiling is gone (256 per client address, 8192 in all). Settings, filters, the CA and HTML filtering run on 16 worker threads, name lookups on 32. HTTP/1.1 towards the client is parsed by h11 (framing, chunked bodies, `100 Continue`; requests with an unknown `Transfer-Encoding` get 501). **Upgrading:** `pip install -r requirements.txt` (new: `h11`, `h2`, `httpcore`, `anyio`), then restart `runproxy`.
+  - HTTP/2 both ways. Inside an HTTPS inspection session the browser may choose h2 (ALPN): many requests share one TLS connection, with flow control both ways. Towards the servers the proxy speaks HTTP/2 or HTTP/1.1 as each server chooses, with one pool of kept-alive connections (httpcore).
+  - A server that answers without a length is relayed chunked to HTTP/1.1 clients, which keep their connection, instead of closing it.
+  - An unexpected error while serving a request answers 500 (and is logged) instead of leaving the client without an answer.
 - **Added** (proxy)
   - The HTML filter reads the policies of `<meta http-equiv="Content-Security-Policy">` too, and decompresses `br` pages (brotli 1.2 or later, with the same 8 MB limit).
 - **Fixed** (proxy)

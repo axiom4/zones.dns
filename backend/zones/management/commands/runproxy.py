@@ -1,3 +1,5 @@
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import os
 import sys
@@ -47,39 +49,53 @@ class Command(BaseCommand):
         writer = ProxyLogWriter()
         writer.start()
         try:
-            srv = ProxyServer((bind_addr, bind_port), settings_getter=cached_proxy_settings, log=writer)
-        except OSError as e:
+            asyncio.run(self.serve(bind_addr, bind_port, s, writer))
+        finally:
             writer.stop()
+
+    async def serve(self, bind_addr, bind_port, s, writer):
+        loop = asyncio.get_running_loop()
+        loop.set_default_executor(ThreadPoolExecutor(max_workers=8, thread_name_prefix='proxy-misc'))
+        try:
+            srv = await ProxyServer((bind_addr, bind_port), settings_getter=cached_proxy_settings, log=writer).start()
+        except OSError as e:
             raise CommandError(f'Cannot bind TCP {bind_addr}:{bind_port} ({e}).')
-        srv.timeout = 2
-        pfilter.run_on_db_pool(resolver._snapshot)
+        await asyncio.to_thread(pfilter.run_on_db_pool, resolver._snapshot)
         self.snap = {k: getattr(s, k) for k in BIND_KEYS}
-        self.seen = DataVersion.version()
-        connections.close_all()
+        self.seen = await asyncio.to_thread(DataVersion.version)
+        await asyncio.to_thread(connections.close_all)
         self.stdout.write(
             f'Proxy listening on {bind_addr}:{bind_port} '
             f'(ads={"on" if s.PROXY_BLOCK_ADS else "off"}, '
             f'popups={"on" if s.PROXY_BLOCK_POPUPS else "off"}, '
-            f'https={"MITM" if s.PROXY_HTTPS_MITM else "CONNECT"})'
+            f'https={"MITM" if s.PROXY_HTTPS_MITM else "CONNECT"}, asyncio, HTTP/2)'
         )
         self.stdout.flush()
-        last_check = time.monotonic()
         last_purge = 0.0
         while True:
-            srv.handle_request()
+            await asyncio.sleep(2.0)
+            try:
+                action = await asyncio.to_thread(self.reload_if_changed)
+            except DatabaseError as e:
+                self.stderr.write(f'Proxy: cannot check settings: {e!r}')
+                action = None
+            if action:
+                srv.close()
+                writer.stop()
+                if action == 'stop':
+                    self.stdout.write('Proxy switched off in the settings: stopping.')
+                    raise SystemExit(0)
+                self.stdout.write('Proxy bind settings changed: restarting with them.')
+                self.stdout.flush()
+                await asyncio.to_thread(connections.close_all)  # Django refuses database calls on the event loop's thread
+                os.execv(sys.executable, [sys.executable] + sys.argv)
             now = time.monotonic()
-            if now - last_check >= 2.0:
-                last_check = now
-                try:
-                    self.reload_if_changed(srv, writer)
-                except DatabaseError as e:
-                    self.stderr.write(f'Proxy: cannot check settings: {e!r}')
             if now - last_purge >= 3600.0:
                 last_purge = now
-                threading.Thread(target=self.sync_rules, daemon=True).start()  # a download takes seconds: not in the accept loop
+                threading.Thread(target=self.sync_rules, daemon=True).start()  # a download takes seconds: not on the event loop
                 try:
                     cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
-                    pfilter.run_on_db_pool(lambda: ProxyLog.objects.filter(time__lt=cutoff).delete())
+                    await asyncio.to_thread(pfilter.run_on_db_pool, lambda: ProxyLog.objects.filter(time__lt=cutoff).delete())
                 except Exception:
                     pass
 
@@ -93,24 +109,16 @@ class Command(BaseCommand):
         finally:
             connections.close_all()
 
-    def reload_if_changed(self, srv, writer=None):
+    def reload_if_changed(self):
+        """None, 'restart' (address or port changed) or 'stop' (the proxy was switched off)."""
         ver = pfilter.run_on_db_pool(DataVersion.version)
         if ver == self.seen:
-            return
+            return None
         self.seen = ver
         new = cached_proxy_settings(settings, force=True)
         if new.PROXY_HTTPS_MITM:
             ca.ensure_ca()
         snap = {k: getattr(new, k) for k in BIND_KEYS}
         if snap == self.snap:
-            return
-        srv.server_close()
-        if writer:
-            writer.stop()
-        if not new.PROXY:
-            self.stdout.write('Proxy switched off in the settings: stopping.')
-            raise SystemExit(0)
-        self.stdout.write('Proxy bind settings changed: restarting with them.')
-        self.stdout.flush()
-        connections.close_all()
-        os.execv(sys.executable, [sys.executable] + sys.argv)
+            return None
+        return 'restart' if new.PROXY else 'stop'

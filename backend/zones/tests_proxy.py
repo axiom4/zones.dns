@@ -15,7 +15,7 @@ from .dnsd import resolver
 from .dnsd.resolver import Resolver
 from .models import BlockedDomain, DataVersion, ProxyLog, Setting
 from .proxy import ca, filter as pfilter
-from .proxy.server import ProxyHandler, _mitm_failed, cached_proxy_settings, is_mitm_failed
+from .proxy.server import _mitm_failed, cached_proxy_settings, is_mitm_failed, serve_connection
 
 
 def _fake_fetcher(scheme, host, port, method, path, body, headers):
@@ -51,10 +51,20 @@ def _fake_fetcher(scheme, host, port, method, path, body, headers):
     return 200, 'OK', [('Content-Type', 'text/html; charset=utf-8')], raw
 
 
+def _dechunk(body):
+    out = b''
+    while True:
+        size_line, _, body = body.partition(b'\r\n')
+        n = int(size_line, 16)
+        if n == 0:
+            return out
+        out, body = out + body[:n], body[n + 2:]
+
+
 def _run_proxy_session(raw_bytes, server_ns):
-    """Run one ProxyHandler connection over a socketpair and return the raw response bytes."""
+    """Run one proxy connection over a socketpair and return the raw response bytes."""
     client_sock, server_sock = socket.socketpair()
-    t = threading.Thread(target=lambda: (ProxyHandler(server_sock, ('127.0.0.1', 54321), server_ns), server_sock.close()), daemon=True)
+    t = threading.Thread(target=lambda: (serve_connection(server_sock, ('127.0.0.1', 54321), server_ns), server_sock.close()), daemon=True)
     t.start()
     try:
         client_sock.sendall(raw_bytes)
@@ -211,7 +221,7 @@ class ProxyAndWpadTests(TestCase):
         self.assertIn(b'FindProxyForURL', resp)
 
         # 2. HTTP request to blocked domain is rejected with 403
-        resp = _run_proxy_session(b'GET http://ads.badtracker.example/page.html HTTP/1.1\r\nHost: ads.badtracker.example\r\n\r\n', make_server_ns())
+        resp = _run_proxy_session(b'GET http://ads.badtracker.example/page.html HTTP/1.1\r\nHost: ads.badtracker.example\r\nConnection: close\r\n\r\n', make_server_ns())
         self.assertIn(b'403 Forbidden', resp)
         self.assertIn(b'X-Blocked-By: Zones.dns (blacklist:', resp)
 
@@ -246,7 +256,7 @@ class ProxyAndWpadTests(TestCase):
         threading.Thread(target=_echo_upstream, daemon=True).start()
         c_sock, s_sock = socket.socketpair()
         srv_ns = make_server_ns(tunnel_factory=lambda h, p: up_a)
-        t = threading.Thread(target=lambda: (ProxyHandler(s_sock, ('127.0.0.1', 54321), srv_ns), s_sock.close()), daemon=True)
+        t = threading.Thread(target=lambda: (serve_connection(s_sock, ('127.0.0.1', 54321), srv_ns), s_sock.close()), daemon=True)
         t.start()
         c_sock.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
         banner = c_sock.recv(1024)
@@ -262,7 +272,7 @@ class ProxyAndWpadTests(TestCase):
         mitm_enabled['on'] = True
         c_sock, s_sock = socket.socketpair()
         srv_ns = make_server_ns()
-        t = threading.Thread(target=lambda: (ProxyHandler(s_sock, ('127.0.0.1', 54321), srv_ns), s_sock.close()), daemon=True)
+        t = threading.Thread(target=lambda: (serve_connection(s_sock, ('127.0.0.1', 54321), srv_ns), s_sock.close()), daemon=True)
         t.start()
         c_sock.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
         banner = b''
@@ -294,7 +304,7 @@ class ProxyAndWpadTests(TestCase):
         # 7. Dynamic adaptive MITM fallback: if a client/app rejects the MITM TLS handshake (pinning or missing CA),
         #    the proxy automatically remembers (client_ip, host) and switches the next connection to direct CONNECT passthrough
         c_sock2, s_sock2 = socket.socketpair()
-        t2 = threading.Thread(target=lambda: (ProxyHandler(s_sock2, ('10.0.0.99', 54322), srv_ns), s_sock2.close()), daemon=True)
+        t2 = threading.Thread(target=lambda: (serve_connection(s_sock2, ('10.0.0.99', 54322), srv_ns), s_sock2.close()), daemon=True)
         t2.start()
         c_sock2.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
         banner2 = b''
@@ -314,7 +324,7 @@ class ProxyAndWpadTests(TestCase):
         threading.Thread(target=_echo_up2, daemon=True).start()
         c_sock3, s_sock3 = socket.socketpair()
         srv_ns2 = make_server_ns(tunnel_factory=lambda h, p: up2_a)
-        t3 = threading.Thread(target=lambda: (ProxyHandler(s_sock3, ('10.0.0.99', 54323), srv_ns2), s_sock3.close()), daemon=True)
+        t3 = threading.Thread(target=lambda: (serve_connection(s_sock3, ('10.0.0.99', 54323), srv_ns2), s_sock3.close()), daemon=True)
         t3.start()
         c_sock3.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
         banner3 = c_sock3.recv(1024)
@@ -484,39 +494,38 @@ class ProxyStatsTests(TestCase):
 
 
 class UpstreamPoolTests(TestCase):
-    def test_a_kept_alive_connection_is_reused_and_a_stale_one_is_dropped(self):
-        from http.client import HTTPConnection
-        from http.server import BaseHTTPRequestHandler, HTTPServer
-        from .proxy import server as ps
+    def test_a_kept_alive_upstream_connection_is_reused(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        seen = []
 
         class H(BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
 
             def do_GET(self):
+                seen.append(self.client_address)
                 self.send_response(200)
                 self.send_header('Content-Length', '2')
+                self.send_header('Content-Type', 'text/plain')
                 self.end_headers()
                 self.wfile.write(b'ok')
 
             def log_message(self, *a):
                 pass
 
-        srv = HTTPServer(('127.0.0.1', 0), H)
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close)
         self.addCleanup(srv.shutdown)
-        key = ('http', 'x', srv.server_port, '127.0.0.1')
-        conn = HTTPConnection('127.0.0.1', srv.server_port)
-        conn.request('GET', '/')
-        resp = conn.getresponse()
-        resp.read()
-        ps._pool_give(key, conn)
-        self.assertIs(ps._pool_take(key), conn)  # same connection, no new handshake
-        self.assertIsNone(ps._pool_take(key))
-        ps._pool_give(key, conn)
-        with ps._pool_lock:
-            ps._pool[key][0] = (conn, 0)  # idle for longer than _POOL_IDLE
-        self.assertIsNone(ps._pool_take(key))
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=False, PROXY_BLOCK_POPUPS=False, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=None,
+        )
+        req = f'GET http://127.0.0.1:{srv.server_port}/ HTTP/1.1\r\nHost: x\r\n\r\n'.encode()
+        resp = _run_proxy_session(req + req[:-2] + b'Connection: close\r\n\r\n', ns)  # two requests on one client connection
+        self.assertEqual(resp.count(b'200 OK'), 2)
+        self.assertEqual(len(seen), 2)
+        self.assertEqual(seen[0], seen[1])  # the same upstream connection: no second handshake
 
 
 class UploadBodyTests(TestCase):
@@ -575,8 +584,9 @@ class StreamingTests(TestCase):
         )
         resp = _run_proxy_session(f'GET http://127.0.0.1:{srv.server_port}/ HTTP/1.1\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n'.encode(), ns)
         self.assertIn(b'200 OK', resp)
-        self.assertTrue(resp.endswith(b'{"a":1}'))  # no Content-Length: the body ends with the connection
-        self.assertNotIn(b'Transfer-Encoding', resp)
+        head, _, body = resp.partition(b'\r\n\r\n')
+        self.assertIn(b'Transfer-Encoding: chunked', head)  # no Content-Length from the server: chunked to an HTTP/1.1 client
+        self.assertEqual(_dechunk(body), b'{"a":1}')
 
 
 class RfcAndSecurityTests(TestCase):
@@ -601,7 +611,7 @@ class RfcAndSecurityTests(TestCase):
                                    + f'{len(data):x}'.encode() + b'\r\n' + data + b'\r\n0\r\n\r\n')
         self.assertIn(b'200 OK', resp)
         self.assertEqual(seen['body'], data)
-        self.assertNotIn('content-length', {k.lower() for k in seen['headers']})  # http.client frames the body it sends
+        self.assertEqual(seen['headers']['Content-Length'], str(len(data)))  # the length of what is sent, not the client's 3
 
     def test_bad_framing_is_refused(self):
         for raw in (
@@ -612,7 +622,7 @@ class RfcAndSecurityTests(TestCase):
             b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nContent-Length: -3\r\nConnection: close\r\n\r\n',
         ):
             resp, seen = self._session(raw)
-            self.assertIn(b' 400 ', resp.split(b'\r\n', 1)[0], raw)
+            self.assertRegex(resp.split(b'\r\n', 1)[0], rb' (400|501) ', raw)  # 501: a transfer coding it does not know (RFC 9112 6.1)
             self.assertEqual(seen, {})
 
     def test_a_large_body_is_streamed_not_held(self):
@@ -625,6 +635,7 @@ class RfcAndSecurityTests(TestCase):
             resp, seen = self._session(b'POST http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n3\r\ndef\r\n0\r\n\r\n')
             self.assertEqual(seen['body'], b'abcdef')
             self.assertNotIn('Content-Length', seen['headers'])
+            self.assertEqual(seen['headers']['Transfer-Encoding'], 'chunked')
 
     def test_headers_a_proxy_adds_and_drops(self):
         resp, seen = self._session(b'GET http://127.0.0.1/a HTTP/1.1\r\nHost: x\r\nConnection: close, X-Hop\r\nX-Hop: secret\r\nX-Keep: 1\r\n\r\n')
@@ -725,20 +736,16 @@ class RfcAndSecurityTests(TestCase):
 
 
 class NoPostRetryTests(TestCase):
-    def test_a_post_never_uses_a_pooled_connection(self):
+    def test_a_post_is_never_sent_twice(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-        from .proxy import server as ps
+        posts = []
 
         class H(BaseHTTPRequestHandler):
             protocol_version = 'HTTP/1.1'
 
             def do_POST(self):
-                self.rfile.read(int(self.headers['Content-Length']))
-                self.send_response(200)
-                self.send_header('Content-Length', '2')
-                self.send_header('Content-Type', 'text/plain')
-                self.end_headers()
-                self.wfile.write(b'ok')
+                posts.append(self.rfile.read(int(self.headers['Content-Length'])))
+                self.close_connection = True  # the server dies before it answers: the mail may have been sent
 
             def log_message(self, *a):
                 pass
@@ -748,17 +755,13 @@ class NoPostRetryTests(TestCase):
         threading.Thread(target=srv.serve_forever, daemon=True).start()
         self.addCleanup(srv.server_close)
         self.addCleanup(srv.shutdown)
-        key = ('http', '127.0.0.1', srv.server_port, '127.0.0.1')
-        stale = SimpleNamespace(close=lambda: None, sock=None)
-        ps._pool_give(key, stale)
-        self.addCleanup(lambda: ps._pool.pop(key, None))
         ns = SimpleNamespace(
             settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=False, PROXY_BLOCK_POPUPS=False, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
             allow_loopback=True, upstream_ssl_context=None,
         )
         resp = _run_proxy_session(f'POST http://127.0.0.1:{srv.server_port}/send HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc'.encode(), ns)
-        self.assertIn(b'200 OK', resp)
-        self.assertIs(ps._pool[key][0][0], stale)  # left alone: a POST could not be sent again if that connection had died
+        self.assertIn(b'502', resp.split(b'\r\n', 1)[0])
+        self.assertEqual(posts, [b'abc'])  # once: a proxy must not repeat a POST (RFC 9110 9.2.2)
 
     def test_a_real_html_page_is_filtered_and_framed(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -908,3 +911,165 @@ class RevocationAndProfileTests(TestCase):
         self.assertEqual(ps._decompress(brotli.compress(b'<p>x</p>'), 'br'), b'<p>x</p>')
         with self.assertRaises(ValueError):
             ps._decompress(brotli.compress(b'\0' * (ps.MAX_HTML_BYTES + 10)), 'br')
+
+
+class Http2Tests(TestCase):
+    """HTTP/2 both ways: a browser that chooses h2 inside a MITM session, and an upstream server that speaks h2."""
+
+    def setUp(self):
+        # nothing written in the test's transaction to the tables the proxy's threads read (SQLite in memory locks them)
+        if ca._cached_ca is None:
+            ca._cached_ca = ca._generate_ca()
+            ca._leaf_contexts.clear()
+        _mitm_failed.clear()
+
+    def _ns(self, mitm=True, fetcher=_fake_fetcher, ctx=None):
+        return SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=True, PROXY_BLOCK_POPUPS=True, PROXY_HTTPS_MITM=mitm, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, http_fetcher=fetcher, upstream_ssl_context=ctx, tunnel_factory=None,
+        )
+
+    def test_a_browser_speaking_h2_inside_mitm(self):
+        import h2.config
+        import h2.connection
+        import h2.events
+        ca_pem = ca.ensure_ca()[0]
+        ctx = ssl.create_default_context(cadata=ca_pem)
+        ctx.set_alpn_protocols(['h2', 'http/1.1'])
+        c_sock, s_sock = socket.socketpair()
+        t = threading.Thread(target=lambda: (serve_connection(s_sock, ('127.0.0.1', 50001), self._ns()), s_sock.close()), daemon=True)
+        t.start()
+        c_sock.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
+        banner = b''
+        while b'\r\n\r\n' not in banner:
+            banner += c_sock.recv(1024)
+        self.assertIn(b'200 Connection Established', banner)
+        tls = ctx.wrap_socket(c_sock, server_hostname='127.0.0.1')
+        self.assertEqual(tls.selected_alpn_protocol(), 'h2')
+        conn = h2.connection.H2Connection(h2.config.H2Configuration(client_side=True, header_encoding='utf-8'))
+        conn.initiate_connection()
+        req = [(':method', 'GET'), (':scheme', 'https'), (':authority', '127.0.0.1'), (':path', '/article')]
+        conn.send_headers(1, req, end_stream=True)
+        conn.send_headers(3, [*req[:3], (':path', '/gzip-page')], end_stream=True)  # two streams on one connection
+        conn.send_headers(5, [(':method', 'GET'), (':scheme', 'https'), (':authority', '127.0.0.1'), (':path', '/x.js'),
+                              ('sec-fetch-dest', 'script')], end_stream=True)
+        tls.sendall(conn.data_to_send())
+        status, bodies, ended = {}, {1: b'', 3: b'', 5: b''}, set()
+        tls.settimeout(10)
+        while len(ended) < 3:
+            data = tls.recv(65536)
+            if not data:
+                break
+            for ev in conn.receive_data(data):
+                if isinstance(ev, h2.events.ResponseReceived):
+                    status[ev.stream_id] = dict(ev.headers)
+                elif isinstance(ev, h2.events.DataReceived):
+                    bodies[ev.stream_id] += ev.data
+                    conn.acknowledge_received_data(ev.flow_controlled_length, ev.stream_id)
+                elif isinstance(ev, h2.events.StreamEnded):
+                    ended.add(ev.stream_id)
+            tls.sendall(conn.data_to_send())
+        tls.close()
+        t.join(timeout=5)
+        self.assertEqual(status[1][':status'], '200')
+        self.assertNotIn('connection', status[1])  # connection-specific fields are not allowed in HTTP/2
+        self.assertIn(b'Real article content', bodies[1])
+        self.assertIn(b'zones-popup-blocker', bodies[1])
+        self.assertNotIn(b'aclib.runPop', bodies[1])
+        self.assertIn(b'<h1>Hello</h1>', bodies[3])
+        self.assertEqual(int(status[3]['content-length']), len(bodies[3]))
+        self.assertFalse(is_mitm_failed('127.0.0.1', '127.0.0.1'))
+
+    def test_an_upstream_server_speaking_h2(self):
+        import h2.config
+        import h2.connection
+        import h2.events
+        ca_pem = ca.ensure_ca()[0]
+        server_ctx = ca.leaf_context('localhost')  # a certificate of the proxy CA, offering h2
+        lst = socket.socket()
+        lst.bind(('127.0.0.1', 0))
+        lst.listen()
+        port = lst.getsockname()[1]
+        seen = {}
+
+        def h2_server():
+            raw, _ = lst.accept()
+            tls = server_ctx.wrap_socket(raw, server_side=True)
+            seen['alpn'] = tls.selected_alpn_protocol()
+            conn = h2.connection.H2Connection(h2.config.H2Configuration(client_side=False, header_encoding='utf-8'))
+            conn.initiate_connection()
+            tls.sendall(conn.data_to_send())
+            done = False
+            while not done:
+                data = tls.recv(65536)
+                if not data:
+                    break
+                for ev in conn.receive_data(data):
+                    if isinstance(ev, h2.events.RequestReceived):
+                        seen['headers'] = dict(ev.headers)
+                        conn.send_headers(ev.stream_id, [(':status', '200'), ('content-type', 'application/json')])
+                        conn.send_data(ev.stream_id, b'{"h2":true}', end_stream=True)
+                        done = True
+                tls.sendall(conn.data_to_send())
+            tls.close()
+            lst.close()
+
+        threading.Thread(target=h2_server, daemon=True).start()
+        ns = self._ns(mitm=False, fetcher=None, ctx=ssl.create_default_context(cadata=ca_pem))
+        del ns.http_fetcher
+        resp = _run_proxy_session(f'GET https://localhost:{port}/api HTTP/1.1\r\nHost: localhost:{port}\r\nConnection: close\r\n\r\n'.encode(), ns)
+        self.assertEqual(seen['alpn'], 'h2')
+        self.assertEqual(seen['headers'][':authority'], f'localhost:{port}')
+        self.assertEqual(seen['headers']['via'], '1.1 zones-dns')
+        head, _, body = resp.partition(b'\r\n\r\n')
+        self.assertIn(b'HTTP/1.1 200 OK', head)  # an h2 answer has no reason phrase: the standard one is used
+        self.assertIn(b'{"h2":true}', body)
+
+    def test_h2_flow_control_both_ways(self):
+        import h2.config
+        import h2.connection
+        import h2.events
+        upload, answer = b'u' * 200_000, b'a' * 300_000  # both larger than the 64 KB initial window
+        seen = {}
+
+        def fetcher(scheme, host, port, method, path, body, headers):
+            seen['body'] = body
+            return 200, 'OK', [('Content-Type', 'application/octet-stream')], answer
+
+        ctx = ssl.create_default_context(cadata=ca.ensure_ca()[0])
+        ctx.set_alpn_protocols(['h2'])
+        c_sock, s_sock = socket.socketpair()
+        t = threading.Thread(target=lambda: (serve_connection(s_sock, ('127.0.0.1', 50002), self._ns(fetcher=fetcher)), s_sock.close()), daemon=True)
+        t.start()
+        c_sock.sendall(b'CONNECT 127.0.0.1:443 HTTP/1.1\r\nHost: 127.0.0.1:443\r\n\r\n')
+        banner = b''
+        while b'\r\n\r\n' not in banner:
+            banner += c_sock.recv(1024)
+        tls = ctx.wrap_socket(c_sock, server_hostname='127.0.0.1')
+        tls.settimeout(10)
+        conn = h2.connection.H2Connection(h2.config.H2Configuration(client_side=True, header_encoding='utf-8'))
+        conn.initiate_connection()
+        conn.send_headers(1, [(':method', 'POST'), (':scheme', 'https'), (':authority', '127.0.0.1'), (':path', '/up'),
+                              ('content-length', str(len(upload)))])
+        tls.sendall(conn.data_to_send())
+        left, got, ended = memoryview(upload), b'', False
+        while not ended:
+            while left and (w := min(conn.local_flow_control_window(1), conn.max_outbound_frame_size)) > 0:
+                n = min(w, len(left))
+                conn.send_data(1, bytes(left[:n]), end_stream=n == len(left))
+                left = left[n:]
+            tls.sendall(conn.data_to_send())
+            data = tls.recv(65536)
+            if not data:
+                break
+            for ev in conn.receive_data(data):
+                if isinstance(ev, h2.events.DataReceived):
+                    got += ev.data
+                    conn.acknowledge_received_data(ev.flow_controlled_length, ev.stream_id)
+                elif isinstance(ev, h2.events.StreamEnded):
+                    ended = True
+            tls.sendall(conn.data_to_send())
+        tls.close()
+        t.join(timeout=5)
+        self.assertEqual(seen['body'], upload)
+        self.assertEqual(got, answer)

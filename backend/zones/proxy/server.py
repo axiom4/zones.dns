@@ -1,15 +1,18 @@
-"""Multi-threaded HTTP and HTTPS ad/popup-filtering forward proxy server."""
+"""Asynchronous HTTP/1.1 and HTTP/2 ad/popup-filtering forward proxy.
+
+asyncio, one event loop: a connection costs a few kilobytes, not a thread. Towards the client HTTP/1.1 (h11: framing, chunked bodies,
+100 Continue and request smuggling handled by the library) and, inside an HTTPS MITM session, HTTP/2 when the client offers it (h2).
+Towards the servers httpcore: HTTP/1.1 or HTTP/2 as the server chooses, one pool of kept-alive connections. Whatever touches the
+database or burns CPU (settings, filters, the CA, HTML filtering) runs on a small thread pool, DNS lookups on another.
+"""
+import asyncio
 from collections import OrderedDict
-from functools import lru_cache
-from http.client import HTTPConnection, HTTPException, HTTPSConnection
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from concurrent.futures import ThreadPoolExecutor
+from functools import lru_cache, partial
+from http import HTTPStatus
 import ipaddress
-import itertools
 import queue
-import re
-import select
 import socket
-from socketserver import ThreadingMixIn
 import ssl
 import sys
 import threading
@@ -18,13 +21,17 @@ from urllib.parse import urlsplit
 import zlib
 
 from django.conf import settings
-from django.db import DatabaseError, close_old_connections, connections
+from django.db import DatabaseError, close_old_connections
 from dnslib import DNSRecord, QTYPE
+import h11
+import httpcore
 
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit, resolver
 from ..models import DataVersion, ProxyLog
-from . import ca, filter as pfilter, pac, revocation
+from . import ca, filter as pfilter, pac, upstream
+from .h2conn import H2Connection, StreamGone
+from .streams import RawStream, TLSStream, keepalive
 
 _cfg_lock = threading.Lock()
 _cfg_data = None
@@ -136,86 +143,6 @@ def note_empty_mitm_session(client_ip, host):
     return False
 
 
-def _connect_any(addrs, timeout):
-    """A TCP socket to the first address of `addrs` [(family, (ip, port))] that answers: one dead address of a name must not fail the request."""
-    err = None
-    for family, addr in addrs:
-        sock = socket.socket(family, socket.SOCK_STREAM)
-        try:
-            _set_nodelay(sock)
-            sock.settimeout(timeout if len(addrs) == 1 else min(timeout, 5))
-            sock.connect(addr)
-            sock.settimeout(timeout)
-            return sock
-        except OSError as e:
-            sock.close()
-            err = e
-    raise err or OSError('no address to connect to')
-
-
-class _ResolvedHTTPConnection(HTTPConnection):
-    """HTTPConnection to already-resolved addresses (no second getaddrinfo), trying the next one when an address does not answer."""
-
-    def __init__(self, host, port, addrs, **kwargs):
-        super().__init__(host, port, **kwargs)
-        self._addrs = addrs
-
-    def connect(self):
-        self.sock = _connect_any(self._addrs, self.timeout)
-
-
-class _ResolvedHTTPSConnection(HTTPSConnection):
-    """HTTPSConnection to already-resolved addresses (avoiding a second getaddrinfo call) while preserving SNI/hostname verification."""
-
-    def __init__(self, host, port, addrs, **kwargs):
-        super().__init__(host, port, **kwargs)
-        self._addrs = addrs
-
-    def connect(self):
-        sock = _connect_any(self._addrs, self.timeout)
-        server_hostname = self._tunnel_host if self._tunnel_host else self.host
-        self.sock = self._context.wrap_socket(sock, server_hostname=server_hostname)
-        if revocation.is_revoked(self.sock.get_verified_chain()):
-            self.sock.close()
-            raise ssl.SSLCertVerificationError(f'the certificate of {server_hostname} is revoked')
-
-
-_default_ssl_context = ssl.create_default_context()  # building one loads the CA store (tens of ms): once, not per request
-
-_pool_lock = threading.Lock()
-_pool = {}  # (scheme, host, port, ip) -> [(conn, idle_since)]: kept-alive upstream connections, the TCP+TLS handshake is most of a request's time
-_POOL_IDLE = 20.0  # most servers close an idle connection after 30-60 s; a stale one is retried on a new connection anyway
-_POOL_PER_KEY = 4
-
-
-def _pool_take(key):
-    now = time.monotonic()
-    with _pool_lock:
-        lst = _pool.get(key)
-        while lst:
-            conn, since = lst.pop()
-            if now - since < _POOL_IDLE:
-                return conn
-            conn.close()
-    return None
-
-
-def _pool_give(key, conn):
-    with _pool_lock:
-        lst = _pool.setdefault(key, [])
-        if len(lst) < _POOL_PER_KEY:
-            lst.append((conn, time.monotonic()))
-            return
-    conn.close()
-    # shortcut: idle connections are dropped only when the same key is used again, no sweeper; add one if the number of hosts grows
-
-
-def _open_upstream(scheme, host, port, addrs, ctx):
-    if scheme == 'https':
-        return _ResolvedHTTPSConnection(host, port, addrs, timeout=20, context=ctx)
-    return _ResolvedHTTPConnection(host, port, addrs, timeout=20)
-
-
 @lru_cache(maxsize=4)
 def _connect_ports(raw):
     raw = str(raw or '').strip()
@@ -226,13 +153,6 @@ def _connect_port_allowed(port):
     """PROXY_CONNECT_PORTS: the ports a CONNECT tunnel may reach ('*' = any)."""
     ports = _connect_ports(getattr(settings, 'PROXY_CONNECT_PORTS', '*'))
     return ports is None or port in ports
-
-
-def _set_nodelay(sock):
-    try:
-        sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-    except OSError:
-        pass
 
 
 def _load_cfg_from_db(base, force, prev_ver):
@@ -277,9 +197,8 @@ MAX_BUFFERED_BODY = 1024 * 1024  # request bodies up to this size are kept in me
 IDEMPOTENT = frozenset({'GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE', 'TRACE'})  # RFC 9110 9.2.2: only these may be retried by a proxy
 VIA = '1.1 zones-dns'  # RFC 9110 7.6.3
 TUNNEL_IDLE = 1800  # seconds a CONNECT tunnel may stay silent: IMAP IDLE, push channels and WebSockets are quiet for many minutes
-PER_CLIENT_MAX = 256  # connections (threads) one client address may hold: one device cannot take all of max_threads
-_HEX_RX = re.compile(rb'^[0-9A-Fa-f]{1,16}$')
-_CL_RX = re.compile(r'^\d{1,19}$')
+PER_CLIENT_MAX = 256  # connections one client address may hold: one device cannot take all of MAX_CLIENT_CONNECTIONS
+MAX_CLIENT_CONNECTIONS = 8192
 
 HOP_BY_HOP = frozenset({
     'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
@@ -291,10 +210,10 @@ class BodyTooLarge(ValueError):
     pass
 
 
-def _hop_headers(headers):
+def _hop_headers(connection_values):
     """The hop-by-hop fields of a message: the fixed ones plus every name listed in its Connection header (RFC 9110 7.6.1)."""
     out = set(HOP_BY_HOP)
-    for v in headers.get_all('Connection') or ():
+    for v in connection_values:
         out.update(t.strip().lower() for t in v.split(',') if t.strip())
     return out
 
@@ -529,84 +448,197 @@ class ProxyLogWriter:
             _warn(f'cannot save {len(rows)} log entries: {_why(e)}')
 
 
-class ProxyServer(ThreadingMixIn, HTTPServer):
-    daemon_threads = True
-    allow_reuse_address = True
-    request_queue_size = 256
-    max_threads = 512
 
-    def __init__(self, server_address, RequestHandlerClass=None, settings_getter=None, allow_loopback=False, upstream_ssl_context=None, log=None):
-        if ':' in server_address[0]:
-            self.address_family = socket.AF_INET6
-        self.settings_getter = settings_getter or cached_proxy_settings
-        self.allow_loopback = allow_loopback
-        self.upstream_ssl_context = upstream_ssl_context
-        self.log = log
-        self._thread_sem = threading.BoundedSemaphore(self.max_threads)
-        self._per_client = {}
-        self._per_client_lock = threading.Lock()
-        super().__init__(server_address, RequestHandlerClass or ProxyHandler)
 
-    def _client_done(self, ip):
-        with self._per_client_lock:
-            n = self._per_client.get(ip, 1) - 1
-            if n > 0:
-                self._per_client[ip] = n
-            else:
-                self._per_client.pop(ip, None)
+_WORK = ThreadPoolExecutor(max_workers=16, thread_name_prefix='proxy-work')  # settings, filters, CA, HTML: database and CPU (each thread may hold a DB connection)
+_DNS = ThreadPoolExecutor(max_workers=32, thread_name_prefix='proxy-dns')  # name lookups wait on the network, not on the database
+FIRST_REQUEST_TIMEOUT = 30  # seconds a new connection may take to send its first request
+KEEPALIVE_TIMEOUT = 30  # ... and to send the next one (15 inside a MITM session, like browsers' own idle timeout)
+UPSTREAM_TIMEOUTS = {'connect': 15.0, 'read': 120.0, 'write': 60.0, 'pool': 30.0}  # read: a long poll is silent for tens of seconds
+_RETRYABLE = (httpcore.RemoteProtocolError, httpcore.ReadError, httpcore.WriteError)
 
-    def process_request(self, request, client_address):
-        ip = client_address[0]
-        with self._per_client_lock:
-            if self._per_client.get(ip, 0) >= PER_CLIENT_MAX:
-                self.shutdown_request(request)
+
+async def _run(pool, fn, *args, **kwargs):
+    return await asyncio.get_running_loop().run_in_executor(pool, partial(fn, *args, **kwargs))
+
+
+def _phrase(status):
+    try:
+        return HTTPStatus(status).phrase
+    except ValueError:
+        return ''
+
+
+def _filter_page(raw_body, cenc, ctype, host, s, csp):
+    """(body, changed): the page decompressed and filtered; raises when it cannot be (it is then relayed as it came)."""
+    plain = _decompress(raw_body, cenc)
+    out = pfilter.filter_html(plain, content_type=ctype, host=host, s=s, csp=csp)
+    return out, out != plain
+
+
+def _resolve_for_backend(host, port, allow_loopback, own_ips):
+    return _resolve_target(host, port, allow_loopback=allow_loopback, own_ips=own_ips)
+
+
+class H1Exchange:
+    """One HTTP/1.1 (or 1.0) request on an h11 connection."""
+
+    def __init__(self, conn, req):
+        self.conn = conn
+        self.method = req.method.decode('latin-1')
+        self.target = req.target.decode('latin-1')
+        self.version = 'HTTP/' + req.http_version.decode('latin-1')
+        self.headers = [(k.decode('latin-1'), v.decode('latin-1')) for k, v in req.headers.raw_items()]
+        tokens = {t.strip().lower() for v in self.get_all('connection') for t in v.split(',')}
+        self.keep_alive = req.http_version >= b'1.1' and 'close' not in tokens
+        self.started = False
+
+    def header(self, name):
+        name = name.lower()
+        return next((v for k, v in self.headers if k.lower() == name), '')
+
+    def get_all(self, name):
+        name = name.lower()
+        return [v for k, v in self.headers if k.lower() == name]
+
+    def content_length(self):
+        if self.get_all('transfer-encoding'):
+            return None
+        v = self.header('content-length').strip()
+        return int(v) if v.isdigit() else None
+
+    async def wait_continue(self):
+        if self.conn.h11.they_are_waiting_for_100_continue:  # only HTTP/1.1 clients (RFC 9110 10.1.1): h11 knows
+            await self.conn.send(h11.InformationalResponse(status_code=100, headers=[]))
+
+    async def body_chunks(self):
+        while True:
+            try:
+                ev = await self.conn.next_event(KEEPALIVE_TIMEOUT)
+            except h11.RemoteProtocolError as e:
+                raise ValueError(str(e)) from e
+            if isinstance(ev, h11.Data):
+                yield bytes(ev.data)
+            elif isinstance(ev, h11.EndOfMessage):
                 return
-            self._per_client[ip] = self._per_client.get(ip, 0) + 1
-        if not self._thread_sem.acquire(blocking=False):
-            self._client_done(ip)
-            self.shutdown_request(request)
+            else:
+                raise ValueError('the client closed the connection before the end of the body')
+
+    @staticmethod
+    def _encode(headers):
+        return [(k.encode('latin-1'), str(v).encode('latin-1')) for k, v in headers if k.lower() != 'connection']
+
+    async def start(self, status, reason, headers, end=False, close=False):
+        self.started = True
+        hdrs = self._encode(headers)
+        if close or not self.keep_alive:
+            hdrs.append((b'connection', b'close'))
+        await self.conn.send(h11.Response(status_code=status, headers=hdrs, reason=(reason or _phrase(status)).encode('latin-1')))
+
+    async def send(self, data):
+        if data:
+            await self.conn.send(h11.Data(data=data))
+
+    async def finish(self):
+        await self.conn.send(h11.EndOfMessage())
+
+    async def respond(self, status, reason, headers, body=b'', close=False):
+        if self.started:
             return
         try:
-            super().process_request(request, client_address)
-        except Exception:
-            self._thread_sem.release()
-            self._client_done(ip)
-            raise
+            await self.start(status, reason, [*headers, ('Content-Length', str(len(body)))], close=close)
+            if body and self.method != 'HEAD':
+                await self.send(body)
+            await self.finish()
+        except h11.LocalProtocolError:
+            # the client broke the protocol (h11 refuses to go on): answered by hand, then the connection is closed
+            head = f'HTTP/1.1 {status} {reason or _phrase(status)}\r\nContent-Length: {len(body)}\r\nConnection: close\r\n'
+            head += ''.join(f'{k}: {v}\r\n' for k, v in headers)
+            await self.conn.stream.write(head.encode('latin-1') + b'\r\n' + (body if self.method != 'HEAD' else b''))
+            self.conn.broken = True
 
-    def process_request_thread(self, request, client_address):
+    async def establish(self):
+        """Answer a CONNECT with 200 and hand over the raw connection, with what the client already sent behind its request."""
+        while self.conn.h11.their_state is h11.SEND_BODY:
+            await self.conn.next_event(KEEPALIVE_TIMEOUT)
+        await self.conn.send(h11.Response(status_code=200, headers=[], reason=b'Connection Established'))
+        self.conn.taken = True
+        data, _ = self.conn.h11.trailing_data
+        stream = self.conn.stream
+        return RawStream(stream.reader, stream.writer, prefix=bytes(data) + stream.take_prefix())
+
+
+class H1Connection:
+    def __init__(self, client, stream, mitm=None):
+        self.client = client
+        self.stream = stream
+        self.mitm = mitm
+        self.h11 = h11.Connection(h11.SERVER, max_incomplete_event_size=65536)
+        self.handled = 0
+        self.websocket = False
+        self.taken = False
+        self.broken = False
+
+    async def next_event(self, timeout):
+        while True:
+            ev = self.h11.next_event()
+            if ev is h11.NEED_DATA:
+                self.h11.receive_data(await self.stream.read(65536, timeout))
+                continue
+            return ev
+
+    async def send(self, ev):
+        data = self.h11.send(ev)
+        if data:
+            await self.stream.write(data)
+
+    async def run(self):
         try:
-            super().process_request_thread(request, client_address)
-        finally:
-            connections.close_all()
-            self._thread_sem.release()
-            self._client_done(client_address[0])
+            while True:
+                timeout = FIRST_REQUEST_TIMEOUT if not self.handled else (15 if self.mitm else KEEPALIVE_TIMEOUT)
+                try:
+                    ev = await self.next_event(timeout)
+                except h11.RemoteProtocolError as e:
+                    status = e.error_status_hint or 400
+                    self.client.log('', '', '', 'error', status, f'Bad request: {e}'[:255], None)
+                    body = f'{_phrase(status)}\n'.encode()
+                    await self.stream.write(f'HTTP/1.1 {status} {_phrase(status)}\r\nContent-Type: text/plain; charset=utf-8\r\n'
+                                            f'Content-Length: {len(body)}\r\nConnection: close\r\n\r\n'.encode() + body)
+                    return
+                if not isinstance(ev, h11.Request):
+                    return  # the client closed the connection
+                ex = H1Exchange(self, ev)
+                if self.mitm and ex.header('upgrade').lower() == 'websocket':
+                    self.websocket = True  # WebSockets inside MITM fall back to a direct CONNECT tunnel on the next attempt
+                    return
+                self.handled += 1
+                await self.client.handle(ex, self.mitm)
+                if self.taken or self.broken:
+                    return
+                if self.h11.our_state is h11.DONE and self.h11.their_state is h11.DONE:
+                    self.h11.start_next_cycle()
+                else:
+                    return  # a body not read to its end, or "Connection: close": the connection ends here
+        except (OSError, TimeoutError, h11.LocalProtocolError, StreamGone, ssl.SSLError):
+            return
 
 
-class ProxyHandler(BaseHTTPRequestHandler):
-    protocol_version = 'HTTP/1.1'
-    timeout = 30
+class Client:
+    """One accepted client connection: who it is, and the handling of its requests (HTTP/1.1 or HTTP/2 exchanges alike)."""
 
-    def setup(self):
-        _set_nodelay(self.request)
-        super().setup()
+    def __init__(self, server, client_address, sockname):
+        self.server = server
+        self.client_address = client_address
+        self.client_ip = str(client_address[0] or '')
+        self.sockname = sockname
 
-    def log_message(self, fmt, *args):
-        pass  # keep stdout quiet per request unless debugging
-
-    def _cfg(self):
-        return self.server.settings_getter()
-
-    def _client_allowed(self):
-        client_ip = self.client_address[0]
-        return ratelimit.allowed(client_ip)
-
-    def _log(self, method, host, url, outcome, status_code=200, reason='', t0=None):
+    def log(self, method, host, url, outcome, status_code=200, reason='', t0=None):
         logger = getattr(self.server, 'log', None)
         if not logger:
             return
         ms = max(0, int((time.monotonic() - t0) * 1000)) if t0 is not None else 0
         entry = ProxyLog(
-            client=str(self.client_address[0] or '')[:45],
+            client=self.client_ip[:45],
             method=str(method or '')[:12],
             host=str(host or '').lower()[:253],
             url=_redact_url(url)[:500],
@@ -618,188 +650,162 @@ class ProxyHandler(BaseHTTPRequestHandler):
         print(f'{entry.client} {entry.method} {entry.status} {entry.outcome} {entry.ms}ms {entry.url} {entry.reason}'.rstrip(), flush=True)  # the supervisor log of runproxy: one line per request
         if hasattr(logger, 'add'):
             logger.add(entry)
-        elif logger is True:
-            try:
-                pfilter.run_on_db_pool(entry.save)
-            except Exception as e:
-                _warn(f'cannot save a log entry: {_why(e)}')
 
-    def _send_bytes(self, status_code, content_type, body, extra_headers=None):
-        self.send_response(status_code)
-        self.send_header('Content-Type', content_type)
-        self.send_header('Content-Length', str(len(body)))
-        self.send_header('Connection', 'close')
-        if extra_headers:
-            for k, v in extra_headers.items():
-                self.send_header(k, v)
-        self.end_headers()
-        if self.command != 'HEAD' and body:
-            self.wfile.write(body)
-        self.close_connection = True
+    def own_ips(self, s):
+        """This server's addresses: the one the client reached and the configured ones (none in the tests, that allow loopback)."""
+        if getattr(self.server, 'allow_loopback', False):
+            return frozenset()
+        out = set()
+        if isinstance(self.sockname, tuple):
+            out.add(self.sockname[0])
+        for v in (getattr(s, 'DHCP_SERVER', ''), getattr(s, 'PROXY_ADDRESS', '')):
+            if v and str(v) not in ('0.0.0.0', '::'):
+                out.add(str(v))
+        return frozenset(out)
 
-    def _send_blocked(self, reason, detail, path=''):
+    @staticmethod
+    async def text(ex, status, text, close=True, extra=None):
+        await ex.respond(status, '', [('Content-Type', 'text/plain; charset=utf-8'), *(extra or {}).items()], text if isinstance(text, bytes) else text.encode(), close=close)
+
+    async def handle(self, ex, mitm=None):
+        try:
+            if ex.method == 'CONNECT':
+                if mitm:
+                    await self.text(ex, 405, 'CONNECT inside a tunnel is not supported')
+                else:
+                    await self.connect(ex)
+            elif mitm:
+                await self.http(ex, scheme='https', default_host=mitm[0], default_port=mitm[1])
+            else:
+                await self.http(ex)
+        except (OSError, StreamGone, h11.LocalProtocolError, ssl.SSLError, TimeoutError):
+            raise  # the client's connection: the caller ends it
+        except Exception as e:
+            # a bug or the database gone: the client gets an answer, the log the reason
+            _warn(f'{ex.method} {ex.target}: {_why(e)}')
+            self.log(ex.method, mitm[0] if mitm else '', ex.target, 'error', 500, f'Internal error: {_why(e)}', None)
+            if ex.started:
+                await self.abort(ex)
+            else:
+                await self.text(ex, 500, 'Internal error')
+
+    async def blocked(self, ex, reason, detail, path=''):
+        """A blocked request gets what the page expects (an empty script, style, image or JSON) so it does not show an "ad blocker" wall."""
         header_val = f'Zones.dns ({reason}: {detail})'
-        origin = self.headers.get('Origin') or '*'
-        hdrs = {
-            'X-Blocked-By': header_val,
-            'Access-Control-Allow-Origin': origin,
-            'Access-Control-Allow-Credentials': 'true',
-            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS, HEAD',
-            'Access-Control-Allow-Headers': '*',
-            'Cache-Control': 'no-store',
-        }
-        if self.command == 'OPTIONS':
-            self._send_bytes(204, 'text/plain; charset=utf-8', b'', hdrs)
-            return
+        hdrs = [
+            ('X-Blocked-By', header_val),
+            ('Access-Control-Allow-Origin', ex.header('origin') or '*'),
+            ('Access-Control-Allow-Credentials', 'true'),
+            ('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, HEAD'),
+            ('Access-Control-Allow-Headers', '*'),
+            ('Cache-Control', 'no-store'),
+        ]
+
+        async def send(status, ctype, body):
+            await ex.respond(status, '', [('Content-Type', ctype), *hdrs], body)
+
+        if ex.method == 'OPTIONS':
+            return await send(204, 'text/plain; charset=utf-8', b'')
         low_path = (path or '').lower().partition('?')[0]
-        accept = (self.headers.get('Accept') or '').lower()
-        sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
-        sec_mode = (self.headers.get('Sec-Fetch-Mode') or '').strip().lower()
-        if (
-            low_path.endswith('.js')
-            or low_path.endswith('/gtag/js')
-            or '/widget/' in low_path
-            or 'javascript' in accept
-            or sec_dest == 'script'
-        ):
-            self._send_bytes(200, 'application/javascript; charset=utf-8', SURROGATE_JS, hdrs)
+        accept = ex.header('accept').lower()
+        sec_dest = ex.header('sec-fetch-dest').strip().lower()
+        sec_mode = ex.header('sec-fetch-mode').strip().lower()
+        if low_path.endswith('.js') or low_path.endswith('/gtag/js') or '/widget/' in low_path or 'javascript' in accept or sec_dest == 'script':
+            await send(200, 'application/javascript; charset=utf-8', SURROGATE_JS)
         elif low_path.endswith('.css') or 'text/css' in accept or sec_dest == 'style':
-            self._send_bytes(200, 'text/css; charset=utf-8', b'/* blocked by Zones.dns */\n', hdrs)
+            await send(200, 'text/css; charset=utf-8', b'/* blocked by Zones.dns */\n')
         elif low_path.endswith('.map'):
-            self._send_bytes(200, 'application/json; charset=utf-8', b'{"version":3,"sources":[],"mappings":""}', hdrs)
+            await send(200, 'application/json; charset=utf-8', b'{"version":3,"sources":[],"mappings":""}')
         elif low_path.endswith(('.gif', '.png', '.jpg', '.jpeg', '.webp', '.ico', '.svg')) or accept.startswith('image/') or sec_dest == 'image':
-            self._send_bytes(200, 'image/gif', TRANSPARENT_GIF, hdrs)
+            await send(200, 'image/gif', TRANSPARENT_GIF)
         elif (
             low_path.endswith(('.html', '.htm'))
             or sec_dest in ('document', 'iframe')
             or ('text/html' in accept and sec_mode in ('', 'navigate'))
-            or (not accept and sec_dest == '' and self.command == 'GET' and not low_path.endswith('.json') and '/settings' not in low_path)
+            or (not accept and sec_dest == '' and ex.method == 'GET' and not low_path.endswith('.json') and '/settings' not in low_path)
         ):
-            body = f'<!doctype html><title>Blocked</title><!-- blocked by {header_val} -->'.encode()
-            self._send_bytes(403, 'text/html; charset=utf-8', body, hdrs)
+            await send(403, 'text/html; charset=utf-8', f'<!doctype html><title>Blocked</title><!-- blocked by {header_val} -->'.encode())
         else:
-            self._send_bytes(200, 'application/json; charset=utf-8', SURROGATE_JSON, hdrs)
+            await send(200, 'application/json; charset=utf-8', SURROGATE_JSON)
 
-    def _handle_local(self, s):
-        """Serve /wpad.dat, /proxy.pac, /ca.crt (/ca.pem) and /proxy.mobileconfig when requested directly from the proxy port."""
-        path = self.path.partition('?')[0]
+    async def local(self, ex, s):
+        """/wpad.dat, /proxy.pac, /ca.crt (/ca.pem) and /proxy.mobileconfig asked directly of the proxy port. True when answered."""
+        path = ex.target.partition('?')[0]
         if path in ('/wpad.dat', '/proxy.pac'):
-            body = pac.build_pac(s, request_host=self.headers.get('Host', '')).encode('utf-8')
-            self._send_bytes(200, 'application/x-ns-proxy-autoconfig; charset=utf-8', body, {'Cache-Control': 'no-cache'})
+            body = (await _run(_WORK, pac.build_pac, s, request_host=ex.header('host'))).encode('utf-8')
+            await ex.respond(200, '', [('Content-Type', 'application/x-ns-proxy-autoconfig; charset=utf-8'), ('Cache-Control', 'no-cache')], body, close=True)
             return True
         if path in ('/ca.crt', '/ca.pem', '/proxy.mobileconfig') and str(settings.GUI_URL).startswith('https://'):
             # plain HTTP lets anyone on the path swap the certificate for their own: the GUI serves both over https
             target = settings.GUI_URL.rstrip('/') + ('/proxy.mobileconfig' if path == '/proxy.mobileconfig' else '/proxy-ca.crt')
-            self._send_bytes(302, 'text/plain; charset=utf-8', b'', {'Location': target})
+            await ex.respond(302, '', [('Location', target)], b'', close=True)
             return True
         if path in ('/ca.crt', '/ca.pem'):
-            cert_pem, _, _, _ = ca.ensure_ca()
-            self._send_bytes(
-                200,
-                'application/x-x509-ca-cert',
-                cert_pem.encode('utf-8'),
-                {'Content-Disposition': 'attachment; filename="zones-proxy-ca.crt"'},
-            )
+            cert_pem = (await _run(_WORK, ca.ensure_ca))[0]
+            await ex.respond(200, '', [('Content-Type', 'application/x-x509-ca-cert'), ('Content-Disposition', 'attachment; filename="zones-proxy-ca.crt"')],
+                             cert_pem.encode('utf-8'), close=True)
             return True
         if path == '/proxy.mobileconfig':
-            cert_pem, _, _, _ = ca.ensure_ca()
-            body = pac.build_mobileconfig(s, ca_cert_pem=cert_pem, request_host=self.headers.get('Host', ''))
-            self._send_bytes(
-                200,
-                'application/x-apple-aspen-config',
-                body,
-                {'Content-Disposition': 'attachment; filename="zones-proxy.mobileconfig"'},
-            )
+            cert_pem = (await _run(_WORK, ca.ensure_ca))[0]
+            body = await _run(_WORK, pac.build_mobileconfig, s, ca_cert_pem=cert_pem, request_host=ex.header('host'))
+            await ex.respond(200, '', [('Content-Type', 'application/x-apple-aspen-config'), ('Content-Disposition', 'attachment; filename="zones-proxy.mobileconfig"')],
+                             body, close=True)
             return True
         return False
 
-    def _read_exact(self, n):
-        data = self.rfile.read(n)
-        if len(data) != n:
-            raise ValueError('the client closed the connection before the end of the body')
-        return data
-
-    def _chunks(self):
-        """The data of a chunked body (RFC 9112 7.1), piece by piece. Raises ValueError on bad framing, BodyTooLarge over MAX_REQUEST_BYTES."""
-        total = 0
-        while True:
-            line = self.rfile.readline(1025)
-            size_txt = line.split(b';', 1)[0].strip()
-            if not line.endswith(b'\n') or not _HEX_RX.match(size_txt):
-                raise ValueError('bad chunk size')  # only hex digits: int(x, 16) also takes "-1", "0x10" and "1_0"
-            size = int(size_txt, 16)
-            if size == 0:
-                for _ in range(64):  # trailers, up to the blank line
-                    if not self.rfile.readline(8193).strip():
-                        return
-                raise ValueError('too many trailer lines')
-            total += size
-            if total > MAX_REQUEST_BYTES:
-                raise BodyTooLarge('request body too large')
-            while size:
-                part = self._read_exact(min(size, 65536))
-                size -= len(part)
-                yield part
-            if self.rfile.readline(3) not in (b'\r\n', b'\n'):
-                raise ValueError('missing CRLF after a chunk')
-
-    def _request_body(self):
-        """(body, length): body None, bytes (small: can be sent again) or an iterator that streams a large body without holding it in memory;
-        length is the Content-Length to forward for a streamed sized body, else None (http.client then frames the body itself).
-        Raises ValueError on a message whose length is ambiguous (request smuggling, RFC 9112 6.1 and 6.3), BodyTooLarge over MAX_REQUEST_BYTES."""
-        te = [c.strip().lower() for v in self.headers.get_all('Transfer-Encoding') or () for c in v.split(',') if c.strip()]
-        if te:
-            if te != ['chunked']:
-                raise ValueError('unsupported Transfer-Encoding')
-            chunks = self._chunks()
-            head, size = [], 0
-            for part in chunks:
-                head.append(part)
-                size += len(part)
-                if size > MAX_BUFFERED_BODY:
-                    return itertools.chain(head, chunks), None
-            return b''.join(head) or None, None
-        lengths = {v.strip() for v in self.headers.get_all('Content-Length') or ()}
-        if len(lengths) > 1 or (lengths and not _CL_RX.match(next(iter(lengths)))):
-            raise ValueError('bad Content-Length')
-        n = int(lengths.pop()) if lengths else 0
-        if n > MAX_REQUEST_BYTES:
+    async def read_body(self, ex):
+        """(body, length): None, bytes (small: can be sent again) or an async iterator that streams a large body without holding it;
+        length: the Content-Length to forward for a streamed body, when the client gave one. Raises BodyTooLarge, ValueError (bad framing)."""
+        n = ex.content_length()
+        if n is not None and n > MAX_REQUEST_BYTES:
             raise BodyTooLarge('request body too large')
-        if n <= MAX_BUFFERED_BODY:
-            return (self._read_exact(n) if n else None), None
+        chunks = ex.body_chunks()
+        head, size = [], 0
+        while True:
+            try:
+                part = await chunks.__anext__()
+            except StopAsyncIteration:
+                return b''.join(head) or None, None
+            size += len(part)
+            if size > MAX_REQUEST_BYTES:
+                raise BodyTooLarge('request body too large')
+            head.append(part)
+            if size > MAX_BUFFERED_BODY:
+                break
 
-        def stream(left=n):
-            while left:
-                part = self._read_exact(min(left, 65536))
-                left -= len(part)
-                yield part
-        return stream(), n
+        async def rest(total=size):
+            for p in head:
+                yield p
+            async for p in chunks:
+                total += len(p)
+                if total > MAX_REQUEST_BYTES:
+                    raise BodyTooLarge('request body too large')
+                yield p
+        return rest(), n
 
-    def _proxy_http(self, scheme=None, default_host=None, default_port=None, keep_alive=False):
+    async def http(self, ex, scheme=None, default_host=None, default_port=None):
         t0 = time.monotonic()
-        if not self._client_allowed():
-            self._log(self.command, '', self.path, 'error', 403, 'Client refused (DNS_ALLOW_QUERY or rate limit)', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden')
-            return
-        s = self._cfg()
-        if self.path.startswith('/') and scheme is None:
-            if self._handle_local(s):
+        if not ratelimit.allowed(self.client_ip):
+            self.log(ex.method, '', ex.target, 'error', 403, 'Client refused (DNS_ALLOW_QUERY or rate limit)', t0)
+            return await self.text(ex, 403, 'Forbidden')
+        s = await _run(_WORK, self.server.settings_getter)
+        target = ex.target
+        if target.startswith('/') and scheme is None:
+            if await self.local(ex, s):
                 return
-            host_hdr = self.headers.get('Host', '')
+            host_hdr = ex.header('host')
             if not host_hdr:
-                self._log(self.command, '', self.path, 'error', 400, 'No Host header', t0)
-                self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad Request')
-                return
-            full_url = f'http://{host_hdr}{self.path}'
-        elif self.path.startswith(('http://', 'https://')):
-            full_url = self.path
+                self.log(ex.method, '', target, 'error', 400, 'No Host header', t0)
+                return await self.text(ex, 400, 'Bad Request')
+            full_url = f'http://{host_hdr}{target}'
+        elif target.startswith(('http://', 'https://')):
+            full_url = target
         elif scheme and default_host:
             port_part = f':{default_port}' if default_port and default_port not in (80, 443) else ''
-            full_url = f'{scheme}://{default_host}{port_part}{self.path}'
+            full_url = f'{scheme}://{default_host}{port_part}{target}'
         else:
-            self._log(self.command, '', self.path, 'error', 400, 'Unusable request target', t0)
-            self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad Request')
-            return
+            self.log(ex.method, '', target, 'error', 400, 'Unusable request target', t0)
+            return await self.text(ex, 400, 'Bad Request')
 
         parts = urlsplit(full_url)
         target_scheme = (parts.scheme or scheme or 'http').lower()
@@ -807,289 +813,217 @@ class ProxyHandler(BaseHTTPRequestHandler):
         try:
             port = parts.port or default_port or (443 if target_scheme == 'https' else 80)
         except ValueError:  # a port that is not a number or out of range
-            self._log(self.command, '', full_url, 'error', 400, 'Bad port in the request target', t0)
-            self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad Request')
-            return
+            self.log(ex.method, '', full_url, 'error', 400, 'Bad port in the request target', t0)
+            return await self.text(ex, 400, 'Bad Request')
         path_query = (parts.path or '/') + (f'?{parts.query}' if parts.query else '')
-        log_method = f'MITM {self.command}' if scheme == 'https' else self.command
+        log_method = f'MITM {ex.method}' if scheme == 'https' else ex.method
 
         if not host:
-            self._log(log_method, '', full_url, 'error', 400, 'Missing target host', t0)
-            self._send_bytes(400, 'text/plain; charset=utf-8', b'Missing target host')
-            return
+            self.log(log_method, '', full_url, 'error', 400, 'Missing target host', t0)
+            return await self.text(ex, 400, 'Missing target host')
 
-        if hit := pfilter.check_request(host, full_url, s=s):
-            self._log(log_method, host, full_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
-            self._send_blocked(hit[0], hit[1], path=parts.path)
-            return
+        if hit := await _run(_WORK, pfilter.check_request, host, full_url, s=s):
+            self.log(log_method, host, full_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
+            return await self.blocked(ex, hit[0], hit[1], path=parts.path)
 
-        if self.command == 'OPTIONS' and (self.headers.get('Max-Forwards') or '').strip() == '0':
+        if ex.method == 'OPTIONS' and ex.header('max-forwards').strip() == '0':
             # RFC 9110 7.6.2: Max-Forwards 0 means the request is for this proxy, it goes no further
-            self._send_bytes(200, 'text/plain; charset=utf-8', b'', {'Allow': 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH, CONNECT'})
-            return
+            return await ex.respond(200, '', [('Allow', 'GET, HEAD, POST, PUT, DELETE, OPTIONS, PATCH, CONNECT')], b'')
 
+        own_ips = self.own_ips(s)
+        allow_loopback = bool(getattr(self.server, 'allow_loopback', False))
         try:
-            addrs = _resolve_target(host, port, allow_loopback=self.server.allow_loopback, own_ips=self._own_ips(s))
+            await _run(_DNS, _resolve_target, host, port, allow_loopback=allow_loopback, own_ips=own_ips)
         except PermissionError:
-            self._log(log_method, host, full_url, 'error', 403, 'Forbidden target address', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
-            return
+            self.log(log_method, host, full_url, 'error', 403, 'Forbidden target address', t0)
+            return await self.text(ex, 403, 'Forbidden target address')
         except OSError:
-            self._log(log_method, host, full_url, 'error', 502, 'DNS lookup failed', t0)
-            self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
-            return
+            self.log(log_method, host, full_url, 'error', 502, 'DNS lookup failed', t0)
+            return await self.text(ex, 502, 'Bad Gateway: DNS lookup failed')
 
-        if self.request_version >= 'HTTP/1.1' and (self.headers.get('Expect') or '').lower() == '100-continue':
-            self.send_response_only(100)  # the client holds back the body until it hears this (mail clients upload attachments this way); never to HTTP/1.0 (RFC 9110 10.1.1)
-            self.end_headers()
         try:
-            req_body, stream_len = self._request_body()
+            await ex.wait_continue()
+            req_body, stream_len = await self.read_body(ex)
         except BodyTooLarge:
-            self._log(log_method, host, full_url, 'error', 413, 'Request body too large', t0)
-            self._send_bytes(413, 'text/plain; charset=utf-8', b'Request body too large')
-            return
-        except (ValueError, OSError) as e:
-            self._log(log_method, host, full_url, 'error', 400, f'Bad request body: {_why(e)}', t0)
-            self._send_bytes(400, 'text/plain; charset=utf-8', b'Bad request body')
-            return
+            self.log(log_method, host, full_url, 'error', 413, 'Request body too large', t0)
+            return await self.text(ex, 413, 'Request body too large')
+        except (ValueError, OSError, StreamGone) as e:
+            self.log(log_method, host, full_url, 'error', 400, f'Bad request body: {_why(e)}', t0)
+            return await self.text(ex, 400, 'Bad request body')
         resendable = req_body is None or isinstance(req_body, bytes)
 
-        sec_dest = (self.headers.get('Sec-Fetch-Dest') or '').strip().lower()
-        is_bg_fetch = (sec_dest and sec_dest != 'document') or (
-            (self.headers.get('X-Requested-With') or '').strip().lower() == 'xmlhttprequest'
-        )
+        sec_dest = ex.header('sec-fetch-dest').strip().lower()
+        is_bg_fetch = (sec_dest and sec_dest != 'document') or ex.header('x-requested-with').strip().lower() == 'xmlhttprequest'
         filter_enabled = bool(getattr(s, 'PROXY_BLOCK_ADS', True) or getattr(s, 'PROXY_BLOCK_POPUPS', True))
-        may_filter = filter_enabled and not is_bg_fetch and self.command != 'HEAD'  # only a page itself is filtered, never what it fetches
-        hop = _hop_headers(self.headers)
-        fwd_headers = {}
-        for k, v in self.headers.items():
+        may_filter = filter_enabled and not is_bg_fetch and ex.method != 'HEAD'  # only a page itself is filtered, never what it fetches
+        hop = _hop_headers(ex.get_all('connection'))
+        fwd = {}
+        for k, v in ex.headers:
             kl = k.lower()
-            # content-length: http.client frames the body it is given; forwarding the client's own next to a chunked body is request smuggling
+            # content-length: the proxy frames the body it sends; the client's own next to a chunked body is request smuggling
             if kl in hop or kl in ('host', 'expect', 'content-length', 'via', 'max-forwards'):
                 continue
             if kl == 'accept-encoding' and may_filter:
                 continue
-            fwd_headers[k] = v
-        fwd_headers['Host'] = f'{host}:{port}' if port not in (80, 443) else host
-        fwd_headers['Via'] = _with_via(self.headers.get('Via'))
-        if (mf := (self.headers.get('Max-Forwards') or '').strip()).isdigit():
-            fwd_headers['Max-Forwards'] = str(int(mf) - 1) if self.command == 'OPTIONS' else mf
-        if stream_len is not None:
-            fwd_headers['Content-Length'] = str(stream_len)
+            fwd[k] = v
+        host_url = f'[{host}]' if ':' in host else host
+        fwd['Host'] = f'{host_url}:{port}' if port not in (80, 443) else host_url
+        fwd['Via'] = _with_via(', '.join(ex.get_all('via')))
+        if (mf := ex.header('max-forwards').strip()).isdigit():
+            fwd['Max-Forwards'] = str(int(mf) - 1) if ex.method == 'OPTIONS' else mf
+        if isinstance(req_body, bytes):
+            fwd['Content-Length'] = str(len(req_body))
+        elif req_body is None:
+            if ex.method in ('POST', 'PUT', 'PATCH'):
+                fwd['Content-Length'] = '0'
+        elif stream_len is not None:
+            fwd['Content-Length'] = str(stream_len)
+        else:
+            fwd['Transfer-Encoding'] = 'chunked'  # dropped again if the server speaks HTTP/2
         if may_filter:
-            fwd_headers['Accept-Encoding'] = 'gzip, deflate'
+            fwd['Accept-Encoding'] = 'gzip, deflate'
 
-        conn_header_val = 'keep-alive' if keep_alive else 'close'
-        conn = pool_key = None
-        raw_body = b''
+        info = SimpleCtx(ex=ex, s=s, host=host, full_url=full_url, path_query=path_query, log_method=log_method, t0=t0, may_filter=may_filter)
+        fetcher = getattr(self.server, 'http_fetcher', None)
+        if fetcher is not None:  # the tests' stand-in for the network
+            body = req_body if resendable else b''.join([p async for p in req_body])
+            try:
+                status, reason, resp_headers, raw_body = await _run(_WORK, fetcher, target_scheme, host, port, ex.method, path_query, body, fwd)
+            except Exception as e:
+                self.log(log_method, host, full_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
+                return await self.text(ex, 502, 'Bad Gateway')
+            return await self.page(info, status, reason, list(resp_headers), raw_body)
+
+        pool = upstream.pool_for(self.server, _resolve_for_backend, _DNS)
+        url = f'{target_scheme}://{host_url}:{port}{path_query}'
+        token = upstream.target_rules.set((allow_loopback, own_ips))
+        idempotent = ex.method in IDEMPOTENT and resendable
         try:
-            fetcher = getattr(self.server, 'http_fetcher', None)
-            if fetcher is not None:
-                body = req_body if resendable else b''.join(req_body)
-                status_code, reason, resp_headers, raw_body = fetcher(target_scheme, host, port, self.command, path_query, body, fwd_headers)
-                rh = {k.lower(): v for k, v in resp_headers}
-                ctype, cenc = rh.get('content-type', ''), rh.get('content-encoding', '')
-                cache_control, csp = rh.get('cache-control', ''), rh.get('content-security-policy', '')
-                out_headers = [
-                    (k, v) for k, v in resp_headers
-                    if k.lower() not in HOP_BY_HOP and k.lower() not in ('content-length', 'content-encoding', 'via')
-                ]
-                resp_via = rh.get('via')
-            else:
-                ctx = self.server.upstream_ssl_context or _default_ssl_context
-                key = (target_scheme, host, port, addrs[0][1][0])
-                idempotent = self.command in IDEMPOTENT and resendable
-                conn = _pool_take(key) if idempotent else None  # anything else goes on a fresh connection: it may not be sent twice (RFC 9110 9.2.2)
-                reused = conn is not None
-                if conn is None:
-                    conn = _open_upstream(target_scheme, host, port, addrs, ctx)
+            for attempt in (0, 1):
+                info.responded = False
                 try:
-                    resp = self._send_upstream(conn, path_query, req_body, fwd_headers)
-                except (OSError, HTTPException) as e:
-                    conn.close()
-                    if not reused or isinstance(e, TimeoutError):  # a timeout is an answer too slow, not a closed connection: retrying doubled the wait
-                        raise
-                    # the server closed the idle connection: one retry on a new one (an idempotent request that was not answered)
-                    conn = _open_upstream(target_scheme, host, port, addrs, ctx)
-                    resp = self._send_upstream(conn, path_query, req_body, fwd_headers)
-                status_code, reason = resp.status, resp.reason
-                hop_resp = _hop_headers(resp.msg)
-                ctype = resp.getheader('Content-Type', '') or ''
-                cenc = resp.getheader('Content-Encoding', '') or ''
-                cache_control = resp.getheader('Cache-Control', '') or ''
-                csp = ', '.join(resp.msg.get_all('Content-Security-Policy') or ())
-                resp_via = resp.getheader('Via')
-                clen_hdr = resp.getheader('Content-Length')
-                chunked_up = bool(getattr(resp, 'chunked', False))  # with both, Transfer-Encoding wins and Content-Length is not forwarded (RFC 9112 6.3)
-                low_ctype = ctype.lower()
-                no_body = self.command == 'HEAD' or status_code in (204, 304)
-                prefix = b''
-                buffer_html = (
-                    may_filter and not no_body and 'text/html' in low_ctype and '/cdn-cgi/' not in path_query
-                    and 'no-transform' not in cache_control.lower()  # RFC 9110 7.7: a proxy must not transform it
-                    and not (clen_hdr and clen_hdr.isdigit() and not chunked_up and int(clen_hdr) > MAX_HTML_BYTES)
-                )
-                if buffer_html:
-                    raw_body = resp.read(MAX_HTML_BYTES + 1)
-                    if len(raw_body) > MAX_HTML_BYTES:
-                        prefix, raw_body, buffer_html = raw_body, b'', False  # too big to filter: relayed as it comes, starting with what was read
-                if not buffer_html:
-                    # Relayed as it arrives: long polls and streams (Exchange EWS streaming notifications, Teams trouter, SSE) never end,
-                    # and a buffered copy made the client wait until its own timeout
-                    framed = (bool(clen_hdr and clen_hdr.isdigit()) and not chunked_up) or no_body  # the client can tell where the body ends
-                    chunk_out = not framed and keep_alive  # otherwise the end of the body is the end of the connection
-                    self.send_response_only(status_code, reason)  # not send_response: it adds a second Date and Server
-                    for k, v in resp.getheaders():
-                        kl = k.lower()
-                        if kl in hop_resp or kl == 'via' or (kl == 'content-length' and chunked_up):
-                            continue
-                        self.send_header(k, v)
-                    self.send_header('Via', _with_via(resp_via))
-                    if chunk_out:
-                        self.send_header('Transfer-Encoding', 'chunked')
-                    self.send_header('Connection', 'keep-alive' if (framed or chunk_out) and keep_alive else 'close')
-                    self.end_headers()
-                    if not framed and conn.sock is not None:
-                        conn.sock.settimeout(120)  # a long poll is silent for tens of seconds
-                    client_gone = False
-                    if not no_body:
-                        read_fn = getattr(resp, 'read1', None) or resp.read
-                        pieces = itertools.chain([prefix] if prefix else [], iter(lambda: read_fn(65536), b''))
-                        try:
-                            for chunk in pieces:
-                                try:
-                                    self.wfile.write(f'{len(chunk):x}\r\n'.encode() + chunk + b'\r\n' if chunk_out else chunk)
-                                    if chunk_out or 'text/event-stream' in low_ctype:
-                                        self.wfile.flush()
-                                except OSError:
-                                    client_gone = True  # the client gave up (a video seek, a closed tab): not an error of ours
-                                    break
-                            if chunk_out and not client_gone:
-                                self.wfile.write(b'0\r\n\r\n')
-                        except Exception as e:
-                            # the headers are gone: all we can do is cut the connection
-                            self._log(log_method, host, full_url, 'error', status_code, f'Upstream failed while streaming: {_why(e)}', t0)
-                            self.close_connection = True
-                            return
-                    if client_gone:
-                        self._log(log_method, host, full_url, 'allowed', status_code, 'client closed the connection', t0)
-                        self.close_connection = True
-                        return
-                    pool_key = key if resp.isclosed() and not resp.will_close else None  # body read to its end: the connection is reusable
-                    self._log(log_method, host, full_url, 'allowed', status_code, ctype.partition(';')[0] or 'stream', t0)
-                    self.close_connection = not keep_alive
+                    async with pool.stream(ex.method, url, headers=list(fwd.items()), content=req_body,
+                                           extensions={'timeout': UPSTREAM_TIMEOUTS}) as resp:
+                        info.responded = True
+                        await self.relay(info, resp)
                     return
-                pool_key = key if resp.isclosed() and not resp.will_close else None
-                out_headers = [
-                    (k, v) for k, v in resp.getheaders()
-                    if k.lower() not in hop_resp and k.lower() not in ('content-length', 'content-encoding', 'via')
-                ]
+                except _RETRYABLE:
+                    # a kept-alive connection the server had closed: once more on a new one, only for a request that may be sent twice
+                    if info.responded or attempt or not idempotent:
+                        raise
         except BodyTooLarge:
-            self._log(log_method, host, full_url, 'error', 413, 'Request body too large', t0)
-            self._send_bytes(413, 'text/plain; charset=utf-8', b'Request body too large')
-            return
+            self.log(log_method, host, full_url, 'error', 413, 'Request body too large', t0)
+            await self.text(ex, 413, 'Request body too large')
+        except StreamGone:
+            pass  # HTTP/2: the client reset the stream
         except Exception as e:
-            self._log(log_method, host, full_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
-            self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway')
-            return
+            if ex.started:
+                self.log(log_method, host, full_url, 'error', info.status, f'Upstream failed while streaming: {_why(e)}', t0)
+                await self.abort(ex)
+            else:
+                self.log(log_method, host, full_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
+                await self.text(ex, 502, 'Bad Gateway')
         finally:
-            if conn:
-                _pool_give(pool_key, conn) if pool_key and conn.sock else conn.close()
+            upstream.target_rules.reset(token)
 
+    @staticmethod
+    async def abort(ex):
+        """The answer has started and cannot be completed: the client must see a broken message, not a short one that looks whole."""
+        conn = getattr(ex, 'conn', None)
+        if isinstance(conn, H1Connection):
+            conn.broken = True  # HTTP/1.1: the connection is closed; HTTP/2: the stream is reset when the handler returns
+
+    async def relay(self, info, resp):
+        ex = info.ex
+        status = resp.status
+        info.status = status
+        reason = (resp.extensions.get('reason_phrase') or b'').decode('latin-1') or _phrase(status)
+        rh = [(k.decode('latin-1'), v.decode('latin-1')) for k, v in resp.headers]
+
+        def get(name):
+            return next((v for k, v in rh if k.lower() == name), '')
+        ctype, cache_control = get('content-type'), get('cache-control')
+        clen_hdr = get('content-length').strip()
+        chunked_up = 'chunked' in get('transfer-encoding').lower()
+        low_ctype = ctype.lower()
+        no_body = ex.method == 'HEAD' or status in (204, 304)
+        buffer_html = (
+            info.may_filter and not no_body and 'text/html' in low_ctype and '/cdn-cgi/' not in info.path_query
+            and 'no-transform' not in cache_control.lower()  # RFC 9110 7.7: a proxy must not transform it
+            and not (clen_hdr.isdigit() and not chunked_up and int(clen_hdr) > MAX_HTML_BYTES)
+        )
+        chunks = resp.aiter_stream()
+        prefix = b''
+        if buffer_html:
+            buf = bytearray()
+            async for chunk in chunks:
+                buf += chunk
+                if len(buf) > MAX_HTML_BYTES:
+                    break
+            if len(buf) > MAX_HTML_BYTES:
+                prefix, buffer_html = bytes(buf), False  # too big to filter: relayed as it comes, starting with what was read
+            else:
+                return await self.page(info, status, reason, rh, bytes(buf))
+
+        # Relayed as it arrives: long polls and streams (Exchange EWS streaming notifications, Teams trouter, SSE) never end
+        hop_resp = _hop_headers([v for k, v in rh if k.lower() == 'connection'])
+        headers = [(k, v) for k, v in rh if k.lower() not in hop_resp and k.lower() != 'via' and not (k.lower() == 'content-length' and chunked_up)]
+        headers.append(('Via', _with_via(get('via'))))
+        await ex.start(status, reason, headers, end=no_body and ex.version == 'HTTP/2')
+        if no_body:
+            if ex.version != 'HTTP/2':
+                await ex.finish()
+            self.log(info.log_method, info.host, info.full_url, 'allowed', status, ctype.partition(';')[0] or 'stream', info.t0)
+            return
+        try:
+            if prefix:
+                await ex.send(prefix)
+            async for chunk in chunks:
+                await ex.send(chunk)
+            await ex.finish()
+        except (OSError, StreamGone, h11.LocalProtocolError) as e:
+            if isinstance(e, h11.LocalProtocolError):
+                raise  # the server sent less than its Content-Length
+            # the client gave up (a video seek, a closed tab): not an error of ours
+            self.log(info.log_method, info.host, info.full_url, 'allowed', status, 'client closed the connection', info.t0)
+            await self.abort(ex)
+            return
+        self.log(info.log_method, info.host, info.full_url, 'allowed', status, ctype.partition(';')[0] or 'stream', info.t0)
+
+    async def page(self, info, status, reason, rh, raw_body):
+        """A whole answer in hand (an HTML page to filter, or the tests' stand-in): filtered when it is a page, then sent with its length."""
+        ex = info.ex
+
+        def get(name):
+            return next((v for k, v in rh if k.lower() == name), '')
+        ctype, cenc, cache_control = get('content-type'), get('content-encoding'), get('cache-control')
+        csp = ', '.join(v for k, v in rh if k.lower() == 'content-security-policy')
+        hop_resp = _hop_headers([v for k, v in rh if k.lower() == 'connection'])
+        out_headers = [(k, v) for k, v in rh if k.lower() not in hop_resp and k.lower() not in ('content-length', 'content-encoding', 'via')]
         html_filtered = False
         if (
-            may_filter
-            and '/cdn-cgi/' not in path_query
-            and 'text/html' in ctype.lower()
-            and 'no-transform' not in cache_control.lower()
-            and len(raw_body) <= MAX_HTML_BYTES
+            info.may_filter and '/cdn-cgi/' not in info.path_query and 'text/html' in ctype.lower()
+            and 'no-transform' not in cache_control.lower() and len(raw_body) <= MAX_HTML_BYTES
         ):
             try:
-                plain = _decompress(raw_body, cenc)
-                filtered_body = pfilter.filter_html(plain, content_type=ctype, host=host, s=s, csp=csp)
-                html_filtered = filtered_body != plain
-                raw_body = filtered_body
+                raw_body, html_filtered = await _run(_WORK, _filter_page, raw_body, cenc, ctype, info.host, info.s, csp)
                 cenc = ''
                 out_headers = [(k, v) for k, v in out_headers if k.lower() != 'etag']
             except Exception:
                 pass
-
-        self._log(
-            log_method,
-            host,
-            full_url,
-            'filtered' if html_filtered else 'allowed',
-            status_code,
-            'HTML filtered' if html_filtered else (ctype.partition(';')[0] or 'HTTP'),
-            t0,
-        )
-
-        self.send_response_only(status_code, reason)
-        for k, v in out_headers:
-            self.send_header(k, v)
+        self.log(info.log_method, info.host, info.full_url, 'filtered' if html_filtered else 'allowed', status,
+                 'HTML filtered' if html_filtered else (ctype.partition(';')[0] or 'HTTP'), info.t0)
         if cenc:
-            self.send_header('Content-Encoding', cenc)
-        self.send_header('Content-Length', str(len(raw_body)))
-        self.send_header('Via', _with_via(resp_via))
-        self.send_header('Connection', conn_header_val)
-        self.end_headers()
-        if self.command != 'HEAD' and raw_body:
-            self.wfile.write(raw_body)
-        self.close_connection = not keep_alive
+            out_headers.append(('Content-Encoding', cenc))
+        out_headers.append(('Via', _with_via(get('via'))))
+        await ex.respond(status, reason, out_headers, raw_body)
 
-    def _send_upstream(self, conn, path_query, body, headers):
-        conn.request(self.command, path_query, body=body, headers=headers)
-        if conn.sock is not None:
-            _set_nodelay(conn.sock)
-        return conn.getresponse()
-
-    def _own_ips(self, s):
-        """This server's addresses: the one the client reached and the configured ones (none in the tests, that allow loopback)."""
-        if self.server.allow_loopback:
-            return frozenset()
-        out = set()
-        try:
-            local = self.connection.getsockname()
-            if isinstance(local, tuple):
-                out.add(local[0])
-        except OSError:
-            pass
-        for v in (getattr(s, 'DHCP_SERVER', ''), getattr(s, 'PROXY_ADDRESS', '')):
-            if v and str(v) not in ('0.0.0.0', '::'):
-                out.add(str(v))
-        return frozenset(out)
-
-    def _plain(self):
-        self._proxy_http(keep_alive=not self.close_connection)  # parse_request decided it from the version and the Connection header
-
-    def do_GET(self):
-        self._plain()
-
-    def do_POST(self):
-        self._plain()
-
-    def do_PUT(self):
-        self._plain()
-
-    def do_DELETE(self):
-        self._plain()
-
-    def do_HEAD(self):
-        self._plain()
-
-    def do_OPTIONS(self):
-        self._plain()
-
-    def do_PATCH(self):
-        self._plain()
-
-    def do_CONNECT(self):
+    async def connect(self, ex):
         t0 = time.monotonic()
-        if not self._client_allowed():
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden')
-            return
-        s = self._cfg()
-        host_port = self.path.strip()
+        if not ratelimit.allowed(self.client_ip):
+            return await self.text(ex, 403, 'Forbidden')
+        s = await _run(_WORK, self.server.settings_getter)
+        host_port = ex.target.strip()
         if host_port.startswith('[') and ']' in host_port:
             host = host_port[1:host_port.index(']')].lower()
             rest = host_port[host_port.index(']') + 1:]
@@ -1100,177 +1034,189 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 host, port = h.lower(), int(p)
             else:
                 host, port = host_port.lower(), 443
-
         target_url = f'https://{host}:{port}/' if port != 443 else f'https://{host}/'
         if not _connect_port_allowed(port):
             # RFC 9110 9.3.6: a tunnel to any port would let clients reach mail relays and internal services through the proxy
-            self._log('CONNECT', host, target_url, 'error', 403, f'Port {port} is not allowed for CONNECT (PROXY_CONNECT_PORTS)', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden port')
-            return
-        client_ip = self.client_address[0]
+            self.log('CONNECT', host, target_url, 'error', 403, f'Port {port} is not allowed for CONNECT (PROXY_CONNECT_PORTS)', t0)
+            return await self.text(ex, 403, 'Forbidden port')
         allow_domains, _, _, _ = pfilter.parse_custom_rules(getattr(s, 'PROXY_CUSTOM_RULES', ''))
-        mitm_bypassed_for_client = is_mitm_failed(client_ip, host)
-        use_mitm = (
-            bool(getattr(s, 'PROXY_HTTPS_MITM', False))
-            and not pfilter.is_domain_allowed(host, allow_domains)
-            and not mitm_bypassed_for_client
-        )
+        bypassed = is_mitm_failed(self.client_ip, host)
+        if bool(getattr(s, 'PROXY_HTTPS_MITM', False)) and not pfilter.is_domain_allowed(host, allow_domains) and not bypassed:
+            # accepted locally without contacting the server yet: blocked trackers inside the tunnel get a stealth surrogate from blocked()
+            # instead of a CONNECT 403 network error that triggers "Ad Blocker Detected" walls
+            return await self.mitm(ex, host, port, target_url, t0)
 
-        if use_mitm:
-            # With MITM enabled, accept CONNECT locally (without contacting or resolving the remote host yet)
-            # so blocked tracker scripts/fetches inside the tunnel receive a stealth 200 OK surrogate from _send_blocked()
-            # instead of a hard CONNECT 403 network error that triggers "Ad Blocker Detected" walls.
-            self.send_response(200, 'Connection Established')
-            self.end_headers()
-            self.wfile.flush()
-            try:
-                ctx = ca.leaf_context(host)
-                with ctx.wrap_socket(self.connection, server_side=True) as tls_client:
-                    mitm_handler = _MitmHandler(tls_client, self.client_address, self.server, host=host, port=port)
-                    mitm_handler.handle_requests()
-                    if mitm_handler.tls_handshake_failed:
-                        record_mitm_failure(client_ip, host)
-                        self._log('MITM', host, target_url, 'allowed', 200, 'TLS pin/CA fallback -> CONNECT', t0)
-                    elif mitm_handler.handled_requests == 0 and note_empty_mitm_session(client_ip, host):
-                        self._log('MITM', host, target_url, 'allowed', 200, 'TLS sessions without requests (pinning?) -> CONNECT', t0)
-                    try:
-                        tls_client.unwrap()
-                    except Exception:
-                        pass
-            except (ssl.SSLError, OSError) as e:
-                record_mitm_failure(client_ip, host)
-                self._log('MITM', host, target_url, 'allowed', 200, f'TLS pin/CA fallback -> CONNECT ({_why(e)})', t0)
-            except Exception as e:
-                _warn(f'MITM {host}: {_why(e)}')
-                self._log('MITM', host, target_url, 'error', 500, f'Internal error: {_why(e)}', t0)
-            self.close_connection = True
-            return
-
-        if hit := pfilter.check_request(host, target_url, s=s):
-            self._log('CONNECT', host, target_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Blocked by Zones.dns', {'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
-            return
-
+        if hit := await _run(_WORK, pfilter.check_request, host, target_url, s=s):
+            self.log('CONNECT', host, target_url, 'blocked', 403, f'{hit[0]}: {hit[1]}', t0)
+            return await self.text(ex, 403, 'Blocked by Zones.dns', extra={'X-Blocked-By': f'Zones.dns ({hit[0]}: {hit[1]})'})
         try:
-            addrs = _resolve_target(host, port, allow_loopback=self.server.allow_loopback, own_ips=self._own_ips(s))
+            addrs = await _run(_DNS, _resolve_target, host, port, allow_loopback=bool(getattr(self.server, 'allow_loopback', False)), own_ips=self.own_ips(s))
         except PermissionError:
-            self._log('CONNECT', host, target_url, 'error', 403, 'Forbidden target address', t0)
-            self._send_bytes(403, 'text/plain; charset=utf-8', b'Forbidden target address')
-            return
+            self.log('CONNECT', host, target_url, 'error', 403, 'Forbidden target address', t0)
+            return await self.text(ex, 403, 'Forbidden target address')
         except OSError:
-            self._log('CONNECT', host, target_url, 'error', 502, 'DNS lookup failed', t0)
-            self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway: DNS lookup failed')
-            return
-
+            self.log('CONNECT', host, target_url, 'error', 502, 'DNS lookup failed', t0)
+            return await self.text(ex, 502, 'Bad Gateway: DNS lookup failed')
         try:
-            tunnel_factory = getattr(self.server, 'tunnel_factory', None)
-            upstream = tunnel_factory(host, port) if tunnel_factory is not None else _connect_any(addrs, 15)
-        except OSError as e:
-            self._log('CONNECT', host, target_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
-            self._send_bytes(502, 'text/plain; charset=utf-8', b'Bad Gateway')
-            return
-
-        self._log(
-            'CONNECT',
-            host,
-            target_url,
-            'allowed',
-            200,
-            'CONNECT tunnel (MITM auto-bypass)' if mitm_bypassed_for_client else 'CONNECT tunnel',
-            t0,
-        )
+            up = await self.open_tunnel(host, port, addrs)
+        except (OSError, TimeoutError) as e:
+            self.log('CONNECT', host, target_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
+            return await self.text(ex, 502, 'Bad Gateway')
+        self.log('CONNECT', host, target_url, 'allowed', 200, 'CONNECT tunnel (MITM auto-bypass)' if bypassed else 'CONNECT tunnel', t0)
         try:
-            self.send_response(200, 'Connection Established')
-            self.end_headers()
-            self.wfile.flush()
-            self._tunnel(self.connection, upstream)
+            client = await ex.establish()
+            await _pipe(client, up)
         finally:
-            upstream.close()
-            self.close_connection = True
+            await up.aclose()
 
-    @staticmethod
-    def _keepalive(sock):
-        """TCP keep-alive: a tunnel may stay silent for a long time, a peer that vanished is still noticed."""
+    async def open_tunnel(self, host, port, addrs):
+        factory = getattr(self.server, 'tunnel_factory', None)
+        if factory is not None:  # the tests' stand-in: a connected socket
+            r, w = await asyncio.open_connection(sock=factory(host, port))
+            return RawStream(r, w)
+        err = None
+        for _, (ip, p) in addrs:
+            try:
+                r, w = await asyncio.wait_for(asyncio.open_connection(ip, p), 15 if len(addrs) == 1 else 5)
+                keepalive(w)
+                return RawStream(r, w)
+            except (OSError, TimeoutError) as e:
+                err = e
+        raise err or OSError('no address to connect to')
+
+    async def mitm(self, ex, host, port, target_url, t0):
+        raw = await ex.establish()
         try:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-            if hasattr(socket, 'TCP_KEEPIDLE'):
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPIDLE, 60)
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPINTVL, 30)
-                sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_KEEPCNT, 4)
-        except OSError:
-            pass
+            ctx = await _run(_WORK, ca.leaf_context, host)
+        except Exception as e:
+            _warn(f'MITM {host}: {_why(e)}')
+            self.log('MITM', host, target_url, 'error', 500, f'Internal error: {_why(e)}', t0)
+            return
+        tls = TLSStream(raw, ctx)
+        try:
+            await tls.handshake()
+        except (ssl.SSLError, OSError, TimeoutError) as e:
+            record_mitm_failure(self.client_ip, host)
+            self.log('MITM', host, target_url, 'allowed', 200, f'TLS pin/CA fallback -> CONNECT ({_why(e)})', t0)
+            return
+        try:
+            if tls.alpn() == 'h2':
+                conn = H2Connection(tls, lambda x: self.handle(x, (host, port)))
+                await conn.run()
+                websocket = False
+            else:
+                conn = H1Connection(self, tls, mitm=(host, port))
+                await conn.run()
+                websocket = conn.websocket
+            if websocket:
+                record_mitm_failure(self.client_ip, host)
+                self.log('MITM', host, target_url, 'allowed', 200, 'TLS pin/CA fallback -> CONNECT', t0)
+            elif conn.handled == 0 and note_empty_mitm_session(self.client_ip, host):
+                self.log('MITM', host, target_url, 'allowed', 200, 'TLS sessions without requests (pinning?) -> CONNECT', t0)
+        except Exception as e:
+            _warn(f'MITM {host}: {_why(e)}')
+            self.log('MITM', host, target_url, 'error', 500, f'Internal error: {_why(e)}', t0)
+        finally:
+            await tls.aclose()
 
-    @staticmethod
-    def _tunnel(client_sock, upstream_sock):
-        for sock in (client_sock, upstream_sock):
-            _set_nodelay(sock)
-            ProxyHandler._keepalive(sock)
-            sock.settimeout(60)  # for a send that does not progress; silence is measured by select
-        sockets = [client_sock, upstream_sock]
+
+class SimpleCtx:
+    """What relay() and page() need to know about the request they answer."""
+
+    def __init__(self, **kw):
+        self.status = 0
+        self.responded = False
+        self.__dict__.update(kw)
+
+
+async def _pipe(a, b):
+    """Copy both ways until one side closes, or both have been silent for TUNNEL_IDLE seconds."""
+    last = [time.monotonic()]
+
+    async def copy(src, dst):
         while True:
             try:
-                r, _, e = select.select(sockets, [], sockets, TUNNEL_IDLE)
-            except OSError:
-                break
-            if e or not r:
-                break
-            for sock in r:
-                other = upstream_sock if sock is client_sock else client_sock
-                try:
-                    data = sock.recv(65536)
-                except OSError:
-                    return
-                if not data:
-                    return
-                try:
-                    other.sendall(data)
-                except OSError:
-                    return
+                data = await src.read(65536, TUNNEL_IDLE)
+            except TimeoutError:
+                if time.monotonic() - last[0] < TUNNEL_IDLE:
+                    continue  # the other direction is busy (a download): not idle
+                return
+            if not data:
+                return
+            last[0] = time.monotonic()
+            await dst.write(data)
+
+    tasks = [asyncio.create_task(copy(a, b)), asyncio.create_task(copy(b, a))]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
 
 
-class _MitmHandler(ProxyHandler):
-    """Handles decrypted HTTP/1.1 requests (with Keep-Alive) inside an HTTPS MITM tunnel."""
+async def handle_client(server, reader, writer, client_address):
+    keepalive(writer)
+    stream = RawStream(reader, writer)
+    client = Client(server, client_address, writer.get_extra_info('sockname'))
+    try:
+        await H1Connection(client, stream).run()
+    finally:
+        await stream.aclose()
 
-    def __init__(self, connection, client_address, server, host, port):
-        self._mitm_host = host
-        self._mitm_port = port
-        self.handled_requests = 0
-        self.tls_handshake_failed = False
-        self.request = connection
-        self.connection = connection
-        self.client_address = client_address
-        self.server = server
-        self.setup()
 
-    def handle_requests(self):
-        self.close_connection = False
+def serve_connection(sock, client_address, server):
+    """Serve one already-connected socket until it closes, on an event loop of its own (the tests drive the proxy this way)."""
+    async def main():
+        reader, writer = await asyncio.open_connection(sock=sock)
         try:
-            while not self.close_connection and self.handled_requests < 64:
-                if self.handled_requests > 0:
-                    self.connection.settimeout(15)
-                self.raw_requestline = self.rfile.readline(65537)
-                if not self.raw_requestline:
-                    return
-                if len(self.raw_requestline) > 65536 or not self.parse_request():
-                    return
-                if (self.headers.get('Upgrade') or '').lower() == 'websocket':
-                    # WebSockets inside MITM should fall back to direct CONNECT tunnel on next attempt
-                    self.tls_handshake_failed = True
-                    return
-                self.handled_requests += 1
-                conn_hdr = (self.headers.get('Connection') or '').lower()
-                keep_alive = conn_hdr != 'close' and self.request_version >= 'HTTP/1.1'
-                self._proxy_http(
-                    scheme='https',
-                    default_host=self._mitm_host,
-                    default_port=self._mitm_port,
-                    keep_alive=keep_alive,
-                )
-                self.wfile.flush()
-        except (OSError, ssl.SSLError):
-            pass  # the client went away or timed out: normal at the end of a keep-alive connection
-        except Exception as e:
-            _warn(f'MITM {self._mitm_host}: {_why(e)}')
-            self._log('MITM', self._mitm_host, f'https://{self._mitm_host}/', 'error', 500, f'Internal error: {_why(e)}')
+            await handle_client(server, reader, writer, client_address)
         finally:
-            self.finish()
+            pool = getattr(server, '_upstream_pool', None)
+            if pool is not None and getattr(server, '_upstream_loop', None) is asyncio.get_running_loop():
+                await pool.aclose()
+                server._upstream_pool = None
+    asyncio.run(main())
+
+
+class ProxyServer:
+    """The listening proxy: `await start()`, then it serves on the running loop until `close()`."""
+
+    def __init__(self, server_address, settings_getter=None, allow_loopback=False, upstream_ssl_context=None, log=None):
+        self.server_address = server_address
+        self.settings_getter = settings_getter or cached_proxy_settings
+        self.allow_loopback = allow_loopback
+        self.upstream_ssl_context = upstream_ssl_context
+        self.log = log
+        self._per_client = {}
+        self._total = 0
+        self._srv = None
+
+    async def start(self):
+        host, port = self.server_address
+        self._srv = await asyncio.start_server(self._accept, host, port, backlog=1024, reuse_address=True, limit=65536)
+        return self
+
+    async def _accept(self, reader, writer):
+        peer = writer.get_extra_info('peername') or ('', 0)
+        ip = peer[0]
+        if self._per_client.get(ip, 0) >= PER_CLIENT_MAX or self._total >= MAX_CLIENT_CONNECTIONS:
+            writer.close()
+            return
+        self._per_client[ip] = self._per_client.get(ip, 0) + 1
+        self._total += 1
+        try:
+            await handle_client(self, reader, writer, peer)
+        except Exception as e:
+            _warn(f'connection from {ip}: {_why(e)}')
+        finally:
+            self._total -= 1
+            n = self._per_client.get(ip, 1) - 1
+            if n > 0:
+                self._per_client[ip] = n
+            else:
+                self._per_client.pop(ip, None)
+
+    def close(self):
+        if self._srv is not None:
+            self._srv.close()
