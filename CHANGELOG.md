@@ -57,6 +57,9 @@
   - HTTP/2 both ways. Inside an HTTPS inspection session the browser may choose h2 (ALPN): many requests share one TLS connection, with flow control both ways. Towards the servers the proxy speaks HTTP/2 or HTTP/1.1 as each server chooses, with one pool of kept-alive connections (httpcore).
   - A server that answers without a length is relayed chunked to HTTP/1.1 clients, which keep their connection, instead of closing it.
   - An unexpected error while serving a request answers 500 (and is logged) instead of leaving the client without an answer.
+  - Large uploads (over 1 MB) are sent with `Expect: 100-continue` and the server's answer is read while the body is still going out: a server that refuses the upload (413, 401) has its answer reach the client instead of a 502. An answer sent before the end of the client's body is followed by a lingering close (RFC 9112 9.6), so the client reads it instead of a connection reset.
+  - WebSockets inside HTTPS inspection pass through (handshake to the server, then the frames unchanged both ways) instead of turning inspection off for that host; HTTP/2 clients may open them on a stream (RFC 8441, extended CONNECT, announced with `SETTINGS_ENABLE_CONNECT_PROTOCOL`). The handshake goes to the server over HTTP/1.1.
+  - The proxy reads the database only through its 2 database threads (plus its log writer): 3 connections however busy it is. The `max_connections` note in `.env.example` says so.
 - **Added** (proxy)
   - The HTML filter reads the policies of `<meta http-equiv="Content-Security-Policy">` too, and decompresses `br` pages (brotli 1.2 or later, with the same 8 MB limit).
 - **Fixed** (proxy)

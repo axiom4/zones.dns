@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 import html
 import re
+import threading
 import time
 from urllib.parse import urlparse
 
@@ -15,9 +16,10 @@ _db_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='proxy-db')
 
 
 def run_on_db_pool(fn, *args, **kwargs):
-    """Execute a DB-touching function on the dedicated 2-worker pool so persistent DB connections are reused and tunnel threads never touch PostgreSQL."""
-    if connection.in_atomic_block:
-        return fn(*args, **kwargs)
+    """Execute a DB-touching function on the dedicated 2-worker pool so persistent DB connections are reused and tunnel threads never touch PostgreSQL.
+    The proxy's other threads then hold no database connection: the proxy uses 2 (plus 1 for its log writer), however busy it is."""
+    if connection.in_atomic_block or threading.current_thread().name.startswith('proxy-db'):
+        return fn(*args, **kwargs)  # already in a transaction (tests) or on the pool itself: waiting on the pool would deadlock it
 
     def _task():
         resolver._db_check()

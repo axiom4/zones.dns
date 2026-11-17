@@ -47,6 +47,7 @@ class H2Exchange:
             fields.insert(0, ('host', authority))
         self.method = pseudo.get(':method', 'GET')
         self.target = pseudo.get(':path', '/')
+        self.protocol = pseudo.get(':protocol', '')  # 'websocket' on an extended CONNECT (RFC 8441)
         self.headers = fields
         self._body = asyncio.Queue()
         self._ended = False
@@ -200,7 +201,10 @@ class H2Connection:
 
     async def run(self):
         self.h2.initiate_connection()
-        self.h2.update_settings({h2.settings.SettingCodes.MAX_CONCURRENT_STREAMS: MAX_STREAMS})
+        self.h2.update_settings({
+            h2.settings.SettingCodes.MAX_CONCURRENT_STREAMS: MAX_STREAMS,
+            h2.settings.SettingCodes.ENABLE_CONNECT_PROTOCOL: 1,  # RFC 8441: WebSockets on h2 streams, inside the inspected session
+        })
         try:
             await self._flush()
             while True:

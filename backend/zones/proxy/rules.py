@@ -163,18 +163,27 @@ def reset():
         _cache.update(ver=None, checked=0.0)
 
 
+def _read(prev_ver):
+    """(version, stored lists or None when the version did not move)."""
+    ver = DataVersion.version()
+    if ver == prev_ver:
+        return ver, None
+    return ver, list(Setting.objects.filter(key__startswith=RULES).values_list('key', 'value'))
+
+
 def loaded():
     """The stored rules, parsed; looked at again when DataVersion moves (checked at most every 2 s)."""
     now = time.monotonic()
     if _cache['ver'] is not None and now - _cache['checked'] < 2.0:
         return _cache['data']
+    from .filter import run_on_db_pool  # filter imports this module
     with _lock:
-        ver = DataVersion.version()
+        ver, rows = run_on_db_pool(_read, _cache['ver'])
         _cache['checked'] = now
-        if ver == _cache['ver']:
+        if rows is None:
             return _cache['data']
         data = Loaded()
-        for key, text in Setting.objects.filter(key__startswith=RULES).values_list('key', 'value'):
+        for key, text in rows:
             name = key[len(RULES):]
             for line in text.splitlines():
                 if line.startswith('@@||'):

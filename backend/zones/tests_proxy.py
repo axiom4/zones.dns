@@ -1073,3 +1073,202 @@ class Http2Tests(TestCase):
         t.join(timeout=5)
         self.assertEqual(seen['body'], upload)
         self.assertEqual(got, answer)
+
+
+class UploadAndWebSocketTests(TestCase):
+    """A refused large upload reaches the client as the server's answer; WebSockets through the inspected session, HTTP/1.1 and HTTP/2."""
+
+    def setUp(self):
+        if ca._cached_ca is None:
+            ca._cached_ca = ca._generate_ca()
+            ca._leaf_contexts.clear()
+        _mitm_failed.clear()
+
+    def _ns(self, mitm=False, ctx=None):
+        return SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=True, PROXY_BLOCK_POPUPS=True, PROXY_HTTPS_MITM=mitm, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=ctx, tunnel_factory=None,
+        )
+
+    def _server(self, handle, tls=False):
+        lst = socket.socket()
+        lst.bind(('127.0.0.1', 0))
+        lst.listen()
+        self.addCleanup(lst.close)
+
+        def run():
+            while True:
+                try:
+                    raw, _ = lst.accept()
+                except OSError:
+                    return
+                sock = ca.leaf_context('localhost').wrap_socket(raw, server_side=True) if tls else raw
+                threading.Thread(target=handle, args=(sock,), daemon=True).start()
+        threading.Thread(target=run, daemon=True).start()
+        return lst.getsockname()[1]
+
+    def test_a_refused_upload_gets_the_servers_answer(self):
+        got = {}
+
+        def handle(sock):
+            head = b''
+            while b'\r\n\r\n' not in head:
+                head += sock.recv(4096)
+            got['head'] = head
+            sock.sendall(b'HTTP/1.1 413 Payload Too Large\r\nContent-Type: text/plain\r\nContent-Length: 8\r\nConnection: close\r\n\r\ntoo big!')
+            sock.close()  # without reading the body
+
+        port = self._server(handle)
+        body = b'x' * 5_000_000
+        c_sock, s_sock = socket.socketpair()
+        t = threading.Thread(target=lambda: (serve_connection(s_sock, ('127.0.0.1', 50004), self._ns()), s_sock.close()), daemon=True)
+        t.start()
+
+        def send():  # like a real client: it goes on sending while the answer arrives
+            try:
+                c_sock.sendall(f'POST http://127.0.0.1:{port}/up HTTP/1.1\r\nHost: x\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n'.encode() + body)
+            except OSError:
+                pass
+        threading.Thread(target=send, daemon=True).start()
+        c_sock.settimeout(10)
+        resp = b''
+        while b'too big!' not in resp:
+            data = c_sock.recv(65536)
+            if not data:
+                break
+            resp += data
+        c_sock.close()
+        t.join(timeout=10)
+        self.assertIn(b'413 Payload Too Large', resp.split(b'\r\n', 1)[0])
+        self.assertTrue(resp.endswith(b'too big!'))
+        self.assertIn(b'expect: 100-continue', got['head'].lower())
+
+    def test_a_large_upload_goes_whole_after_100_continue(self):
+        import hashlib
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_POST(self):  # BaseHTTPRequestHandler answers 100 Continue by itself
+                digest = hashlib.sha256(self.rfile.read(int(self.headers['Content-Length']))).hexdigest().encode()
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(digest)))
+                self.end_headers()
+                self.wfile.write(digest)
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        body = os_urandom(3_000_000)
+        resp = _run_proxy_session(f'POST http://127.0.0.1:{srv.server_port}/up HTTP/1.1\r\nHost: x\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n'.encode() + body, self._ns())
+        self.assertTrue(resp.endswith(hashlib.sha256(body).hexdigest().encode()))
+
+    def _ws_server(self):
+        import base64
+        import hashlib
+
+        def handle(sock):
+            head = b''
+            while b'\r\n\r\n' not in head:
+                head += sock.recv(4096)
+            lines = head.decode().split('\r\n')
+            hdrs = {k.lower(): v for k, _, v in (ln.partition(': ') for ln in lines[1:] if ln)}
+            assert hdrs['upgrade'].lower() == 'websocket', hdrs
+            accept = base64.b64encode(hashlib.sha1((hdrs['sec-websocket-key'] + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11').encode()).digest()).decode()
+            sock.sendall(f'HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n'.encode())
+            while data := sock.recv(4096):
+                sock.sendall(b'echo:' + data)
+            sock.close()
+        return self._server(handle, tls=True)
+
+    def _mitm(self, port, alpn):
+        ctx = ssl.create_default_context(cadata=ca.ensure_ca()[0])
+        ctx.set_alpn_protocols(alpn)
+        c_sock, s_sock = socket.socketpair()
+        ns = self._ns(mitm=True, ctx=ssl.create_default_context(cadata=ca.ensure_ca()[0]))
+        t = threading.Thread(target=lambda: (serve_connection(s_sock, ('127.0.0.1', 50003), ns), s_sock.close()), daemon=True)
+        t.start()
+        c_sock.sendall(f'CONNECT localhost:{port} HTTP/1.1\r\nHost: localhost:{port}\r\n\r\n'.encode())
+        banner = b''
+        while b'\r\n\r\n' not in banner:
+            banner += c_sock.recv(1024)
+        self.assertIn(b'200 Connection Established', banner)
+        tls = ctx.wrap_socket(c_sock, server_hostname='localhost')
+        tls.settimeout(10)
+        return tls, t
+
+    @override_settings(PROXY_CONNECT_PORTS='*')
+    def test_a_websocket_inside_mitm_over_http1(self):
+        port = self._ws_server()
+        tls, t = self._mitm(port, ['http/1.1'])
+        tls.sendall(f'GET /ws HTTP/1.1\r\nHost: localhost:{port}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n'
+                    'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n'.encode())
+        head = b''
+        while b'\r\n\r\n' not in head:
+            head += tls.recv(4096)
+        self.assertIn(b'101 Switching Protocols', head)
+        self.assertIn(b'Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=', head)  # the client's own key reached the server
+        tls.sendall(b'ping')
+        self.assertEqual(tls.recv(4096), b'echo:ping')
+        tls.close()
+        t.join(timeout=5)
+        self.assertFalse(is_mitm_failed('127.0.0.1', 'localhost'))  # no fallback to a plain tunnel any more
+
+    @override_settings(PROXY_CONNECT_PORTS='*')
+    def test_a_websocket_over_http2_rfc8441(self):
+        import h2.config
+        import h2.connection
+        import h2.events
+        import h2.settings
+        port = self._ws_server()
+        tls, t = self._mitm(port, ['h2'])
+        self.assertEqual(tls.selected_alpn_protocol(), 'h2')
+        conn = h2.connection.H2Connection(h2.config.H2Configuration(client_side=True, header_encoding='utf-8'))
+        conn.initiate_connection()
+        tls.sendall(conn.data_to_send())
+        enabled = False
+        while not enabled:
+            for ev in conn.receive_data(tls.recv(65536)):
+                if isinstance(ev, h2.events.RemoteSettingsChanged) and h2.settings.SettingCodes.ENABLE_CONNECT_PROTOCOL in ev.changed_settings:
+                    enabled = ev.changed_settings[h2.settings.SettingCodes.ENABLE_CONNECT_PROTOCOL].new_value == 1
+            tls.sendall(conn.data_to_send())
+        conn.send_headers(1, [(':method', 'CONNECT'), (':protocol', 'websocket'), (':scheme', 'https'), (':path', '/ws'),
+                              (':authority', f'localhost:{port}'), ('sec-websocket-version', '13')])
+        tls.sendall(conn.data_to_send())
+        status, echoed = None, b''
+        while not echoed:
+            for ev in conn.receive_data(tls.recv(65536)):
+                if isinstance(ev, h2.events.ResponseReceived):
+                    status = dict(ev.headers)[':status']
+                    conn.send_data(1, b'ping')
+                elif isinstance(ev, h2.events.DataReceived):
+                    echoed += ev.data
+                    conn.acknowledge_received_data(ev.flow_controlled_length, 1)
+            tls.sendall(conn.data_to_send())
+        self.assertEqual(status, '200')
+        self.assertEqual(echoed, b'echo:ping')
+        tls.close()
+        t.join(timeout=5)
+
+    def test_worker_threads_hold_no_database_connection(self):
+        from django.db import connection
+        from .proxy import server as ps
+        BlockedDomain.objects.create(name='ads.example', source='manual', enabled=True)
+
+        def work():
+            pfilter.check_request('www.ads.example', 'https://www.ads.example/x.js')
+            pfilter.filter_html(b'<html><head></head></html>', 'text/html', host='news.example')
+            return connection.connection is None  # this thread never opened its own
+
+        self.assertTrue(ps._WORK.submit(work).result(timeout=10))
+
+
+def os_urandom(n):
+    import os
+    return os.urandom(n)

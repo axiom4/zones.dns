@@ -45,7 +45,7 @@ class Command(BaseCommand):
         if not 1 <= bind_port <= 65535:
             raise CommandError(f'Invalid proxy port {bind_port} (must be 1-65535).')
         if s.PROXY_HTTPS_MITM:
-            ca.ensure_ca()
+            pfilter.run_on_db_pool(ca.ensure_ca)
         writer = ProxyLogWriter()
         writer.start()
         try:
@@ -117,7 +117,7 @@ class Command(BaseCommand):
         self.seen = ver
         new = cached_proxy_settings(settings, force=True)
         if new.PROXY_HTTPS_MITM:
-            ca.ensure_ca()
+            pfilter.run_on_db_pool(ca.ensure_ca)
         snap = {k: getattr(new, k) for k in BIND_KEYS}
         if snap == self.snap:
             return None

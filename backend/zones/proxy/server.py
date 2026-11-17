@@ -29,9 +29,10 @@ import httpcore
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit, resolver
 from ..models import DataVersion, ProxyLog
-from . import ca, filter as pfilter, pac, upstream
+from . import ca, filter as pfilter, pac, upload, upstream
 from .h2conn import H2Connection, StreamGone
 from .streams import RawStream, TLSStream, keepalive
+from .upload import Prefixed
 
 _cfg_lock = threading.Lock()
 _cfg_data = None
@@ -575,7 +576,6 @@ class H1Connection:
         self.mitm = mitm
         self.h11 = h11.Connection(h11.SERVER, max_incomplete_event_size=65536)
         self.handled = 0
-        self.websocket = False
         self.taken = False
         self.broken = False
 
@@ -608,9 +608,6 @@ class H1Connection:
                 if not isinstance(ev, h11.Request):
                     return  # the client closed the connection
                 ex = H1Exchange(self, ev)
-                if self.mitm and ex.header('upgrade').lower() == 'websocket':
-                    self.websocket = True  # WebSockets inside MITM fall back to a direct CONNECT tunnel on the next attempt
-                    return
                 self.handled += 1
                 await self.client.handle(ex, self.mitm)
                 if self.taken or self.broken:
@@ -618,9 +615,33 @@ class H1Connection:
                 if self.h11.our_state is h11.DONE and self.h11.their_state is h11.DONE:
                     self.h11.start_next_cycle()
                 else:
+                    if self.h11.our_state in (h11.DONE, h11.MUST_CLOSE) and self.h11.their_state is h11.SEND_BODY:
+                        await _linger(self.stream)  # answered before the end of the body (413, blocked): let the client read it
                     return  # a body not read to its end, or "Connection: close": the connection ends here
         except (OSError, TimeoutError, h11.LocalProtocolError, StreamGone, ssl.SSLError):
             return
+
+
+LINGER_SECONDS = 5
+LINGER_BYTES = 64 * 1024 * 1024
+
+
+async def _linger(stream):
+    """Close the sending side and throw away what the client still sends for a while, then close (RFC 9112 9.6). Closing at once,
+    with its body still arriving, makes the kernel reset the connection, and the client may lose the answer it was sent."""
+    raw = getattr(stream, 'raw', stream)
+    try:
+        if raw.writer.can_write_eof():
+            raw.writer.write_eof()
+        loop = asyncio.get_running_loop()
+        end, total = loop.time() + LINGER_SECONDS, 0
+        while total < LINGER_BYTES and (left := end - loop.time()) > 0:
+            data = await raw.read(65536, left)
+            if not data:
+                return
+            total += len(data)
+    except (OSError, TimeoutError, ssl.SSLError):
+        pass
 
 
 class Client:
@@ -670,7 +691,9 @@ class Client:
     async def handle(self, ex, mitm=None):
         try:
             if ex.method == 'CONNECT':
-                if mitm:
+                if mitm and getattr(ex, 'protocol', '') == 'websocket':
+                    await self.http(ex, scheme='https', default_host=mitm[0], default_port=mitm[1])  # RFC 8441: a WebSocket on an h2 stream
+                elif mitm:
                     await self.text(ex, 405, 'CONNECT inside a tunnel is not supported')
                 else:
                     await self.connect(ex)
@@ -741,12 +764,12 @@ class Client:
             await ex.respond(302, '', [('Location', target)], b'', close=True)
             return True
         if path in ('/ca.crt', '/ca.pem'):
-            cert_pem = (await _run(_WORK, ca.ensure_ca))[0]
+            cert_pem = (await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca))[0]
             await ex.respond(200, '', [('Content-Type', 'application/x-x509-ca-cert'), ('Content-Disposition', 'attachment; filename="zones-proxy-ca.crt"')],
                              cert_pem.encode('utf-8'), close=True)
             return True
         if path == '/proxy.mobileconfig':
-            cert_pem = (await _run(_WORK, ca.ensure_ca))[0]
+            cert_pem = (await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca))[0]
             body = await _run(_WORK, pac.build_mobileconfig, s, ca_cert_pem=cert_pem, request_host=ex.header('host'))
             await ex.respond(200, '', [('Content-Type', 'application/x-apple-aspen-config'), ('Content-Disposition', 'attachment; filename="zones-proxy.mobileconfig"')],
                              body, close=True)
@@ -833,13 +856,18 @@ class Client:
         own_ips = self.own_ips(s)
         allow_loopback = bool(getattr(self.server, 'allow_loopback', False))
         try:
-            await _run(_DNS, _resolve_target, host, port, allow_loopback=allow_loopback, own_ips=own_ips)
+            addrs = await _run(_DNS, _resolve_target, host, port, allow_loopback=allow_loopback, own_ips=own_ips)
         except PermissionError:
             self.log(log_method, host, full_url, 'error', 403, 'Forbidden target address', t0)
             return await self.text(ex, 403, 'Forbidden target address')
         except OSError:
             self.log(log_method, host, full_url, 'error', 502, 'DNS lookup failed', t0)
             return await self.text(ex, 502, 'Bad Gateway: DNS lookup failed')
+
+        ws_tokens = {t.strip().lower() for v in ex.get_all('connection') for t in v.split(',')}
+        if (ex.method == 'GET' and ex.header('upgrade').lower() == 'websocket' and 'upgrade' in ws_tokens) or getattr(ex, 'protocol', '') == 'websocket':
+            return await self.websocket(ex, target_scheme, host, port, addrs, path_query, s, SimpleCtx(
+                ex=ex, s=s, host=host, full_url=full_url, path_query=path_query, log_method=log_method, t0=t0, may_filter=False))
 
         try:
             await ex.wait_continue()
@@ -899,6 +927,17 @@ class Client:
         token = upstream.target_rules.set((allow_loopback, own_ips))
         idempotent = ex.method in IDEMPOTENT and resendable
         try:
+            if not resendable:
+                # a large upload: Expect: 100-continue and the answer read while it goes out, so a refusal (413) reaches the client
+                ctx = getattr(self.server, 'upstream_ssl_context', None) or upload.h1_ssl_context
+                stream = await upload.open_h1(target_scheme, host, port, addrs, ctx, UPSTREAM_TIMEOUTS['connect'])
+                try:
+                    resp = await upload.upload(stream, ex.method, path_query, list(fwd.items()), req_body, UPSTREAM_TIMEOUTS['read'])
+                    info.responded = True
+                    await self.relay(info, resp)
+                finally:
+                    await stream.aclose()
+                return
             for attempt in (0, 1):
                 info.responded = False
                 try:
@@ -925,6 +964,54 @@ class Client:
                 await self.text(ex, 502, 'Bad Gateway')
         finally:
             upstream.target_rules.reset(token)
+
+    async def websocket(self, ex, scheme, host, port, addrs, path_query, s, info):
+        """A WebSocket (RFC 6455) through the proxy, also inside HTTPS inspection: the handshake goes to the server over HTTP/1.1,
+        then the frames pass unchanged both ways. From an HTTP/2 client (RFC 8441, extended CONNECT) the stream carries the frames."""
+        hop = _hop_headers(ex.get_all('connection'))
+        h2_client = ex.version == 'HTTP/2'
+        fwd = [(k, v) for k, v in ex.headers if k.lower() not in hop and k.lower() not in ('host', 'via', 'sec-websocket-key', 'content-length')]
+        host_url = f'[{host}]' if ':' in host else host
+        fwd = [('Host', f'{host_url}:{port}' if port not in (80, 443) else host_url), *fwd, ('Via', _with_via(', '.join(ex.get_all('via'))))]
+        if not any(k.lower() == 'sec-websocket-version' for k, _ in fwd):
+            fwd.append(('Sec-WebSocket-Version', '13'))
+        # an HTTP/1.1 client's key goes on (its browser checks the server's accept against it); an HTTP/2 client has none
+        fwd.append(('Sec-WebSocket-Key', ex.header('sec-websocket-key') or upload.websocket_key()))
+        ctx = getattr(self.server, 'upstream_ssl_context', None) or upload.h1_ssl_context
+        if not h2_client:
+            while ex.conn.h11.their_state is h11.SEND_BODY:  # the end of the client's request, before h11 lets it switch protocol
+                await ex.conn.next_event(KEEPALIVE_TIMEOUT)
+        try:
+            stream = await upload.open_h1(scheme, host, port, addrs, ctx, UPSTREAM_TIMEOUTS['connect'])
+        except (OSError, TimeoutError, ssl.SSLError) as e:
+            self.log(info.log_method, host, info.full_url, 'error', 502, f'Bad Gateway: {_why(e)}', info.t0)
+            return await self.text(ex, 502, 'Bad Gateway')
+        try:
+            conn, ev = await upload.websocket_handshake(stream, path_query, fwd, UPSTREAM_TIMEOUTS['read'])
+            if not (isinstance(ev, h11.InformationalResponse) and ev.status_code == 101):
+                if isinstance(ev, h11.Response):  # refused (403, 404...): that answer goes to the client
+                    info.responded = True
+                    return await self.relay(info, upload.H1Response(conn, stream, ev, UPSTREAM_TIMEOUTS['read']))
+                raise ConnectionError('no answer to the WebSocket handshake')
+            rh = [(k.decode('latin-1'), v.decode('latin-1')) for k, v in ev.headers.raw_items()]
+            up = Prefixed(stream, bytes(conn.trailing_data[0]))
+            self.log(info.log_method, host, info.full_url, 'allowed', 101, 'WebSocket', info.t0)
+            if h2_client:
+                keep = [(k, v) for k, v in rh if k.lower() in ('sec-websocket-protocol', 'sec-websocket-extensions')]
+                await ex.start(200, '', keep)
+                await _pipe_h2(ex, up)
+            else:
+                await ex.conn.send(h11.InformationalResponse(status_code=101, headers=H1Exchange._encode(rh) + [(b'connection', b'Upgrade')],
+                                                             reason=b'Switching Protocols'))
+                ex.conn.taken = True
+                client = Prefixed(ex.conn.stream, bytes(ex.conn.h11.trailing_data[0]))
+                await _pipe(client, up)
+        except (OSError, TimeoutError, ssl.SSLError, h11.ProtocolError, ConnectionError) as e:
+            if not ex.started and not getattr(ex.conn, 'taken', False):
+                self.log(info.log_method, host, info.full_url, 'error', 502, f'Bad Gateway: {_why(e)}', info.t0)
+                await self.text(ex, 502, 'Bad Gateway')
+        finally:
+            await stream.aclose()
 
     @staticmethod
     async def abort(ex):
@@ -1087,7 +1174,7 @@ class Client:
     async def mitm(self, ex, host, port, target_url, t0):
         raw = await ex.establish()
         try:
-            ctx = await _run(_WORK, ca.leaf_context, host)
+            ctx = await _run(_WORK, pfilter.run_on_db_pool, ca.leaf_context, host)
         except Exception as e:
             _warn(f'MITM {host}: {_why(e)}')
             self.log('MITM', host, target_url, 'error', 500, f'Internal error: {_why(e)}', t0)
@@ -1102,16 +1189,10 @@ class Client:
         try:
             if tls.alpn() == 'h2':
                 conn = H2Connection(tls, lambda x: self.handle(x, (host, port)))
-                await conn.run()
-                websocket = False
             else:
                 conn = H1Connection(self, tls, mitm=(host, port))
-                await conn.run()
-                websocket = conn.websocket
-            if websocket:
-                record_mitm_failure(self.client_ip, host)
-                self.log('MITM', host, target_url, 'allowed', 200, 'TLS pin/CA fallback -> CONNECT', t0)
-            elif conn.handled == 0 and note_empty_mitm_session(self.client_ip, host):
+            await conn.run()
+            if conn.handled == 0 and note_empty_mitm_session(self.client_ip, host):
                 self.log('MITM', host, target_url, 'allowed', 200, 'TLS sessions without requests (pinning?) -> CONNECT', t0)
         except Exception as e:
             _warn(f'MITM {host}: {_why(e)}')
@@ -1147,6 +1228,29 @@ async def _pipe(a, b):
             await dst.write(data)
 
     tasks = [asyncio.create_task(copy(a, b)), asyncio.create_task(copy(b, a))]
+    try:
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+    finally:
+        for t in tasks:
+            t.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+
+
+async def _pipe_h2(ex, up):
+    """A WebSocket on an HTTP/2 stream (RFC 8441): the stream's DATA to the server, the server's bytes back as DATA."""
+    async def to_server():
+        async for chunk in ex.body_chunks():
+            await up.write(chunk)
+
+    async def to_client():
+        while True:
+            data = await up.read(65536, TUNNEL_IDLE)
+            if not data:
+                await ex.finish()
+                return
+            await ex.send(data)
+
+    tasks = [asyncio.create_task(to_server()), asyncio.create_task(to_client())]
     try:
         await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
     finally:
