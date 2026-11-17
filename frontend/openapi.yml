@@ -2569,10 +2569,14 @@ components:
           description: All queries in the bucket
         blocked:
           type: integer
-          description: Of which blocked
+          description: Of which blocked by the DNS daemon
+        proxy_blocked:
+          type: integer
+          description: Of which blocked by the filtering proxy
       required:
       - blocked
       - count
+      - proxy_blocked
       - t
     BulkActionRequest:
       type: object

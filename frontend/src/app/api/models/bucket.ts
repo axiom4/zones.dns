@@ -4,7 +4,7 @@
 export interface Bucket {
 
   /**
-   * Of which blocked
+   * Of which blocked by the DNS daemon
    */
   blocked: number;
 
@@ -12,6 +12,11 @@ export interface Bucket {
    * All queries in the bucket
    */
   count: number;
+
+  /**
+   * Of which blocked by the filtering proxy
+   */
+  proxy_blocked: number;
 
   /**
    * Start of the minute or hour (UTC)

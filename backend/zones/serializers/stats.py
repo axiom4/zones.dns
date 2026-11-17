@@ -9,7 +9,8 @@ class CountSerializer(serializers.Serializer):
 class BucketSerializer(serializers.Serializer):
     t = serializers.DateTimeField(help_text='Start of the minute or hour (UTC)')
     count = serializers.IntegerField(help_text='All queries in the bucket')
-    blocked = serializers.IntegerField(help_text='Of which blocked')
+    blocked = serializers.IntegerField(help_text='Of which blocked by the DNS daemon')
+    proxy_blocked = serializers.IntegerField(help_text='Of which blocked by the filtering proxy')
 
 
 class StatsSerializer(serializers.Serializer):
