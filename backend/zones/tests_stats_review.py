@@ -75,6 +75,18 @@ class StatsViewReviewTests(TestCase):
         self.assertEqual(self.api.get('/api/stats/').json()['timeouts'], 2)
         self.assertEqual(self.api.get('/api/proxy/logs/?outcome=timeout').json()['count'], 2)  # the log still lists them
 
+    def test_proxy_log_filters_follow_the_dns_log(self):
+        from .models import ProxyLog
+        for host, status, outcome, url, client in (('a.example', 200, 'allowed', 'https://a.example/x', '10.0.0.1'), ('b.example', 404, 'allowed', 'https://b.example/missing', '10.0.0.2'),
+                                                   ('c.example', 503, 'error', 'https://c.example/', '10.0.0.1')):
+            ProxyLog.objects.create(client=client, method='GET', host=host, url=url, outcome=outcome, status=status, reason='Bad Gateway' if outcome == 'error' else '')
+        def count(**q):
+            return self.api.get('/api/proxy/logs/', q).json()['count']
+        self.assertEqual((count(q='b.example'), count(q='missing')), (1, 0))  # q is the site name, as the DNS log's
+        self.assertEqual((count(detail='missing'), count(detail='bad gateway')), (1, 1))  # detail: the URL or the reason
+        self.assertEqual((count(status='4xx'), count(status='404'), count(status='5xx'), count(status='2xx'), count(status='bogus')), (1, 1, 1, 1, 3))
+        self.assertEqual(count(client='10.0.0.1', status='5xx'), 1)
+
     def test_since_that_is_not_a_date_is_ignored(self):
         self.assertEqual(self.api.get('/api/stats/?since=2024-13-45T00:00:00Z').status_code, 200)
 

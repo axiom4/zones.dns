@@ -1969,6 +1969,11 @@ paths:
           type: string
         description: Filter by client IP
       - in: query
+        name: detail
+        schema:
+          type: string
+        description: Search the URL or the reason (case-insensitive)
+      - in: query
         name: hours
         schema:
           type: integer
@@ -1998,7 +2003,12 @@ paths:
         name: q
         schema:
           type: string
-        description: Search host, URL or reason (case-insensitive)
+        description: Search the host name (case-insensitive)
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: 'HTTP status: a code (404) or a class (2xx, 3xx, 4xx, 5xx)'
       tags:
       - proxy
       security:

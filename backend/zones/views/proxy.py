@@ -1,3 +1,4 @@
+import re
 from datetime import timedelta
 import ipaddress
 from urllib.parse import urlsplit
@@ -253,7 +254,9 @@ class ProxyAllowUndoView(APIView):
 class ProxyLogsView(APIView):
     @extend_schema(
         parameters=[
-            OpenApiParameter('q', str, description='Search host, URL or reason (case-insensitive)'),
+            OpenApiParameter('q', str, description='Search the host name (case-insensitive)'),
+            OpenApiParameter('detail', str, description='Search the URL or the reason (case-insensitive)'),
+            OpenApiParameter('status', str, description='HTTP status: a code (404) or a class (2xx, 3xx, 4xx, 5xx)'),
             OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error', 'timeout'], description='Filter by outcome'),
             OpenApiParameter('client', str, description='Filter by client IP'),
             OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
@@ -273,7 +276,11 @@ class ProxyLogsView(APIView):
             qs = qs.filter(time__gte=timezone.now() - timedelta(hours=min(hours, 720)))
         clients = list(qs.order_by('client').values_list('client', flat=True).distinct()[:200])
         if q := p.get('q', '').strip().lower():
-            qs = qs.filter(Q(host__icontains=q) | Q(url__icontains=q) | Q(reason__icontains=q))
+            qs = qs.filter(host__icontains=q)
+        if detail := p.get('detail', '').strip().lower():
+            qs = qs.filter(Q(url__icontains=detail) | Q(reason__icontains=detail))
+        if (status := p.get('status', '').strip().lower()) and re.fullmatch(r'[1-5]\d\d|[1-5]xx', status):
+            qs = qs.filter(status__gte=int(status[0]) * 100, status__lt=int(status[0]) * 100 + 100) if status.endswith('xx') else qs.filter(status=int(status))
         if outcome := p.get('outcome', '').strip().lower():
             qs = qs.filter(outcome=outcome)
         if client := p.get('client', '').strip():

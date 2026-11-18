@@ -12,13 +12,16 @@ import {
   proxyRulesCreate,
   proxyRulesList,
   proxyLogsPurgeCreate,
+  logsClientsList,
   proxyLogsRetrieve,
   proxyTestCreate,
   proxySettingsPartialUpdate,
   proxySettingsRetrieve,
   statusRetrieve,
 } from '../api/functions';
-import { ProxyAllow, ProxyRuleList, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
+import { ProxyAllow, ProxyRuleList, QueryLogClient, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
+import { Autocomplete } from '../lib/autocomplete';
+import { byIp } from '../lib/ip';
 import { DaemonStatusLine } from '../daemon-status/daemon-status';
 import { blockLayer } from '../lib/proxy-reason';
 import { fieldErrors } from '../lib/error-text';
@@ -47,7 +50,7 @@ const LISTS: SettingField[] = [
 
 @Component({
   selector: 'app-proxy-page',
-  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine],
+  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine, Autocomplete],
   templateUrl: './proxy-page.html',
 })
 export class ProxyPage implements OnDestroy {
@@ -91,10 +94,19 @@ export class ProxyPage implements OnDestroy {
     results: [],
   });
   logQ = '';
-  logOutcome: '' | 'allowed' | 'filtered' | 'blocked' | 'error' = '';
+  logOutcome: '' | 'allowed' | 'filtered' | 'blocked' | 'error' | 'timeout' = '';
   logClient = '';
   logMethod = '';
+  logStatus = '';
+  logDetail = '';
   logHours = 24;
+  // the client filter works as the DNS log's: a list of the devices (names from the default zone) and an IP or name typed
+  logClients = signal<QueryLogClient[]>([]);
+  clientOptions = computed(() => this.logClients().map(c => ({ value: c.ip, label: c.host })).sort((a, b) => byIp(a.value, b.value)));
+  private clientIp() { const c = this.logClient.trim().toLowerCase(); return c && this.logClients().find(x => x.host === c || x.name === c)?.ip || this.logClient.trim(); }
+  async loadClients() {
+    try { this.logClients.set(await this.api.invoke(logsClientsList, { hours: this.logHours || undefined })); } catch { /* the filter still works with a typed address */ }
+  }
   live = true;
   private pollTimer?: ReturnType<typeof setInterval>;
   private searchTimer?: ReturnType<typeof setTimeout>;
@@ -116,11 +128,15 @@ export class ProxyPage implements OnDestroy {
 
   constructor() {
     this.load();
+    this.loadClients();
     // the log filters live in the address (?outcome=&q=&client=&hours=): links from Statistics land filtered, Back and reload keep them
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(p => {
       const o = p.get('outcome') ?? '', h = Number(p.get('hours') ?? 24);
-      this.logOutcome = (['allowed', 'filtered', 'blocked', 'error'].includes(o) ? o : '') as typeof this.logOutcome;
+      this.logOutcome = (['allowed', 'filtered', 'blocked', 'error', 'timeout'].includes(o) ? o : '') as typeof this.logOutcome;
       this.logQ = p.get('q') ?? '';
+      this.logDetail = p.get('detail') ?? '';
+      this.logMethod = p.get('method') ?? '';
+      this.logStatus = /^([1-5]\d\d|[1-5]xx)$/.test(p.get('status') ?? '') ? p.get('status')! : '';
       this.logClient = p.get('client') ?? '';
       this.logHours = [1, 24, 168, 0].includes(h) ? h : 24;
       if (this.mode() === 'logs') this.loadLogs();
@@ -164,9 +180,11 @@ export class ProxyPage implements OnDestroy {
     try {
       const res = await this.api.invoke(proxyLogsRetrieve, {
         q: this.logQ.trim() || undefined,
+        detail: this.logDetail.trim() || undefined,
         outcome: this.logOutcome || undefined,
-        client: this.logClient.trim() || undefined,
+        client: this.clientIp() || undefined,
         method: this.logMethod || undefined,
+        status: this.logStatus || undefined,
         hours: this.logHours,
         limit: 200,
       });
@@ -185,7 +203,8 @@ export class ProxyPage implements OnDestroy {
   /** Puts the filters in the address (only those not at their default); the query-parameter subscription then loads the log. */
   filtersChanged() {
     const queryParams = {
-      outcome: this.logOutcome || null, q: this.logQ.trim() || null, client: this.logClient || null, hours: this.logHours === 24 ? null : this.logHours,
+      outcome: this.logOutcome || null, q: this.logQ.trim() || null, detail: this.logDetail.trim() || null, method: this.logMethod || null, status: this.logStatus || null,
+      client: this.logClient.trim() || null, hours: this.logHours === 24 ? null : this.logHours,
     };
     const cur = this.route.snapshot.queryParamMap;
     if (Object.entries(queryParams).every(([k, v]) => cur.get(k) === (v == null ? null : String(v)))) this.loadLogs(); // address unchanged (e.g. a method filter): no subscription event

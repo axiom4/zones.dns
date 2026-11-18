@@ -22,7 +22,7 @@
   </header>
 
   <div class="composer filters">
-    <input class="grow" type="search" name="logQ" [(ngModel)]="logQ" (ngModelChange)="onFilterChange()" placeholder="Search site, address or block reason" autocomplete="off" aria-label="Search proxy requests">
+    <input class="grow" type="search" name="logQ" [(ngModel)]="logQ" (ngModelChange)="onFilterChange()" placeholder="Search by site name" autocomplete="off" aria-label="Search by name">
     <select name="logOutcome" [(ngModel)]="logOutcome" (ngModelChange)="filtersChanged()" aria-label="Outcome">
       <option value="">All outcomes</option>
       <option value="blocked">Blocked</option>
@@ -31,20 +31,23 @@
       <option value="error">Errors</option>
       <option value="timeout">Timeouts</option>
     </select>
-    <select name="logMethod" [(ngModel)]="logMethod" (ngModelChange)="filtersChanged()" aria-label="Kind of request">
-      <option value="">All kinds</option>
+    <select name="logMethod" [(ngModel)]="logMethod" (ngModelChange)="filtersChanged()" aria-label="Type">
+      <option value="">All types</option>
       <option value="CONNECT">HTTPS, passed through (CONNECT)</option>
       <option value="MITM">HTTPS, inspected (MITM)</option>
       <option value="GET">HTTP GET</option>
       <option value="POST">HTTP POST</option>
     </select>
-    <select name="logClient" [(ngModel)]="logClient" (ngModelChange)="filtersChanged()" aria-label="Device">
-      <option value="">All devices</option>
-      @for (c of logsData().clients; track c) {
-        <option [value]="c">{{ c }}</option>
-      }
+    <select name="logStatus" [(ngModel)]="logStatus" (ngModelChange)="filtersChanged()" aria-label="Response code">
+      <option value="">All responses</option>
+      <option value="2xx">2xx success</option>
+      <option value="3xx">3xx redirect</option>
+      <option value="4xx">4xx client error</option>
+      <option value="5xx">5xx server error</option>
     </select>
-    <select name="logHours" [(ngModel)]="logHours" (ngModelChange)="filtersChanged()" aria-label="Period">
+    <input class="ip" name="logDetail" [(ngModel)]="logDetail" (ngModelChange)="onFilterChange()" placeholder="Search the URL or the reason" autocomplete="off" aria-label="Search the URL or the reason">
+    <app-autocomplete [(value)]="logClient" (valueChange)="onFilterChange()" [options]="clientOptions()" (opened)="loadClients()" placeholder="Client (IP or name)" label="Client" />
+    <select name="logHours" [(ngModel)]="logHours" (ngModelChange)="filtersChanged(); loadClients()" aria-label="Period">
       <option [ngValue]="1">Last hour</option>
       <option [ngValue]="24">Last 24 hours</option>
       <option [ngValue]="168">Last 7 days</option>

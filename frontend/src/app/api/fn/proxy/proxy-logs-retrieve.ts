@@ -17,6 +17,11 @@ export interface ProxyLogsRetrieve$Params {
   client?: string;
 
 /**
+ * Search the URL or the reason (case-insensitive)
+ */
+  detail?: string;
+
+/**
  * Only the last N hours (0 = all)
  */
   hours?: number;
@@ -37,20 +42,27 @@ export interface ProxyLogsRetrieve$Params {
   outcome?: 'allowed' | 'blocked' | 'error' | 'filtered' | 'timeout';
 
 /**
- * Search host, URL or reason (case-insensitive)
+ * Search the host name (case-insensitive)
  */
   q?: string;
+
+/**
+ * HTTP status: a code (404) or a class (2xx, 3xx, 4xx, 5xx)
+ */
+  status?: string;
 }
 
 export function proxyLogsRetrieve(http: HttpClient, rootUrl: string, params?: ProxyLogsRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyLogsResponse>> {
   const rb = new RequestBuilder(rootUrl, proxyLogsRetrieve.PATH, 'get');
   if (params) {
     rb.query('client', params.client, {});
+    rb.query('detail', params.detail, {});
     rb.query('hours', params.hours, {});
     rb.query('limit', params.limit, {});
     rb.query('method', params.method, {});
     rb.query('outcome', params.outcome, {});
     rb.query('q', params.q, {});
+    rb.query('status', params.status, {});
   }
 
   return http.request(
