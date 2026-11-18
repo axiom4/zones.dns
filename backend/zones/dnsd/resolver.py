@@ -118,9 +118,14 @@ def _live(qs):
     return qs.filter(Q(expires__isnull=True) | Q(expires__gt=timezone.now()))
 
 
+_NESTED_QUANTIFIER = re.compile(r'\([^()]*[+*][^()]*\)[+*{]|[+*}][+*{]')  # a quantified group holding a quantifier
+
+
 def _load_regexes():
     out = []
     for name, allow in _live(BlockedDomain.objects.filter(enabled=True, regex=True)).values_list('name', 'allow'):
+        if _NESTED_QUANTIFIER.search(name):
+            continue  # (a+)+ and the like can take minutes on one name (catastrophic backtracking): the pattern does nothing
         try:
             out.append((re.compile(name, re.IGNORECASE), name, allow))
         except re.error:
@@ -311,9 +316,9 @@ def blocked_entry(qname):
     else:
         hit = None
     _remember_blocked(qname, hit, gen)
-    if _shared():
+    if hit and _shared():  # only blocked names: a name that is not blocked would fill Redis with every random name asked
         try:
-            cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit) if hit else _NONE, settings.DNS_DATA_TTL)
+            cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit), settings.DNS_DATA_TTL)
         except Exception:
             pass
     return hit
@@ -460,6 +465,7 @@ class Resolver(BaseResolver):
         self.log = log  # a LogWriter; None = write each log row at once
         self.upstream = upstream  # as given, for messages
         self.upstreams = [u.strip() for u in upstream.split(',') if u.strip()]
+        self.fails = {}  # upstream -> timeouts in a row
         self.down = {}  # upstream -> monotonic time until which it is skipped
         self._prefetch_pool = ThreadPoolExecutor(max_workers=settings.DNS_PREFETCH_WORKERS, thread_name_prefix='dns-prefetch')
         self._prefetch_room = threading.BoundedSemaphore(settings.DNS_PREFETCH_WORKERS * 8)
@@ -710,6 +716,8 @@ class Resolver(BaseResolver):
                 if reply.header.id != txid or not reply.header.qr or reply.q != request.q:
                     continue
                 reply.header.id = orig_id
+                reply.header.ad = 0  # the upstream's AD is not ours to pass on: only a validation made here sets it
+                self.fails.pop(server, None)
                 if reply.header.rcode != RCODE.SERVFAIL:
                     if want_dnssec and not request.header.cd:
                         state = dnssec.validate_reply(reply, self._validator)
@@ -721,8 +729,10 @@ class Resolver(BaseResolver):
                     return reply, server
             except DNSError:
                 continue  # an answer dnslib cannot read (anyone can make an upstream relay one from their own zone): not a dead upstream
-            except Exception:
-                self.down[server] = time.monotonic() + settings.DNS_UPSTREAM_DOWN  # no answer at all; a SERVFAIL only moves on to the next
+            except Exception as e:
+                self.fails[server] = n = self.fails.get(server, 0) + 1
+                if not isinstance(e, TimeoutError) or n >= 3:  # one slow name is not a dead upstream; connect errors and 3 timeouts in a row are
+                    self.down[server] = time.monotonic() + settings.DNS_UPSTREAM_DOWN  # no answer at all; a SERVFAIL only moves on to the next
         reply = request.reply()
         reply.header.rcode = RCODE.SERVFAIL
         return reply, None

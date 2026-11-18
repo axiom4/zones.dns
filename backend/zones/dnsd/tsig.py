@@ -1,6 +1,6 @@
 """TSIG (RFC 8945): the shared-key signature that authenticates DNS UPDATE messages (an IP address alone can be forged over UDP).
 
-Keys: settings.DNS_UPDATE_KEYS, "name:base64secret" separated by commas (the same name and secret as in `nsupdate -y hmac-sha256:name:secret`
+Keys: settings.DNS_UPDATE_KEYS, "name:base64secret" separated by commas, optionally "name:base64secret:zone1/zone2" to let that key update only those zones (the same name and secret as in `nsupdate -y hmac-sha256:name:secret`
 or a BIND `key` block). Algorithms: hmac-sha256 and hmac-sha512. The MAC is computed over the bytes received, so it is checked before
 anything else is read from the message, and the answer is signed with the same key (nsupdate refuses an unsigned answer).
 """
@@ -20,16 +20,35 @@ class TsigError(Exception):
     pass
 
 
+class Replayed(TsigError):
+    """The same MAC again (a retransmission after a lost reply): carries the MAC hash, the key of the cached reply."""
+    def __init__(self, digest):
+        super().__init__('replayed')
+        self.digest = digest
+
+
 def keys():
     """{key name (lower case, no final dot): secret bytes} from DNS_UPDATE_KEYS; entries that do not decode are ignored."""
     out = {}
     for entry in (settings.DNS_UPDATE_KEYS or '').split(','):
         name, _, secret = entry.strip().partition(':')
+        secret = secret.partition(':')[0]  # what follows is the zone list (scopes)
         try:
             if name and secret:
                 out[name.strip().lower().rstrip('.')] = base64.b64decode(secret.strip(), validate=True)
         except ValueError:
             continue
+    return out
+
+
+def scopes():
+    """{key name: set of zone names it may update} for the keys written name:secret:zone1/zone2; a key without zones is not in the dict (any zone)."""
+    out = {}
+    for entry in (settings.DNS_UPDATE_KEYS or '').split(','):
+        name, _, rest = entry.strip().partition(':')
+        zones = rest.partition(':')[2]
+        if name and zones:
+            out[name.strip().lower().rstrip('.')] = {z.strip().lower().rstrip('.') for z in zones.split('/') if z.strip()}
     return out
 
 
@@ -112,12 +131,13 @@ def verify(wire):
     if abs(time.time() - signed) > fudge:
         raise TsigError('bad time')
     from django.core.cache import cache
+    digest = hashlib.sha256(mac).hexdigest()
     try:
-        fresh = cache.add('tsig-mac:' + hashlib.sha256(mac).hexdigest(), 1, 2 * fudge + 60)
+        fresh = cache.add('tsig-mac:' + digest, 1, 2 * fudge + 60)
     except Exception:
         fresh = True  # no cache: the time window still bounds a replay
     if not fresh:
-        raise TsigError('replayed')
+        raise Replayed(digest)
     return key, alg, mac
 
 

@@ -4,6 +4,7 @@ Every UPDATE must be signed with TSIG (RFC 8945, keys in settings.DNS_UPDATE_KEY
 DoH / DoT clients all reach the daemon from 127.0.0.1. settings.DNS_UPDATE_ALLOW (IP addresses or CIDR networks, comma separated) narrows down
 who may send them as well. No key = UPDATE refused. The message is applied whole or not at all (RFC 2136 §3.4).
 """
+import hashlib
 import ipaddress
 
 from django.conf import settings
@@ -92,6 +93,12 @@ def handle_update(request, client_ip, wire=None):
         return reply
     try:
         key, alg, mac = tsig.verify(wire or b'')
+    except tsig.Replayed as e:  # a retransmission after a lost reply: the same signed answer again (not applied twice)
+        cached = _reply_cache_get(e.digest)
+        reply.header.rcode = RCODE.NOTAUTH
+        if cached:
+            reply.wire = cached
+        return reply
     except tsig.TsigError:
         reply.header.rcode = RCODE.NOTAUTH  # RFC 8945 §5.2: unsigned or badly signed
         return reply
@@ -99,15 +106,32 @@ def handle_update(request, client_ip, wire=None):
     zname = str(request.q.qname).rstrip('.').lower()
     zone = Zone.objects.filter(name__iexact=zname, enabled=True).first()
     try:
-        if not zone:
-            raise _Abort(RCODE.NOTAUTH)
+        if not zone or (key in tsig.scopes() and zname not in tsig.scopes()[key]):
+            raise _Abort(RCODE.NOTAUTH)  # a key limited to some zones: the others look like zones we do not serve
         with transaction.atomic():
             _apply(request, zone)
         reply.header.rcode = RCODE.NOERROR
     except _Abort as e:
         reply.header.rcode = e.rcode
     reply.wire = tsig.sign(reply.pack(), key, alg, mac)
+    _reply_cache_put(hashlib.sha256(mac).hexdigest(), reply.wire)
     return reply
+
+
+def _reply_cache_get(digest):
+    from django.core.cache import cache
+    try:
+        return cache.get('tsig-reply:' + digest)
+    except Exception:
+        return None
+
+
+def _reply_cache_put(digest, wire):
+    from django.core.cache import cache
+    try:
+        cache.set('tsig-reply:' + digest, bytes(wire), 600)
+    except Exception:
+        pass
 
 
 def _apply(request, zone):
@@ -165,10 +189,11 @@ def _apply(request, zone):
             if rtype == 'CNAME':
                 Record.objects.filter(zone=zone, name=rel, type='CNAME').delete()
             rec, created = Record.objects.get_or_create(zone=zone, name=rel, type=rtype, value=val, defaults={'ttl': ttl})
-            if not created and rec.ttl != ttl:
+            ttl_changed = not created and rec.ttl != ttl
+            if ttl_changed:
                 rec.ttl = ttl
                 rec.save(update_fields=['ttl'])
-            changed = True
+            changed = created or ttl_changed or changed  # an update that changes nothing does not bump the data version
         elif upd.rclass == CLASS_ANY:
             # Delete an RRset or all RRsets from a name
             qs = Record.objects.filter(zone=zone, name=rel) if upd.rtype == QTYPE.ANY else Record.objects.filter(zone=zone, name=rel, type=rtype)

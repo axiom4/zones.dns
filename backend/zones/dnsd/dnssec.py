@@ -144,6 +144,9 @@ def _load_public_key(algorithm, key_bytes):
     return None
 
 
+MAX_SIGS, MAX_KEYS_PER_TAG, MAX_VERIFIES = 8, 4, 32  # KeyTrap (CVE-2023-50387): signatures per RRset, same-tag keys per signature, signatures checked per reply
+
+
 def verify_rrsig(rrset, rrsig_rr, dnskey_rrs, now=None):
     """Verify an RRSIG record over `rrset` using one of `dnskey_rrs`.
 
@@ -159,6 +162,7 @@ def verify_rrsig(rrset, rrsig_rr, dnskey_rrs, now=None):
     signed_data = _rrset_wire(rrset, sig)
     sig_bytes = bytes(sig.sig)
 
+    tried = 0
     for krr in dnskey_rrs:
         if krr.rtype != QTYPE.DNSKEY:
             continue
@@ -168,6 +172,9 @@ def verify_rrsig(rrset, rrsig_rr, dnskey_rrs, now=None):
         raw_key = bytes(kd.key)
         if key_tag(kd.flags, kd.protocol, kd.algorithm, raw_key) != sig.key_tag:
             continue
+        tried += 1
+        if tried > MAX_KEYS_PER_TAG:
+            break
         pub = _load_public_key(kd.algorithm, raw_key)
         if pub is None:
             continue
@@ -207,7 +214,7 @@ def _within(name, zone):
 
 def _signed_by(rrset, rrsigs, keys, now):
     """True if one of rrsigs (RRSIG records over rrset) verifies with one of keys."""
-    return any(verify_rrsig(rrset, sig, keys, now=now) for sig in rrsigs)
+    return any(verify_rrsig(rrset, sig, keys, now=now) for sig in rrsigs[:MAX_SIGS])
 
 
 class Validator:
@@ -295,19 +302,22 @@ def validate_reply(reply, validator, now=None):
             groups.setdefault((_name(rr.rname), rr.rdata.covered), []).append(rr)
     if not groups:
         return 'insecure'
-    covered, insecure = set(), False
+    covered, insecure, budget = set(), False, MAX_VERIFIES
     for (owner, rtype), sigs in groups.items():
         rrset = [rr for rr in section if _name(rr.rname) == owner and rr.rtype == rtype]
         if not rrset:
             return 'bogus'  # a signature with nothing under it
         verdicts = set()  # RFC 4035 §5.3.3: one signature that verifies is enough (rollovers sign twice, maybe with an algorithm we lack)
-        for sig in sigs:
+        for sig in sigs[:MAX_SIGS]:
             signer = _name(sig.rdata.name)
             if not _within(owner, signer):
                 verdicts.add('bogus')  # a zone signing names that are not its own
             elif sig.rdata.algorithm not in ALGORITHMS:
                 verdicts.add('insecure')  # RFC 4035 §5.2: an algorithm we cannot check is treated as unsigned
             else:
+                budget -= 1
+                if budget < 0:
+                    return 'bogus'  # more signatures than any honest answer carries
                 state, keys = validator.keys(signer, now)
                 verdicts.add('bogus' if state == 'secure' and not verify_rrsig(rrset, sig, keys, now=now) else state)
         if 'secure' in verdicts:

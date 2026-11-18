@@ -115,8 +115,8 @@ class TcpConnectionTests(SimpleTestCase):
             s.sendall(b'PROXY TCP4 192.168.1.7 127.0.0.1 51000 853\r\n' + _framed('a.example'))
             self.assertIsNotNone(_read_answer(s))
         with override_settings(DNS_PROXY_PROTOCOL=True), socket.create_connection(self.addr, timeout=5) as s:
-            s.sendall(_framed('b.example'))  # a local client without the line still works
-            self.assertIsNotNone(_read_answer(s))
+            s.sendall(_framed('b.example'))  # fail closed: a loopback client without the line is dropped (a remote DoT client could not forge one otherwise)
+            self.assertIsNone(_read_answer(s))
         with mock.patch('zones.dnsd.dnsserver.TCP_IDLE', 0.3), socket.create_connection(self.addr, timeout=5) as s:  # switched off: the line is not a DNS message, nothing is believed
             s.sendall(b'PROXY TCP4 192.168.1.8 127.0.0.1 51000 853\r\n' + _framed('c.example'))
             s.settimeout(5)
@@ -124,7 +124,7 @@ class TcpConnectionTests(SimpleTestCase):
                 s.recv(2)
             except OSError:
                 pass
-        self.assertEqual(self.echo.clients, ['192.168.1.7', '127.0.0.1'])
+        self.assertEqual(self.echo.clients, ['192.168.1.7'])
 
     def test_silent_connections_hold_no_worker(self):
         idle = [socket.create_connection(self.addr, timeout=5) for _ in range(PooledTCPServer.workers * 3)]

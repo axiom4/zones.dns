@@ -168,3 +168,50 @@ class UpstreamTcpDeadlineTests(SimpleTestCase):
             resolver._tcp_exchange(b'\x12\x34q', '127.0.0.1', srv.getsockname()[1], 0.5)
         self.assertLess(time.monotonic() - t0, 1.5)
         srv.close()
+
+
+class ReviewFixTests(SimpleTestCase):
+    def test_signatures_per_rrset_are_capped(self):
+        now = int(time.time())
+        pki = DnssecPki(now)
+        v = dnssec.Validator(pki.ask, anchors=[pki.root_ds])
+        rep = pki.answer()
+        rep.rr = [rr for rr in rep.rr if rr.rtype != QTYPE.RRSIG]
+        for _ in range(dnssec.MAX_SIGS):
+            rep.add_answer(pki.sign([rep.rr[0]], pki.zone_priv, pki.zone_tag, 'example.com.', bad=True))
+        rep.add_answer(pki.sign([rep.rr[0]], pki.zone_priv, pki.zone_tag, 'example.com.'))  # the good one is past the cap
+        self.assertNotEqual(dnssec.validate_reply(rep, v, now=now), 'secure')
+
+    def test_nested_quantifier_patterns_are_refused(self):
+        for bad in ('(a+)+$', '(.*)*x', 'a++'):
+            self.assertTrue(resolver._NESTED_QUANTIFIER.search(bad), bad)
+        self.assertFalse(resolver._NESTED_QUANTIFIER.search(r'^ads?\d+\.example\.com$'))
+
+    def test_one_timeout_does_not_mark_the_upstream_down(self):
+        r = resolver.Resolver.__new__(resolver.Resolver)
+        r.upstreams, r.down, r.fails, r._validator = ['192.0.2.1'], {}, {}, None
+        q = DNSRecord.question('example.com')
+        with mock.patch.object(resolver, '_udp_exchange', side_effect=TimeoutError):
+            for _ in range(2):
+                r.ask_upstream(q)
+            self.assertEqual(r.down, {})
+            r.ask_upstream(q)
+        self.assertIn('192.0.2.1', r.down)
+
+    def test_upstream_ad_bit_is_cleared(self):
+        r = resolver.Resolver.__new__(resolver.Resolver)
+        r.upstreams, r.down, r.fails, r._validator = ['192.0.2.1'], {}, {}, None
+        q = DNSRecord.question('example.com')
+        a = q.reply()
+        a.add_answer(RR('example.com', QTYPE.A, rdata=A('192.0.2.9')))
+        a.header.ad = 1
+        with mock.patch.object(resolver, '_udp_exchange', return_value=a.pack()):
+            self.assertEqual(r.ask_upstream(q)[0].header.ad, 0)
+
+
+class TsigScopeTests(TestCase):
+    def test_scopes_and_unscoped_keys(self):
+        from .dnsd import tsig
+        with override_settings(DNS_UPDATE_KEYS='a:eHg=:corp.lan/Lab.lan., b:eXk='):
+            self.assertEqual(tsig.keys(), {'a': b'xx', 'b': b'yy'})
+            self.assertEqual(tsig.scopes(), {'a': {'corp.lan', 'lab.lan'}})  # b is unscoped: any zone

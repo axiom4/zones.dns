@@ -50,7 +50,7 @@ class _Conn:
 
     def __init__(self, sock, addr, proxy):
         self.sock, self.addr, self.proxy = sock, addr, proxy  # proxy: a PROXY protocol line may still come first
-        self.buf, self.dead, self.lock = b'', False, threading.Lock()  # lock: one answer at a time on the socket
+        self.buf, self.dead, self.lock, self.inflight = b'', False, threading.Lock(), threading.BoundedSemaphore(32)  # lock: one answer at a time on the socket; inflight: queries of this connection under way
         self.opened = self.seen = time.monotonic()
 
     def kill(self):
@@ -124,6 +124,7 @@ class PooledTCPServer(_Pooled, TCPServer):
     (RFC 7766 §6.2.1; DNS over TLS clients do), in any number, and one that sends nothing or a byte now and then holds no worker.
     Answers of one connection may leave in another order than the queries came (RFC 7766 §7: the client matches them by id)."""
     workers = 16
+    request_queue_size = 128  # listen() backlog; the default of 5 drops connection bursts
 
     def __init__(self, server_address, handler):
         super().__init__(server_address, handler)
@@ -210,6 +211,8 @@ class PooledTCPServer(_Pooled, TCPServer):
             if len(conn.buf) < 2 + n:
                 break
             query, conn.buf = conn.buf[2:2 + n], conn.buf[2 + n:]
+            if not conn.inflight.acquire(blocking=False):
+                return self._drop(conn)  # one client may not fill the workers with its own queries
             if not self._room.acquire(blocking=False):
                 return self._drop(conn)  # more queries waiting than the workers can take (flood protection): the client retries
             self._pool.submit(self._answer, conn, query)
@@ -217,22 +220,25 @@ class PooledTCPServer(_Pooled, TCPServer):
     def _proxy_header(self, conn):
         """DNS_PROXY_PROTOCOL: a connection from this machine (nginx for DNS over TLS, the DoH view) may start with a PROXY protocol v1 line that
         carries the address of the real client; it replaces 127.0.0.1 for DNS_ALLOW_QUERY, the rate limit, the suspicious-query count and the log.
-        Never read from another machine: anybody could claim any address. False = wait for more bytes (or the connection was dropped)."""
+        Never read from another machine: anybody could claim any address. Fails closed: nginx and the DoH view always send the line first, so a
+        connection from this machine without it is dropped. False = wait for more bytes (or the connection was dropped)."""
         if len(conn.buf) < 6:
             return False
-        if conn.buf.startswith(b'PROXY '):
-            if b'\r\n' not in conn.buf:
-                if len(conn.buf) > 107:  # the longest v1 line
-                    self._drop(conn)
+        if not conn.buf.startswith(b'PROXY '):
+            self._drop(conn)
+            return False
+        if b'\r\n' not in conn.buf:
+            if len(conn.buf) > 107:  # the longest v1 line
+                self._drop(conn)
+            return False
+        line, _, conn.buf = conn.buf.partition(b'\r\n')
+        parts = line.decode('ascii', 'replace').split()
+        if len(parts) >= 3 and parts[1] in ('TCP4', 'TCP6'):
+            try:
+                conn.addr = (str(ipaddress.ip_address(parts[2])), 0)
+            except ValueError:
+                self._drop(conn)
                 return False
-            line, _, conn.buf = conn.buf.partition(b'\r\n')
-            parts = line.decode('ascii', 'replace').split()
-            if len(parts) >= 3 and parts[1] in ('TCP4', 'TCP6'):
-                try:
-                    conn.addr = (str(ipaddress.ip_address(parts[2])), 0)
-                except ValueError:
-                    self._drop(conn)
-                    return False
         conn.proxy = False
         return True
 
@@ -244,9 +250,13 @@ class PooledTCPServer(_Pooled, TCPServer):
             self.logger.log_recv(who, data)
             rdata = _reply(self, who, data)
             self.logger.log_send(who, rdata)
-            with conn.lock:
+            if not conn.lock.acquire(timeout=TCP_SEND):
+                raise OSError('send lock')  # another answer of this connection is stuck on a client that does not read
+            try:
                 if not conn.dead:
                     conn.sock.sendall(struct.pack('!H', len(rdata)) + rdata)
+            finally:
+                conn.lock.release()
             conn.seen = time.monotonic()
         except DNSError as e:
             self.logger.log_error(who, e)
@@ -257,6 +267,7 @@ class PooledTCPServer(_Pooled, TCPServer):
             traceback.print_exc()  # a future would keep it to itself
             conn.kill()
         finally:
+            conn.inflight.release()
             self._room.release()
 
     def server_close(self):
