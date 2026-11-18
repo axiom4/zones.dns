@@ -1,3 +1,4 @@
+import io
 import gzip
 import urllib.request
 
@@ -20,7 +21,10 @@ class Command(BaseCommand):
         try:
             with urllib.request.urlopen(urllib.request.Request(url, headers={'User-Agent': 'dns-admin'}), timeout=60) as r:
                 raw = r.read(50_000_000)
-            rows = oui.parse_manuf((gzip.decompress(raw) if raw[:2] == b'\x1f\x8b' else raw).decode('utf-8', 'replace'))
+            if raw[:2] == b'\x1f\x8b':  # at most 50 MB unpacked too (a gzip bomb from --url took all the memory)
+                with gzip.GzipFile(fileobj=io.BytesIO(raw)) as z:
+                    raw = z.read(50_000_000)
+            rows = oui.parse_manuf(raw.decode('utf-8', 'replace'))
         except (OSError, EOFError) as e:
             raise CommandError(f'Download failed: {e}')
         if len(rows) < MIN_ROWS:
