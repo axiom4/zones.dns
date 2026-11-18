@@ -229,7 +229,7 @@ class ProxyCaCertView(View):
             return to
         if not ratelimit.allowed(client_ip(request)):  # behind nginx REMOTE_ADDR is always 127.0.0.1
             return HttpResponseForbidden('Forbidden')
-        cert_pem, _, _, _ = ca.ensure_ca()
+        cert_pem, _, _, _ = ca.ensure_ca(refresh=True)
         resp = HttpResponse(cert_pem, content_type='application/x-x509-ca-cert')
         resp['Content-Disposition'] = 'attachment; filename="zones-proxy-ca.crt"'
         return resp
@@ -244,7 +244,7 @@ class ProxyMobileConfigView(View):
         if not ratelimit.allowed(client_ip(request)):  # behind nginx REMOTE_ADDR is always 127.0.0.1
             return HttpResponseForbidden('Forbidden')
         s = dhcp.dhcp_settings()
-        cert_pem, _, _, _ = ca.ensure_ca()
+        cert_pem, _, _, _ = ca.ensure_ca(refresh=True)
         body = pac.build_mobileconfig(s, ca_cert_pem=cert_pem, request_host=request.META.get('HTTP_HOST', ''))
         resp = HttpResponse(body, content_type='application/x-apple-aspen-config')
         resp['Content-Disposition'] = 'attachment; filename="zones-proxy.mobileconfig"'

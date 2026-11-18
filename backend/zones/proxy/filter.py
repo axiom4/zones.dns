@@ -149,7 +149,7 @@ def parse_custom_rules(raw_rules):
         elif '##' in line:
             dom_part, _, sel = line.partition('##')
             sel = sel.strip()
-            if not sel or '</style' in sel.lower() or sel.startswith(('+js(', '^', 'script:inject')):
+            if not sel or not rules.css_ok(sel) or sel.startswith(('+js(', '^', 'script:inject')):
                 continue
             if not dom_part.strip():
                 global_css.append(sel)

@@ -258,9 +258,18 @@ def _is_forbidden_target_ip(ip_str, allow_loopback=False):
         ip = ipaddress.ip_address(ip_str)
     except ValueError:
         return True
-    if ip.is_Loopback if hasattr(ip, 'is_Loopback') else ip.is_loopback:
+    if ip.is_loopback:
         return not allow_loopback
     return ip.is_link_local or ip.is_multicast or ip.is_unspecified
+
+
+def _plain_ip(ip_str):
+    """The address as compared with this server's own: an IPv4-mapped IPv6 one (::ffff:a.b.c.d) is the IPv4 address it reaches."""
+    try:
+        ip = ipaddress.ip_address(str(ip_str).partition('%')[0])
+    except ValueError:
+        return str(ip_str)
+    return str(getattr(ip, 'ipv4_mapped', None) or ip)
 
 
 def _with_port(addrs, port):
@@ -272,9 +281,10 @@ def _resolve_target(host, port, allow_loopback=False, own_ips=frozenset()):
     Returns every address [(family, (ip, port))], the first one first. `own_ips`: this server's addresses, reachable only on ports 80 and 443
     (the GUI behind nginx), never on the ports of its databases and daemons."""
     clean_host = host.strip('[]')
+    own_ips = {_plain_ip(i) for i in own_ips}
 
     def check(ip_str):
-        if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback) or (ip_str in own_ips and int(port) not in (80, 443)):
+        if _is_forbidden_target_ip(ip_str, allow_loopback=allow_loopback) or (_plain_ip(ip_str) in own_ips and int(port) not in (80, 443)):
             raise PermissionError(f'Target address {ip_str} is not allowed through the proxy')
 
     try:
@@ -354,6 +364,9 @@ def _bounded(d, data):
     out = d.decompress(data, MAX_HTML_BYTES + 1)
     if len(out) > MAX_HTML_BYTES:
         raise ValueError('Decompressed HTML is too large to filter')
+    if not d.eof or d.unused_data:
+        # cut short, or more than one member: what was read is not the whole page, and would be sent as if it were
+        raise ValueError('Truncated or multi-part compressed body')
     return out
 
 
@@ -475,10 +488,6 @@ def _filter_page(raw_body, cenc, ctype, host, s, csp):
     plain = _decompress(raw_body, cenc)
     out = pfilter.filter_html(plain, content_type=ctype, host=host, s=s, csp=csp)
     return out, out != plain
-
-
-def _resolve_for_backend(host, port, allow_loopback, own_ips):
-    return _resolve_target(host, port, allow_loopback=allow_loopback, own_ips=own_ips)
 
 
 class H1Exchange:
@@ -763,12 +772,12 @@ class Client:
             await ex.respond(302, '', [('Location', target)], b'', close=True)
             return True
         if path in ('/ca.crt', '/ca.pem'):
-            cert_pem = (await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca))[0]
+            cert_pem = (await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca, refresh=True))[0]
             await ex.respond(200, '', [('Content-Type', 'application/x-x509-ca-cert'), ('Content-Disposition', 'attachment; filename="zones-proxy-ca.crt"')],
                              cert_pem.encode('utf-8'), close=True)
             return True
         if path == '/proxy.mobileconfig':
-            cert_pem = (await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca))[0]
+            cert_pem = (await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca, refresh=True))[0]
             body = await _run(_WORK, pac.build_mobileconfig, s, ca_cert_pem=cert_pem, request_host=ex.header('host'))
             await ex.respond(200, '', [('Content-Type', 'application/x-apple-aspen-config'), ('Content-Disposition', 'attachment; filename="zones-proxy.mobileconfig"')],
                              body, close=True)
@@ -892,7 +901,8 @@ class Client:
                 continue
             if kl == 'accept-encoding' and may_filter:
                 continue
-            fwd[k] = v
+            # a field sent twice is one list (RFC 9110 5.3), not the last of them; Cookie lines are joined with "; " (RFC 6265 5.4)
+            fwd[k] = f'{fwd[k]}{"; " if kl == "cookie" else ", "}{v}' if k in fwd else v
         host_url = f'[{host}]' if ':' in host else host
         fwd['Host'] = f'{host_url}:{port}' if port not in (80, 443) else host_url
         fwd['Via'] = _with_via(', '.join(ex.get_all('via')))
@@ -921,7 +931,7 @@ class Client:
                 return await self.text(ex, 502, 'Bad Gateway')
             return await self.page(info, status, reason, list(resp_headers), raw_body)
 
-        pool = upstream.pool_for(self.server, _resolve_for_backend, _DNS)
+        pool = upstream.pool_for(self.server, _resolve_target, _DNS)
         url = f'{target_scheme}://{host_url}:{port}{path_query}'
         token = upstream.target_rules.set((allow_loopback, own_ips))
         idempotent = ex.method in IDEMPOTENT and resendable
@@ -1238,7 +1248,7 @@ async def _pipe(a, b):
 async def _pipe_h2(ex, up):
     """A WebSocket on an HTTP/2 stream (RFC 8441): the stream's DATA to the server, the server's bytes back as DATA."""
     async def to_server():
-        async for chunk in ex.body_chunks():
+        async for chunk in ex.body_chunks(TUNNEL_IDLE):
             await up.write(chunk)
 
     async def to_client():

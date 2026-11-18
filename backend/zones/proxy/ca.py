@@ -89,21 +89,26 @@ def _generate_ca():
     return cert_pem, _encrypt_key(key), cert, key
 
 
-def ensure_ca(regenerate=False):
-    """Return (cert_pem, encrypted key_pem, cert_obj, key_obj), creating and storing the CA in Setting if needed."""
+def ensure_ca(regenerate=False, refresh=False):
+    """Return (cert_pem, encrypted key_pem, cert_obj, key_obj), creating and storing the CA in Setting if needed.
+    `refresh`: read the database again, the CA may have been made anew by another process (the GUI's "new Root CA")."""
     global _cached_ca
     with _lock:
-        if not regenerate and _cached_ca is not None:
+        if not regenerate and not refresh and _cached_ca is not None:
             return _cached_ca
         try:
             rows = dict(Setting.objects.filter(key__in=(CA_CERT_KEY, CA_PRIV_KEY)).values_list('key', 'value'))
         except DatabaseError:
+            if _cached_ca is not None and not regenerate:
+                return _cached_ca  # a refresh while the database is away: never a new CA for that
             rows = {}
         cert_pem, key_pem = rows.get(CA_CERT_KEY, ''), rows.get(CA_PRIV_KEY, '')
         if not regenerate and cert_pem and key_pem:
             try:
                 cert = x509.load_pem_x509_certificate(cert_pem.encode())
                 key, plaintext = _load_key(key_pem)
+                if _cached_ca is not None and _cached_ca[0] != cert_pem:
+                    _leaf_contexts.clear()  # signed by the old CA
                 if plaintext:
                     key_pem = _encrypt_key(key)
                     try:
@@ -130,7 +135,7 @@ def ensure_ca(regenerate=False):
 
 def ca_info(regenerate=False):
     """Metadata and PEM certificate of the Proxy Root CA (never exposes the private key)."""
-    cert_pem, _, cert, _ = ensure_ca(regenerate=regenerate)
+    cert_pem, _, cert, _ = ensure_ca(regenerate=regenerate, refresh=True)
     der = cert.public_bytes(serialization.Encoding.DER)
     fp = ':'.join(f'{b:02X}' for b in hashlib.sha256(der).digest())
     cn = cert.subject.get_attributes_for_oid(NameOID.COMMON_NAME)

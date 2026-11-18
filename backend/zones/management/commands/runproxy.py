@@ -117,7 +117,7 @@ class Command(BaseCommand):
         self.seen = ver
         new = cached_proxy_settings(settings, force=True)
         if new.PROXY_HTTPS_MITM:
-            pfilter.run_on_db_pool(ca.ensure_ca)
+            pfilter.run_on_db_pool(ca.ensure_ca, refresh=True)  # a Root CA made anew in the GUI: signed with from now on
         snap = {k: getattr(new, k) for k in BIND_KEYS}
         if snap == self.snap:
             return None

@@ -45,6 +45,13 @@ def split_entries(text):
     return out
 
 
+def css_ok(sel):
+    """Whether a hiding selector may go into the <style> of every page: no end of the element, no block or comment that would
+    let a list add rules of its own (`a{} input[value^=x]{background:url(...)}` reads what is typed into the page)."""
+    low = sel.lower()
+    return '</style' not in low and '{' not in sel and '}' not in sel and '/*' not in sel
+
+
 def _network(rule):
     """The domain of a `||domain^` rule (without the @@), or None when the proxy cannot apply it."""
     body, _, opts = rule.partition('$')
@@ -70,7 +77,7 @@ def reduce(text):
                 allow += 1
         elif '##' in line:
             dom, _, sel = line.partition('##')
-            if not sel.strip() or sel.startswith(('+js(', '^', 'script:inject')) or '</style' in sel.lower() or ':-abp-' in sel or ':has-text(' in sel or ':xpath(' in sel:
+            if not sel.strip() or sel.startswith(('+js(', '^', 'script:inject')) or not css_ok(sel) or ':-abp-' in sel or ':has-text(' in sel or ':xpath(' in sel:
                 continue
             if not dom and css >= MAX_GLOBAL_CSS:
                 continue
@@ -192,6 +199,8 @@ def loaded():
                     data.blocks.setdefault(line[2:-1], name)
                 elif '##' in line:
                     dom, _, sel = line.partition('##')
+                    if not css_ok(sel):
+                        continue  # stored before the check
                     if not dom:
                         data.global_css.append(sel)
                     else:

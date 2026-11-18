@@ -14,6 +14,7 @@ import h2.settings
 
 IDLE = 120  # seconds an h2 connection with no open stream stays up
 MAX_STREAMS = 100
+BODY_TIMEOUT = 30  # seconds a request body may stay silent, like HTTP/1.1 (server.KEEPALIVE_TIMEOUT)
 # Connection-specific fields: not allowed in HTTP/2 (RFC 9113 8.2.2)
 _CONNECTION_FIELDS = frozenset({'connection', 'keep-alive', 'proxy-connection', 'transfer-encoding', 'upgrade', 'te'})
 
@@ -74,10 +75,11 @@ class H2Exchange:
         v = self.header('content-length')
         return int(v) if v.isdigit() else None
 
-    async def body_chunks(self):
-        """The request body piece by piece; each piece is acknowledged (window update) once it has been taken."""
+    async def body_chunks(self, timeout=BODY_TIMEOUT):
+        """The request body piece by piece; each piece is acknowledged (window update) once it has been taken.
+        TimeoutError after `timeout` seconds without data (a stream that never sends its body must not hold its handler for ever)."""
         while True:
-            item = await self._body.get()
+            item = await asyncio.wait_for(self._body.get(), timeout)
             if item is None:
                 return
             if item is StreamGone:
@@ -190,12 +192,22 @@ class H2Connection:
             pass
         finally:
             self.exchanges.pop(ex.stream_id, None)
-            if not self._closed and not ex.reset:
-                try:  # the handler gave up without finishing the stream (an upstream that failed halfway): the client must see it broken
+            # body the handler never read (a blocked request, an early answer): its bytes go back to the connection window,
+            # else a few such requests use it up and every upload of the connection stalls
+            unread = 0
+            while not ex._body.empty():
+                item = ex._body.get_nowait()
+                if isinstance(item, tuple):
+                    unread += item[1]
+            if not self._closed:
+                try:
                     stream = self.h2.streams.get(ex.stream_id)
-                    if stream is not None and not stream.closed:
+                    if not ex.reset and stream is not None and not stream.closed:
+                        # the handler gave up without finishing the stream (an upstream that failed halfway): the client must see it broken
                         self.h2.reset_stream(ex.stream_id)
-                        await self._flush()
+                    if unread:
+                        self.h2.acknowledge_received_data(unread, ex.stream_id)
+                    await self._flush()
                 except (h2.exceptions.ProtocolError, OSError):
                     pass
 
@@ -228,7 +240,7 @@ class H2Connection:
                         self.handled += 1
                         if ev.stream_ended:
                             ex._end()
-                        task = asyncio.create_task(self._serve(ex))
+                        task = ex.task = asyncio.create_task(self._serve(ex))
                         self.tasks.add(task)
                         task.add_done_callback(self.tasks.discard)
                     elif isinstance(ev, h2.events.DataReceived):
@@ -250,6 +262,7 @@ class H2Connection:
                         ex = self.exchanges.get(ev.stream_id)
                         if ex is not None:
                             ex.gone()
+                            ex.task.cancel()  # its work stops too: a client that opens and resets streams (rapid reset) cannot pile up handlers
                         self._wake()
                     elif isinstance(ev, (h2.events.WindowUpdated, h2.events.RemoteSettingsChanged)):
                         self._wake()
