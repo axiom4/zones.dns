@@ -87,3 +87,10 @@ app-audit-page .sumtile:disabled b { color: var(--muted); }
 app-audit-page .audit-filter { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; min-height: 2.5rem; margin-bottom: .6rem; }
 app-audit-page .audit-filter .check { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; }
 @media (max-width: 700px) { app-audit-page .audit-sum { gap: .4rem; } app-audit-page .sumtile { padding: .5rem .55rem; } app-audit-page .sumtile b { font-size: 1.4rem; } app-audit-page .sumtile span { font-size: 12px; } }
+
+/* Statistics: change against the previous period (arrow and number as text, colour only adds to it) */
+app-stats-page .dl { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted); white-space: nowrap; }
+app-stats-page .rate .dl { font-size: 13px; }
+app-stats-page .dl.good { color: var(--ok); }
+app-stats-page .dl.bad { color: var(--danger); }
+app-stats-page .tools { display: flex; flex-wrap: wrap; gap: .5rem; margin: 0 0 1rem; }

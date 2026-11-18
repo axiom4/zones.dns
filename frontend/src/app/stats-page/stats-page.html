@@ -15,6 +15,7 @@
       <option [ngValue]="168">Last 7 days</option>
       <option [ngValue]="720">Last 30 days</option>
     </select>
+    <button class="ghost" type="button" role="switch" [attr.aria-checked]="auto()" (click)="toggleAuto()" title="Reload every 30 seconds while this tab is visible">Auto-refresh: {{ auto() ? 'on' : 'off' }}</button>
     <button class="ghost" (click)="load()" [disabled]="loading()">{{ loading() ? 'Loading…' : 'Refresh' }}</button>
   </div>
 </header>
@@ -24,17 +25,18 @@
     <a class="rate" [routerLink]="logPath()" [queryParams]="logQ({ outcome: 'blocked' })">
       <b>{{ rate() | number: '1.0-1' }}%</b>
       <span>blocked: {{ outcome('blocked') | number }} of {{ st.total | number }} {{ st.total === 1 ? 'query' : 'queries' }}</span>
+      @if (deltas(); as d) { <small class="dl" [class]="'dl ' + d.rate.tone">{{ d.rate.txt }}<span class="sr-only"> {{ d.rate.sr }}</span></small> }
     </a>
     <dl class="figs">
-      <div><dt>Queries and requests</dt><dd><a [routerLink]="logPath()" [queryParams]="logQ()">{{ st.total | number }}</a></dd></div>
+      <div><dt>Queries and requests</dt><dd><a [routerLink]="logPath()" [queryParams]="logQ()">{{ st.total | number }}</a> @if (deltas(); as d) { <small class="dl" [class]="'dl ' + d.total.tone">{{ d.total.txt }}<span class="sr-only"> {{ d.total.sr }}</span></small> }</dd></div>
       <div><dt>From internal zones</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'local' })">{{ outcome('local') | number }}</a></dd></div>
       <div><dt>Forwarded</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'forwarded' })">{{ outcome('forwarded') | number }}</a></dd></div>
       @if (outcome('proxied') + outcome('filtered')) {
         <div><dt>Through the proxy</dt><dd><a routerLink="/logs/proxy">{{ outcome('proxied') | number }}</a></dd></div>
         <div><dt>Pages with ads removed</dt><dd><a routerLink="/logs/proxy">{{ outcome('filtered') | number }}</a></dd></div>
       }
-      <div><dt>Failed</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'error' })">{{ outcome('error') | number }}</a></dd></div>
-      <div><dt>Average time</dt><dd>{{ st.avg_ms | number: '1.0-0' }} ms</dd></div>
+      <div><dt>Failed</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'error' })">{{ outcome('error') | number }}</a> @if (deltas(); as d) { <small class="dl" [class]="'dl ' + d.error.tone">{{ d.error.txt }}<span class="sr-only"> {{ d.error.sr }}</span></small> }</dd></div>
+      <div><dt>Average time</dt><dd>{{ st.avg_ms | number: '1.0-0' }} ms @if (deltas(); as d) { <small class="dl" [class]="'dl ' + d.avg.tone">{{ d.avg.txt }}<span class="sr-only"> {{ d.avg.sr }}</span></small> }</dd></div>
       @if (st.timeouts) { <div><dt>Proxy timeouts</dt><dd>{{ st.timeouts | number }}</dd></div> }
     </dl>
   </section>
@@ -81,6 +83,8 @@
     } @else { <p class="soft">No queries in this period. Pick a longer period, or check that clients use this server for DNS.</p> }
   </section>
 
+  <p class="tools"><button class="ghost" (click)="download()">Download CSV</button> <button class="ghost" (click)="copy()">Copy as CSV</button></p>
+
   <section class="panel">
     <h3>Answers</h3>
     @for (a of answers(); track a.name) {
@@ -110,6 +114,15 @@
           <a class="n" [routerLink]="logPath()" [queryParams]="logQ({ q: d.name, outcome: 'blocked' })" [attr.aria-label]="d.name + ': see why it was blocked'">{{ d.name }}</a><span class="c">{{ d.count | number }}</span></div>
       } @empty { <p class="soft">Nothing was blocked in this period.</p> }
     </section>
+    @if (st.top_timeouts.length) {
+      <section class="panel">
+        <h3>Sites with the most proxy timeouts</h3>
+        @for (d of st.top_timeouts; track d.name) {
+          <div class="row"><span class="bar warn" [style.width.%]="pct(d.count, st.top_timeouts)"></span>
+            <a class="n" routerLink="/logs/proxy" [queryParams]="logQ({ q: d.name, outcome: 'timeout' })">{{ d.name }}</a><span class="c">{{ d.count | number }}</span></div>
+        }
+      </section>
+    }
     <section class="panel">
       <h3>Most active clients</h3>
       @for (d of st.top_clients; track d.name) {

@@ -1,5 +1,5 @@
 import { DecimalPipe } from '@angular/common';
-import { Component, computed, inject, signal } from '@angular/core';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
@@ -65,7 +65,23 @@ export class StatsPage {
   });
 
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
+  /** Totals of the window just before the shown one, null while unknown or when it cannot be told (30 days: the API reaches back 720 hours only). */
+  prev = signal<{ total: number; blocked: number; error: number; avg: number } | null>(null);
+  auto = signal(localStorage.getItem('stats.auto') === '1');
+  private timer?: ReturnType<typeof setInterval>;
+  toggleAuto() {
+    this.auto.update(v => !v); localStorage.setItem('stats.auto', this.auto() ? '1' : '0');
+    this.arm();
+  }
+  private arm() {
+    clearInterval(this.timer);
+    // in-flight guard: a slow answer never stacks requests; a hidden tab waits for the next tick after it is shown again
+    if (this.auto()) this.timer = setInterval(() => { if (!document.hidden && !this.loading()) this.load(true); }, 30_000);
+  }
   constructor() {
+    this.destroyRef.onDestroy(() => clearInterval(this.timer));
+    this.arm();
     const p = inject(ActivatedRoute).snapshot.queryParamMap; // ?hours=168&source=dns: a reload or a shared link keeps the view
     if ([1, 24, 168, 720].includes(Number(p.get('hours')))) this.hours = Number(p.get('hours'));
     if (p.get('source') === 'dns' || p.get('source') === 'proxy') this.source = p.get('source') as 'dns' | 'proxy';
@@ -77,7 +93,7 @@ export class StatsPage {
     this.load();
   }
 
-  load() {
+  load(quiet = false) {
     return this.ui.run(async () => {
       // 7 and 30 days are whole calendar days in the browser's time zone, today included: exactly 7 (or 30) bars, and the numbers above them
       // cover the same window as the chart
@@ -87,12 +103,58 @@ export class StatsPage {
         from = first.getTime(); hours = Math.min(Math.ceil((Date.now() - from) / 3_600_000), 720); since = first.toISOString();
       }
       this.loading.set(true);
+      // The API has no end param: ask for a window twice as long (it also ends now) and take the current one off it. Totals, counts and
+      // time sums add up, so the difference is the previous window (shortcut: it drifts by the queries that arrive between the two requests).
+      let prevP: Promise<Stats | null> = Promise.resolve(null);
+      if (this.hours < 720) {
+        const long = since ? { since: new Date(new Date(since).setDate(new Date(since).getDate() - this.hours / 24)).toISOString() } : { hours: hours * 2 };
+        prevP = this.api.invoke(statsRetrieve, { ...long, source: this.source }).catch(() => null);
+      }
       try {
         const st = await this.api.invoke(statsRetrieve, { hours, since, source: this.source });
+        const big = await prevP, n = (x: Stats, k: string) => x.by_outcome.find(c => c.name === k)?.count ?? 0;
+        const total = big ? big.total - st.total : 0;
+        this.prev.set(big && total > 0 ? { total, blocked: n(big, 'blocked') - n(st, 'blocked'), error: n(big, 'error') - n(st, 'error'), avg: (big.avg_ms * big.total - st.avg_ms * st.total) / total } : null);
         this.period.set(hours); this.from.set(from); this.stats.set(st); this.failed.set(false); this.sel.set(-1);
       } catch (e) { this.failed.set(true); throw e; }
       finally { this.loading.set(false); }
-    });
+    }, { silent: quiet });
+  }
+  /** Change against the previous period: arrow and percent as text, a tone for the colour (more blocked is not bad news; slower and more failures are). */
+  delta(cur: number, prev: number | undefined, worse: 'up' | 'down' | 'none', points = false) {
+    if (prev === undefined || !isFinite(prev) || !prev) return { txt: '—', tone: '', sr: 'no comparison with the previous period' };
+    const d = points ? cur - prev : ((cur - prev) / prev) * 100, r = Math.round(d * 10) / 10;
+    if (!r) return { txt: '= 0%', tone: '', sr: 'unchanged from the previous period' };
+    const up = r > 0, a = Math.abs(r), txt = `${up ? '▲' : '▼'} ${a}${points ? ' pp' : '%'}`;
+    return { txt, tone: worse === 'none' ? '' : (up === (worse === 'up') ? 'bad' : 'good'), sr: `${up ? 'up' : 'down'} ${a}${points ? ' percentage points' : '%'} from the previous period` };
+  }
+  deltas = computed(() => {
+    const st = this.stats(), p = this.prev();
+    if (!st || !p) return null;
+    const share = (b: number, t: number) => (t ? (b / t) * 100 : 0);
+    return {
+      total: this.delta(st.total, p.total, 'none'),
+      rate: this.delta(this.rate(), share(p.blocked, p.total), 'none', true),
+      avg: this.delta(st.avg_ms, p.avg, 'up'),
+      error: this.delta(this.outcome('error'), p.error, 'up'),
+    };
+  });
+  /** Series and top lists as CSV (RFC 4180 quoting), downloaded or copied. */
+  private csv() {
+    const st = this.stats(); if (!st) return '';
+    const q = (v: string | number) => `"${String(v).replace(/"/g, '""').replace(/^([=+\-@])/, "'$1")}"`; // a leading = + - @ would run as a formula in a spreadsheet
+    const rows: (string | number)[][] = [['section', 'name', 'count', 'blocked', 'proxy', 'proxy blocked']];
+    for (const b of this.bars()) rows.push([`per ${this.grain().name}`, new Date(b.at).toISOString(), b.count, b.blocked, b.pcount, b.proxy]);
+    for (const [k, l] of [['top_domains', 'domains'], ['top_blocked', 'blocked'], ['top_clients', 'clients'], ['top_timeouts', 'timeouts'], ['by_type', 'types']] as const)
+      for (const c of st[k]) rows.push([l, c.name, c.count]);
+    return rows.map(r => r.map(q).join(',')).join('\r\n');
+  }
+  download() {
+    const a = document.createElement('a'), u = URL.createObjectURL(new Blob(['\ufeff' + this.csv()], { type: 'text/csv;charset=utf-8' }));
+    a.href = u; a.download = `statistics-${this.source}-${this.hours}h.csv`; a.click(); URL.revokeObjectURL(u);
+  }
+  async copy() {
+    try { await navigator.clipboard.writeText(this.csv()); this.ui.toast('CSV copied'); } catch { this.ui.toast('Copy not allowed here: use Download CSV'); }
   }
   block(name: string) {
     this.ui.ask(`Block ${name}?`, 'The domain and its subdomains will receive NXDOMAIN from the next query. Undo it in Blocklist > Personal blocks.', () =>
