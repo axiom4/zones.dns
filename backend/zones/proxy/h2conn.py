@@ -174,7 +174,7 @@ class H2Connection:
                     return
                 window = min(self.h2.local_flow_control_window(stream_id), self.h2.max_outbound_frame_size)
                 if window <= 0:
-                    await self._window.wait()
+                    await asyncio.wait_for(self._window.wait(), 60)  # a client that never opens its window: TimeoutError, the stream is reset
                     continue
                 n = min(window, len(view))
                 self.h2.send_data(stream_id, bytes(view[:n]), end_stream=end and n == len(view))

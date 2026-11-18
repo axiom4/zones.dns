@@ -12,6 +12,7 @@ from functools import lru_cache, partial
 from http import HTTPStatus
 import ipaddress
 import queue
+import re
 import socket
 import ssl
 import sys
@@ -144,6 +145,10 @@ def note_empty_mitm_session(client_ip, host):
     return False
 
 
+# Sensitive services (SSH, telnet, mail, databases, caches...): never reachable by plain HTTP or MITM requests, whatever the port policy says
+SENSITIVE_PORTS = frozenset({22, 23, 25, 110, 143, 465, 587, 993, 995, 1433, 3306, 5432, 6379, 9200, 11211, 27017})
+
+
 @lru_cache(maxsize=4)
 def _connect_ports(raw):
     raw = str(raw or '').strip()
@@ -226,6 +231,7 @@ def _with_via(prev):
 def _redact_url(url):
     """The URL for the log without the values of its query: they carry sign-in codes, tokens and keys. The parameter names stay."""
     base, sep, query = str(url or '').partition('?')
+    base = re.sub(r'^([a-zA-Z][a-zA-Z0-9+.-]*://)[^/?#]*@', r'\1', base)  # no user:password
     if not sep:
         return base
     names = [p.partition('=')[0] for p in query.split('&') if p]
@@ -536,11 +542,12 @@ class H1Exchange:
 
     @staticmethod
     def _encode(headers):
-        return [(k.encode('latin-1'), str(v).encode('latin-1')) for k, v in headers if k.lower() != 'connection']
+        # backslashreplace: a rule text outside latin-1 (X-Blocked-By) is escaped, not an error after the answer has started
+        return [(k.encode('latin-1'), str(v).encode('latin-1', 'backslashreplace')) for k, v in headers if k.lower() != 'connection']
 
     async def start(self, status, reason, headers, end=False, close=False):
-        self.started = True
         hdrs = self._encode(headers)
+        self.started = True
         if close or not self.keep_alive:
             hdrs.append((b'connection', b'close'))
         await self.conn.send(h11.Response(status_code=status, headers=hdrs, reason=(reason or _phrase(status)).encode('latin-1')))
@@ -859,11 +866,11 @@ class Client:
                 self.log(ex.method, '', target, 'error', 400, 'No Host header', t0)
                 return await self.text(ex, 400, 'Bad Request')
             full_url = f'http://{host_hdr}{target}'
-        elif target.startswith(('http://', 'https://')):
-            full_url = target
-        elif scheme and default_host:
+        elif scheme and default_host and target.startswith('/'):  # inside a tunnel only a path: `@evil:25/` would turn the tunnel's host into userinfo
             port_part = f':{default_port}' if default_port and default_port not in (80, 443) else ''
             full_url = f'{scheme}://{default_host}{port_part}{target}'
+        elif target.startswith(('http://', 'https://')) and not scheme:
+            full_url = target
         else:
             self.log(ex.method, '', target, 'error', 400, 'Unusable request target', t0)
             return await self.text(ex, 400, 'Bad Request')
@@ -876,6 +883,9 @@ class Client:
         except ValueError:  # a port that is not a number or out of range
             self.log(ex.method, '', full_url, 'error', 400, 'Bad port in the request target', t0)
             return await self.text(ex, 400, 'Bad Request')
+        if port in SENSITIVE_PORTS or (scheme is None and port < 1024 and port not in (80, 443) and not _connect_port_allowed(port)):  # CONNECT's port policy for the well-known ports (mail, SSH...); high ports stay open for plain HTTP
+            self.log(ex.method, host, full_url, 'error', 403, f'Port {port} is not allowed (PROXY_CONNECT_PORTS / SENSITIVE_PORTS)', t0)
+            return await self.text(ex, 403, 'Forbidden port')
         path_query = (parts.path or '/') + (f'?{parts.query}' if parts.query else '')
         log_method = f'MITM {ex.method}' if scheme == 'https' else ex.method
 
@@ -921,7 +931,7 @@ class Client:
         sec_dest = ex.header('sec-fetch-dest').strip().lower()
         is_bg_fetch = (sec_dest and sec_dest != 'document') or ex.header('x-requested-with').strip().lower() == 'xmlhttprequest'
         filter_enabled = bool(getattr(s, 'PROXY_BLOCK_ADS', True) or getattr(s, 'PROXY_BLOCK_POPUPS', True))
-        may_filter = filter_enabled and not is_bg_fetch and ex.method != 'HEAD'  # only a page itself is filtered, never what it fetches
+        may_filter = filter_enabled and not is_bg_fetch and ex.method != 'HEAD' and not ex.header('range')  # only a page itself is filtered, never what it fetches
         hop = _hop_headers(ex.get_all('connection'))
         fwd = {}
         for k, v in ex.headers:
@@ -1074,7 +1084,7 @@ class Client:
         low_ctype = ctype.lower()
         no_body = ex.method == 'HEAD' or status in (204, 304)
         buffer_html = (
-            info.may_filter and not no_body and 'text/html' in low_ctype and '/cdn-cgi/' not in info.path_query
+            info.may_filter and status != 206 and not no_body and 'text/html' in low_ctype and '/cdn-cgi/' not in info.path_query
             and 'no-transform' not in cache_control.lower()  # RFC 9110 7.7: a proxy must not transform it
             and not (clen_hdr.isdigit() and not chunked_up and int(clen_hdr) > MAX_HTML_BYTES)
         )
@@ -1128,7 +1138,7 @@ class Client:
         out_headers = [(k, v) for k, v in rh if k.lower() not in hop_resp and k.lower() not in ('content-length', 'content-encoding', 'via')]
         html_filtered = False
         if (
-            info.may_filter and '/cdn-cgi/' not in info.path_query and 'text/html' in ctype.lower()
+            info.may_filter and status != 206 and '/cdn-cgi/' not in info.path_query and 'text/html' in ctype.lower()
             and 'no-transform' not in cache_control.lower() and len(raw_body) <= MAX_HTML_BYTES
         ):
             try:
@@ -1213,7 +1223,9 @@ class Client:
     async def mitm(self, ex, host, port, target_url, t0):
         raw = await ex.establish()
         try:
-            ctx = await _run(_WORK, pfilter.run_on_db_pool, ca.leaf_context, host)
+            if ca._cached_ca is None:
+                await _run(_WORK, pfilter.run_on_db_pool, ca.ensure_ca)  # the one database read: the pool; signing is CPU work for _WORK
+            ctx = await _run(_WORK, ca.leaf_context, host)
         except Exception as e:
             _warn(f'MITM {host}: {_why(e)}')
             self.log('MITM', host, target_url, 'error', 500, f'Internal error: {_why(e)}', t0)
@@ -1262,13 +1274,15 @@ async def _pipe(a, b):
                     continue  # the other direction is busy (a download): not idle
                 return
             if not data:
+                if hasattr(dst, 'write_eof'):
+                    dst.write_eof()  # half-close: the other direction may still have an answer to send
                 return
             last[0] = time.monotonic()
             await dst.write(data)
 
     tasks = [asyncio.create_task(copy(a, b)), asyncio.create_task(copy(b, a))]
     try:
-        await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
+        await asyncio.wait(tasks, return_when=asyncio.FIRST_EXCEPTION)
     finally:
         for t in tasks:
             t.cancel()

@@ -27,6 +27,9 @@ def keepalive(writer):
             pass  # not a TCP socket (the tests use socketpair)
 
 
+WRITE_TIMEOUT = 60
+
+
 class RawStream:
     """A TCP connection (asyncio reader and writer); `prefix`: bytes already read from it, handed out first."""
 
@@ -48,7 +51,7 @@ class RawStream:
     async def write(self, data):
         if data and not self.eof_sent:  # after write_eof() nothing more may go out (a TLS close_notify, say)
             self.writer.write(data)
-            await self.writer.drain()
+            await asyncio.wait_for(self.writer.drain(), WRITE_TIMEOUT)  # a client that stopped reading must not hold the stream for ever
 
     def write_eof(self):
         if not self.eof_sent and self.writer.can_write_eof():

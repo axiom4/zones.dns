@@ -101,6 +101,8 @@ def ensure_ca(regenerate=False, refresh=False):
         except DatabaseError:
             if _cached_ca is not None and not regenerate:
                 return _cached_ca  # a refresh while the database is away: never a new CA for that
+            if not regenerate:
+                raise  # a failed read says nothing about the stored CA: never a new CA for that
             rows = {}
         cert_pem, key_pem = rows.get(CA_CERT_KEY, ''), rows.get(CA_PRIV_KEY, '')
         if not regenerate and cert_pem and key_pem:

@@ -55,6 +55,18 @@ class CaRefreshTests(TestCase):
         self.assertNotIn('a.example', ca._leaf_contexts)
 
 
+    def test_a_database_error_with_no_cached_ca_is_not_a_new_ca(self):
+        from unittest import mock
+        from django.db import DatabaseError
+        ca.ensure_ca()
+        Setting.objects.filter(key__in=(ca.CA_CERT_KEY, ca.CA_PRIV_KEY)).delete()
+        with mock.patch.object(ca, '_cached_ca', None), mock.patch.object(ca.Setting.objects, 'filter', side_effect=DatabaseError('away')), \
+                mock.patch.object(ca, '_generate_ca') as gen:
+            with self.assertRaises(DatabaseError):
+                ca.ensure_ca()
+        gen.assert_not_called()
+
+
 class _Pipe:
     """The server side of an in-memory connection: what the client h2 writes is read here, what the server writes goes to `out`."""
 
@@ -190,3 +202,86 @@ class TlsOnPlainPortTests(TestCase):
         self.assertEqual(ps._tls_sni(hello), 'www.example.org')
         self.assertIsNone(ps._tls_sni(b'GET / HTTP/1.1\r\n'))
         self.assertIsNone(ps._tls_sni(hello[:20]))  # cut short
+
+
+class FilterLinearTests(TestCase):
+    def test_unclosed_tags_are_filtered_in_linear_time(self):
+        import time
+        for tag in ('<script>', '<iframe ', '<meta ', '<head '):
+            t0 = time.monotonic()
+            pfilter.filter_html((tag * 40000).encode())
+            self.assertLess(time.monotonic() - t0, 1, tag)
+
+    def test_blocked_script_still_replaced(self):
+        class S:
+            PROXY_CUSTOM_RULES = '||evil.test^'
+        out = pfilter.filter_html(b'<head></head><script src="http://evil.test/a.js"></script><p>x</p>', s=S).decode()
+        self.assertIn('<!-- blocked script -->', out)
+        self.assertIn('<p>x</p>', out)
+
+    def test_long_url_is_capped_for_rules(self):
+        class S:
+            PROXY_CUSTOM_RULES = 'a*a*a*a*a*a*b'
+        t0 = __import__('time').monotonic()
+        pfilter.check_request('example.com', 'http://example.com/' + 'a' * 60000, s=S, dns=False)
+        self.assertLess(__import__('time').monotonic() - t0, 1)
+
+
+class ProxyHardeningTests(TestCase):
+    def test_redact_url_drops_userinfo(self):
+        self.assertEqual(ps._redact_url('http://u:pw@h/p?a=1'), 'http://h/p?a=…')
+
+    def test_header_outside_latin1_is_escaped(self):
+        self.assertEqual(ps.H1Exchange._encode([('X-Blocked-By', 'a中')]), [(b'X-Blocked-By', b'a\\u4e2d')])
+
+    def test_nested_quantifier_regex_rules_are_ignored(self):
+        import time
+        raw = '/(a+)+/\n/(a*)*b/\n/(.+)*x/\n/ads\\d+/'
+        t0 = time.monotonic()
+        _, pats, _, _ = pfilter.parse_custom_rules(raw)
+        self.assertEqual([p for p, _ in pats], ['/ads\\d+/'])  # the safe one stays
+        self.assertIsNone(pfilter.check_request('a.test', 'http://a.test/' + 'a' * 2000 + '!', s=type('S', (), {'PROXY_CUSTOM_RULES': raw}), dns=False))
+        self.assertLess(time.monotonic() - t0, 1)
+
+    def test_sensitive_ports_are_refused_for_plain_http_even_when_high_or_allowed(self):
+        from django.test import override_settings
+        from .tests_proxy import RfcAndSecurityTests
+        self.assertTrue({22, 25, 3306, 5432, 6379, 11211, 27017} <= ps.SENSITIVE_PORTS)
+        with override_settings(PROXY_CONNECT_PORTS='*'):
+            for port in (3306, 6379, 22):
+                resp, seen = RfcAndSecurityTests._session(self, f'GET http://127.0.0.1:{port}/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'.encode())
+                self.assertIn(b'403', resp.split(b'\r\n', 1)[0])
+                self.assertEqual(seen, {})
+            resp, _ = RfcAndSecurityTests._session(self, b'GET http://127.0.0.1:8080/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n')
+            self.assertIn(b'200 OK', resp)
+
+    def test_pipe_half_close_passes_eof_and_the_late_answer(self):
+        class End:
+            def __init__(self, chunks):
+                self.q, self.got, self.eof = asyncio.Queue(), bytearray(), False
+                for c in chunks:
+                    self.q.put_nowait(c)
+
+            async def read(self, n=65536, timeout=None):
+                return await self.q.get()
+
+            async def write(self, data):
+                self.got += data
+
+            def write_eof(self):
+                self.eof = True
+
+        async def go():
+            a, b = End([b'req', b'']), End([])
+            async def late():  # the server answers after the client's half-close
+                while not b.eof:
+                    await asyncio.sleep(0.01)
+                b.q.put_nowait(b'resp')
+                b.q.put_nowait(b'')
+            t = asyncio.create_task(late())
+            await asyncio.wait_for(ps._pipe(a, b), 5)
+            await t
+            return a, b
+        a, b = asyncio.run(go())
+        self.assertEqual(bytes(b.got), b'req')
+        self.assertEqual(bytes(a.got), b'resp')

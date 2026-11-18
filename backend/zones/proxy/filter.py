@@ -1,6 +1,7 @@
 """Content, URL, and domain filtering for the HTTP/HTTPS proxy: ad blocking, cosmetic CSS, and popup/popunder blocking."""
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from functools import lru_cache
+import bisect
 import html
 import re
 import threading
@@ -127,13 +128,51 @@ POPUP_BLOCKER_JS = (
     '})();</script>'
 )
 
-_SCRIPT_TAG_RX = re.compile(r'<script\b([^>]*)>(.*?)</script\s*>', re.IGNORECASE | re.DOTALL)
-_IFRAME_TAG_RX = re.compile(r'<iframe\b([^>]*)>.*?</iframe\s*>', re.IGNORECASE | re.DOTALL)
+_MAX_RULE_URL = 2048  # URLs are matched against user regexes: bound the work
+_OPEN_RX = {t: re.compile(rf'<{t}\b', re.IGNORECASE) for t in ('script', 'iframe', 'meta', 'head')}
+_CLOSE_RX = {t: re.compile(rf'</{t}\s*>', re.IGNORECASE) for t in ('script', 'iframe')}
+
+
+def _tags(text, tag):
+    """Yield (start, index of the `>`) of each `<tag ...>`, in one linear pass (regexes with `[^>]*` / `.*?` are quadratic on unclosed tags)."""
+    pos = 0
+    for m in _OPEN_RX[tag].finditer(text):
+        if m.start() < pos:
+            continue
+        gt = text.find('>', m.end())
+        if gt < 0:
+            return
+        pos = gt + 1
+        yield m.start(), gt
+
+
+def _sub_paired(text, tag, fn):
+    """Replace each `<tag attrs>body</tag>` with fn(whole, attrs, body); an unclosed tag is left alone."""
+    closes = [(m.start(), m.end()) for m in _CLOSE_RX[tag].finditer(text)]
+    starts = [c[0] for c in closes]
+    out, last = [], 0
+    for st, gt in _tags(text, tag):
+        if st < last:
+            continue
+        i = bisect.bisect_left(starts, gt + 1)
+        if i == len(starts):
+            break
+        cs, ce = closes[i]
+        out.append(text[last:st])
+        out.append(fn(text[st:ce], text[st + len(tag) + 1:gt], text[gt + 1:cs]))
+        last = ce
+    out.append(text[last:])
+    return ''.join(out)
 _SRC_ATTR_RX = re.compile(r'\bsrc\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s>]+))', re.IGNORECASE)
-_HEAD_OPEN_RX = re.compile(r'(<head\b[^>]*>)', re.IGNORECASE)
 _HEAD_CLOSE_RX = re.compile(r'(</head\s*>)', re.IGNORECASE)
 _CHARSET_RX = re.compile(r'charset\s*=\s*([a-zA-Z0-9._-]+)', re.IGNORECASE)
 _NO_HTML_FILTER_DOMAINS = frozenset({'challenges.cloudflare.com', 'hcaptcha.com', 'recaptcha.net'})
+
+
+def _wild(rule):
+    """`a*b*c` as a regex: each `*` is an atomic lazy gap, so a failing match is not retried at every split (no `.*.*.*` blowup)."""
+    first, *rest = (re.escape(p) for p in rule.split('*'))
+    return first + ''.join(f'(?>.*?{p})' for p in rest)
 
 
 @lru_cache(maxsize=32)
@@ -173,19 +212,21 @@ def parse_custom_rules(raw_rules):
             if not rule:
                 continue
             if len(rule) >= 2 and rule.startswith('/') and rule.endswith('/'):
+                if resolver._NESTED_QUANTIFIER.search(rule):
+                    continue  # (a+)+ and the like backtrack catastrophically (and stall the whole proxy on the GIL): the rule does nothing
                 try:
                     url_patterns.append((line, re.compile(rule[1:-1], re.IGNORECASE)))
                 except re.error:
                     pass
             elif rule.startswith('||'):
                 body = rule[2:].rstrip('^')
-                pat = r'(?:^|[/.])' + r'.*'.join(re.escape(p) for p in body.split('*')).replace(r'\^', r'(?:[/?#:]|$)')
+                pat = r'(?:^|[/.])' + _wild(body).replace(r'\^', r'(?:[/?#:]|$)')
                 try:
                     url_patterns.append((line, re.compile(pat, re.IGNORECASE)))
                 except re.error:
                     pass
             else:
-                pat = r'.*'.join(re.escape(p) for p in rule.split('*')).replace(r'\^', r'(?:[/?#:]|$)')
+                pat = _wild(rule).replace(r'\^', r'(?:[/?#:]|$)')
                 url_patterns.append((line, re.compile(pat, re.IGNORECASE)))
     return allow_domains, url_patterns, global_css, domain_css
 
@@ -218,7 +259,7 @@ def check_request(host, url='', s=None, dns=True):
             return ('blacklist', f'{hit[0]} ({hit[1]})')
         if hit := rules.blocked_by(h, ext):
             return ('rule-list', f'{hit[0]} ({hit[1]})')
-    full_url = url or h
+    full_url = (url or h)[:_MAX_RULE_URL]
     if block_popups and full_url and (m := POPUP_URL_RX.search(full_url)):
         return ('popup-url', m.group(0))
     if block_ads and full_url and (m := AD_URL_RX.search(full_url)):
@@ -245,7 +286,6 @@ def _src_is_blocked(src, page_host, s):
 
 
 _UNDECODABLE_RX = re.compile('[\udc80-\udcff]')
-_META_RX = re.compile(r'<meta\b[^>]*>', re.IGNORECASE)
 _HTTP_EQUIV_CSP_RX = re.compile(r'''\bhttp-equiv\s*=\s*["']?content-security-policy["'\s>]''', re.IGNORECASE)
 _CONTENT_ATTR_RX = re.compile(r'''\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')''', re.IGNORECASE)
 
@@ -253,7 +293,8 @@ _CONTENT_ATTR_RX = re.compile(r'''\bcontent\s*=\s*(?:"([^"]*)"|'([^']*)')''', re
 def meta_csp(text):
     """The policies a page declares in <meta http-equiv="Content-Security-Policy" content="..."> (the browser applies them like the header)."""
     out = []
-    for tag in _META_RX.findall(text):
+    for st, gt in _tags(text, 'meta'):
+        tag = text[st:gt + 1]
         if _HTTP_EQUIV_CSP_RX.search(tag) and (m := _CONTENT_ATTR_RX.search(tag)):
             out.append(html.unescape(m.group(1) if m.group(1) is not None else m.group(2)))
     return out
@@ -309,25 +350,23 @@ def filter_html(html_bytes, content_type='', host='', s=None, csp=''):
     if len(_UNDECODABLE_RX.findall(text)) > max(8, len(text) // 20):
         raise ValueError('Compressed or non-text payload cannot be filtered as HTML')
 
-    def _clean_script(match):
-        attrs, body = match.group(1), match.group(2)
+    def _clean_script(whole, attrs, body):
         src = _extract_src(attrs)
         if src and _src_is_blocked(src, h, s):
             return '<!-- blocked script -->'
         if block_popups and body and INLINE_POPUP_RX.search(body):
             return '<!-- blocked popup script -->'
-        return match.group(0)
+        return whole
 
-    def _clean_iframe(match):
-        attrs = match.group(1)
+    def _clean_iframe(whole, attrs, body):
         src = _extract_src(attrs)
         if src and _src_is_blocked(src, h, s):
             return '<!-- blocked iframe -->'
-        return match.group(0)
+        return whole
 
-    text = _SCRIPT_TAG_RX.sub(_clean_script, text)
+    text = _sub_paired(text, 'script', _clean_script)
     if block_ads:
-        text = _IFRAME_TAG_RX.sub(_clean_iframe, text)
+        text = _sub_paired(text, 'iframe', _clean_iframe)
 
     csp = ', '.join(p for p in [csp, *meta_csp(text)] if p)
     injections = []
@@ -348,8 +387,8 @@ def filter_html(html_bytes, content_type='', host='', s=None, csp=''):
         snippet = ''.join(injections)
         if _HEAD_CLOSE_RX.search(text):
             text = _HEAD_CLOSE_RX.sub(lambda m: snippet + m.group(1), text, count=1)
-        elif _HEAD_OPEN_RX.search(text):
-            text = _HEAD_OPEN_RX.sub(lambda m: m.group(1) + snippet, text, count=1)
+        elif head := next(_tags(text, 'head'), None):
+            text = text[:head[1] + 1] + snippet + text[head[1] + 1:]
         else:
             text = snippet + text
 
