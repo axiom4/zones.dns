@@ -28,6 +28,22 @@ DISCOVER, OFFER, REQUEST, DECLINE, ACK, NAK, RELEASE, INFORM, FORCERENEW = 1, 2,
 DHCPLEASEQUERY, DHCPLEASEUNASSIGNED, DHCPLEASEUNKNOWN, DHCPLEASEACTIVE = 10, 11, 12, 13
 OFFER_HOLD, BLOCK_HOLD = 60, 600  # seconds: an offer waits for the REQUEST; a refused or answering address stays out of the pool
 ZERO = ipaddress.IPv4Address(0)
+
+
+class Bucket:
+    """Token bucket per client (burst 5, one more every 10 s): DISCOVER / SOLICIT each write a hold row, so one host forging MACs / DUIDs
+    must not fill the pool. The table is bounded: the oldest entry goes first."""
+    def __init__(self, burst=5, every=10.0, size=4096):
+        self.burst, self.every, self.size, self.t = burst, every, size, {}
+
+    def allow(self, key):
+        now = time.monotonic()
+        tokens, last = self.t.pop(key, (self.burst, now))
+        tokens = min(self.burst, tokens + (now - last) / self.every)
+        self.t[key] = (tokens - 1 if tokens >= 1 else tokens, now)
+        if len(self.t) > self.size:
+            self.t.pop(next(iter(self.t)))
+        return tokens >= 1
 BROADCAST = '255.255.255.255'
 
 DHCP_SETTING_SPEC = (
@@ -333,9 +349,9 @@ def ping(ip):
     """Does something answer at this address? Tries an ARP probe on DHCP_INTERFACE first (if available), then one ICMP echo (RFC 2131 3.1.2)."""
     if arp_probe(ip):
         return True
-    wait = '1000' if sys.platform == 'darwin' else '1'  # -W is milliseconds on macOS, seconds on Linux
-    try:
-        return subprocess.run(['ping', '-c', '1', '-W', wait, ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3).returncode == 0
+    wait = '500' if sys.platform == 'darwin' else '1'  # -W is milliseconds on macOS, seconds on Linux
+    try:  # the timeout cuts the Linux minimum of 1 s: the single-threaded loop waits here, so a probe is at most 0.25 s (ARP) + 0.5 s
+        return subprocess.run(['ping', '-c', '1', '-W', wait, ip], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=0.5).returncode == 0
     except (OSError, subprocess.TimeoutExpired):
         return False  # no ping program: no probe
 
@@ -399,7 +415,7 @@ class Server:
         self.cfg = self.cfgs[0]  # the network of this host
         self.probe = probe if probe is not None else (ping if self.cfg.probe else None)
         self._base = [dict(c.reservations) for c in self.cfgs]  # the ones from DHCP_RESERVATIONS; the table of the GUI is added on top
-        self._seen, self.names = None, {}
+        self._seen, self.names, self.bucket = None, {}, Bucket()
 
     def _refresh(self):
         """Reservations made in the GUI take effect at once: reloaded when the data counter moves."""
@@ -440,6 +456,8 @@ class Server:
         if kind == DISCOVER:
             if cfg.failover_secs > 0 and req.get('secs', 0) < cfg.failover_secs:
                 return None  # standby server: let primary answer first unless client has been retrying for >= failover_secs
+            if mac not in cfg.reservations and not self.bucket.allow(mac):
+                return None  # more than the burst of DISCOVERs from one MAC: no more hold rows
             for _ in range(5):
                 ip, fresh = self._pick(cfg, mac, key, want, now)
                 if ip is None:
@@ -468,7 +486,8 @@ class Server:
             return self._send(req, self._reply(cfg, req, ZERO, ACK, False, ciaddr=req['ciaddr']), str(req['ciaddr']), False)
         if kind == RELEASE:
             DhcpLease.objects.filter(client=key, ip=str(req['ciaddr'])).delete()
-        elif kind == DECLINE and want and self._ok(cfg, want, mac, key, now):
+        elif kind == DECLINE and want and self._ok(cfg, want, mac, key, now) and (
+                mac in cfg.reservations or DhcpLease.objects.filter(client=key, ip=str(want), expires__gt=now).exists()):  # only an address it holds or was offered
             DhcpLease.objects.filter(client=key).delete()
             max_declined = max(1, (int(cfg.last) - int(cfg.first) + 1) // 2)
             active_declined = DhcpLease.objects.filter(client__startswith='declined-', expires__gt=now)

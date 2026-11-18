@@ -659,6 +659,7 @@ class DhcpTests(TestCase):
         self.assertTrue(DhcpLease.objects.filter(ip='192.168.1.101').exists())
         self.reply('aa:aa:aa:aa:aa:30', 7, ciaddr=bytes([192, 168, 1, 101]))
         self.assertFalse(DhcpLease.objects.filter(ip='192.168.1.101').exists())
+        self.reply('aa:aa:aa:aa:aa:31', 3, o50=bytes([192, 168, 1, 100]))  # a decline counts only for an address the client holds
         self.reply('aa:aa:aa:aa:aa:31', 4, o50=bytes([192, 168, 1, 100]))  # declined: out of the pool for a while
         r, _ = self.reply('aa:aa:aa:aa:aa:32', 1)
         self.assertEqual(r['yiaddr'], '192.168.1.101')
@@ -893,6 +894,7 @@ class Dhcp6Tests(TestCase):
         self.s.handle(self.msg(8, sid=self.s.duid, ias=[self.ia(IA_NA, 5)]))  # release
         from .models import Dhcp6Lease
         self.assertFalse(Dhcp6Lease.objects.filter(duid='000361626 3'.replace(' ', ''), iaid=5).exists())
+        self.s.handle(self.msg(3, sid=self.s.duid, ias=[self.ia(IA_NA, 5, good)]))  # a decline counts only for an address the client holds
         self.s.handle(self.msg(9, sid=self.s.duid, ias=[self.ia(IA_NA, 5, good)]))  # decline: that address is out for a while
         _, _, o = parse(self.s.handle(self.msg(3, cid=b'\x00\x03zzz', sid=self.s.duid, ias=[self.ia(IA_NA, 1)])))
         self.assertEqual(str(ipaddress.IPv6Address(options(o[IA_NA][0][12:])[IAADDR][0][:16])), '2001:db8:1::101')

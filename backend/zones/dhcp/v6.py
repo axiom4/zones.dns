@@ -52,6 +52,9 @@ def fqdn_host(value):
     return dhcp.clean_hostname(value[2:2 + value[1]])
 
 
+_PEER_MACS = {}  # (address, interface) -> (mac, when read)
+
+
 def peer_mac(peer_ip, interface):
     """The MAC address behind the link-local address a client wrote from: read from an EUI-64 address, else from the kernel's neighbour table (Linux `ip`).
     '' when unknown (a relayed message, a privacy address that is not in the table yet: the next Renew finds it)."""
@@ -64,6 +67,9 @@ def peer_mac(peer_ip, interface):
     b = addr.packed
     if b[11:13] == b'\xff\xfe':
         return ':'.join(f'{x:02x}' for x in (b[8] ^ 2, b[9], b[10], b[13], b[14], b[15]))
+    hit = _PEER_MACS.get((addr, interface))
+    if hit and time.monotonic() - hit[1] < 5:
+        return hit[0]  # a flood of Solicits from one address must not fork `ip` each time
     ip = ip_command()
     if not ip:
         return ''
@@ -72,7 +78,11 @@ def peer_mac(peer_ip, interface):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=2).stdout.split()
     except (OSError, subprocess.TimeoutExpired):
         return ''
-    return out[out.index('lladdr') + 1].lower() if 'lladdr' in out and out.index('lladdr') + 1 < len(out) else ''
+    mac = out[out.index('lladdr') + 1].lower() if 'lladdr' in out and out.index('lladdr') + 1 < len(out) else ''
+    if len(_PEER_MACS) >= 1024:
+        _PEER_MACS.clear()
+    _PEER_MACS[(addr, interface)] = (mac, time.monotonic())
+    return mac
 
 
 def sync_pd_route(prefix, peer_ip=None, interface=None, add=True, enabled=None):
@@ -206,7 +216,7 @@ class Config6:
 
 class Server6:
     def __init__(self, cfg):
-        self.cfg = cfg
+        self.cfg, self.bucket = cfg, dhcp.Bucket()
         self.duid = struct.pack('!H', 4) + uuid.uuid5(uuid.NAMESPACE_DNS, cfg.name).bytes  # DUID-UUID (RFC 6355): no hardware address needed
 
     # ---- messages
@@ -241,6 +251,8 @@ class Server6:
         if kind == SOLICIT:
             if sid is not None:
                 return None
+            if not self.bucket.allow(duid):
+                return None  # more than the burst of Solicits from one DUID: no more hold rows
             rapid = self.cfg.rapid and RAPID in o
             body = self._bind(o, duid, now, self.cfg.lease if rapid else OFFER_HOLD, RENEW_NONE, peer_ip=peer_ip)[0]
             return self._msg(REPLY if rapid else ADVERTISE, txid, cid, oro, body + (option(RAPID, b'') + reconf_rep if rapid else reconf_adv))
@@ -521,7 +533,7 @@ class Server6:
             for ia in o.get(code, [])[:MAX_IA]:
                 for v in (options(ia[hdr_len:]) or {}).get(IAADDR, [])[:MAX_IA]:
                     addr = self._hint('na', v)
-                    if addr and self._in_pool('na', addr) and not Dhcp6Lease.objects.filter(value=addr, expires__gt=now).exclude(duid=duid).exists():
+                    if addr and self._in_pool('na', addr) and Dhcp6Lease.objects.filter(value=addr, duid=duid, expires__gt=now).exists():  # only an address it holds or was offered
                         Dhcp6Lease.objects.filter(value=addr).delete()
                         if Dhcp6Lease.objects.filter(duid__startswith='declined', expires__gt=now).count() < max_declined:
                             Dhcp6Lease.objects.update_or_create(duid=f'declined-{addr}', iaid=0, kind='na',

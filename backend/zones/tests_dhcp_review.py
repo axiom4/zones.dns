@@ -85,3 +85,28 @@ class CsvTests(TestCase):
             r = self.api.post('/api/dhcp/reservations/', {'mac': 'aa:aa:aa:aa:aa:01', 'ip': ip}, format='json')
             self.assertEqual(r.status_code, 400, ip)
         self.assertEqual(self.api.post('/api/dhcp/reservations/', {'mac': 'aa:aa:aa:aa:aa:01', 'ip': '192.168.1.50'}, format='json').status_code, 201)
+
+
+class NamesCacheTests(TestCase):
+    def test_lease_lookups_are_cached_briefly(self):
+        from .dhcp import names
+        names._cache.clear()
+        cfg = (True, 'lan')
+        calls = []
+
+        def fake(q, c):
+            calls.append(q)
+            return [('192.168.1.5', 60)]
+        with mock.patch.object(names, '_lease_hosts', fake):
+            names.lease_hosts('pc.lan', cfg)
+            names.lease_hosts('pc.lan', cfg)
+        self.assertEqual(len(calls), 1)
+
+
+class StarvationTests(TestCase):
+    def test_bucket_burst_then_refill_and_bound(self):
+        b = v4.Bucket(burst=2, every=1000, size=3)
+        self.assertEqual([b.allow('m') for _ in range(3)], [True, True, False])
+        for k in 'abcde':
+            b.allow(k)
+        self.assertLessEqual(len(b.t), 3)

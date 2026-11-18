@@ -1,11 +1,34 @@
 """The names the DNS server answers from the DHCP leases (DHCP_NAMES): <host name>.<DHCP_DOMAIN> gives the A of a DHCPv4 lease and the AAAA of the DHCPv6 leases
 of the same client, and the reverse names (in-addr.arpa, ip6.arpa) give the PTR. Used by dnsd/resolver.py."""
 import ipaddress
+import time
 
+from django.db.models.signals import post_delete, post_save
 from django.utils import timezone
 
 from ..models import Dhcp6Lease, DhcpLease
 from .v4 import RESERVED_NAMES, dhcp_settings
+
+
+_cache = {}  # (function, name, cfg) -> (monotonic expiry, answer): the DNS hot path asks the same names again and again
+_CACHE_TTL, _CACHE_MAX = 3.0, 2000
+
+
+def _cached(fn, qname, cfg):
+    key, now = (fn.__name__, qname, cfg), time.monotonic()
+    hit = _cache.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    value = fn(qname, cfg)
+    if len(_cache) >= _CACHE_MAX:
+        _cache.clear()
+    _cache[key] = (now + _CACHE_TTL, value)
+    return value
+
+
+for _model in (DhcpLease, Dhcp6Lease):  # a lease saved in this process is seen at once (another process: within the TTL)
+    post_save.connect(lambda **kw: _cache.clear(), sender=_model, weak=False, dispatch_uid=f'names-cache-{_model.__name__}')
+    post_delete.connect(lambda **kw: _cache.clear(), sender=_model, weak=False, dispatch_uid=f'names-cache-del-{_model.__name__}')
 
 
 def _name_cfg():
@@ -37,6 +60,10 @@ def wpad_hosts(qname, cfg=None):
 
 
 def lease_hosts(qname, cfg=None):
+    return _cached(_lease_hosts, qname, cfg or _name_cfg())
+
+
+def _lease_hosts(qname, cfg=None):
     """[(address, ttl)] of the client that called itself <label>.<DHCP_DOMAIN> and has a live lease, or None (the DNS server answers these names).
     cfg: _name_cfg() already read (the DNS daemon keeps it with its data copy), else read now."""
     on, domain = cfg or _name_cfg()
@@ -63,6 +90,10 @@ def _v6_name(row):
 
 
 def lease_ptr(qname, cfg=None):
+    return _cached(_lease_ptr, qname, cfg or _name_cfg())
+
+
+def _lease_ptr(qname, cfg=None):
     """The name of the client that holds the address in a reverse name (d.c.b.a.in-addr.arpa, or the 32 nibbles of ip6.arpa), or None."""
     on, domain = cfg or _name_cfg()
     if not on:
