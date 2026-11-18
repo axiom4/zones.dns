@@ -117,10 +117,10 @@ export class ZonePage {
   bulk(action: ActionEnum) { return this.bulkOn([...this.selected()], action); }
   private bulkOn(ids: number[], action: ActionEnum) {
     return this.ui.run(async () => {
-      // deleting all the records of the zone, or most of them (10 or more and over half), is confirmed with a second factor, like deleting
-      // the zone. The same rule as the server (views/record.py, BULK_MIN).
+      // deleting or switching off all the records of the zone, or most of them (10 or more and over half), is confirmed with a second
+      // factor, like deleting the zone. The same rule as the server (views/record.py, BULK_MIN).
       const total = this.records().length;
-      const all = action === 'delete' && (ids.length >= total || (ids.length >= 10 && ids.length * 2 > total));
+      const all = (action === 'delete' || action === 'disable') && (ids.length >= total || (ids.length >= 10 && ids.length * 2 > total));
       const grant = all ? await this.stepUp.request(`zone-delete:${this.id()}`) : ''; // '' = nothing to prove, null = cancelled
       if (grant === null) return;
       await this.api.invoke(recordsBulkCreate, { body: { ids, action }, 'X-MFA-Grant': grant || undefined });

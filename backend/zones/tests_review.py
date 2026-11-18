@@ -311,6 +311,16 @@ class MoreStepUpTests(TestCase):
         self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}, **self._grant('dhcp-change')), 200)
         self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}), 200)  # unchanged value: nothing to prove
 
+    def test_bulk_disable_of_most_of_a_zone_needs_the_zone_grant(self):
+        ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]
+        post = lambda some, **kw: self.api.post('/api/records/bulk/', {'ids': some, 'action': 'disable'}, format='json', **kw).status_code
+        self.assertEqual(post(ids[:11]), 403)  # 11 of 20: over half
+        self.assertEqual(Record.objects.filter(enabled=False).count(), 0)
+        self.assertEqual(post(ids[:3]), 200)  # a few: no proof
+        self.assertEqual(post(ids, **self._grant(f'zone-delete:{self.zone.pk}')), 200)
+        self.assertEqual(Record.objects.filter(enabled=False).count(), 20)
+        self.assertEqual(self.api.post('/api/records/bulk/', {'ids': ids, 'action': 'enable'}, format='json').status_code, 200)
+
     def test_bulk_delete_of_most_of_a_zone_needs_the_zone_grant(self):
         ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]
         post = lambda some, **kw: self.api.post('/api/records/bulk/', {'ids': some, 'action': 'delete'}, format='json', **kw).status_code

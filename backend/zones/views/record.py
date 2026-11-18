@@ -30,18 +30,19 @@ class RecordViewSet(viewsets.ModelViewSet):
         s.is_valid(raise_exception=True)
         qs = Record.objects.filter(id__in=s.validated_data['ids'])
         act = s.validated_data['action']
-        if act == 'delete':
-            # a delete that takes all the records of a zone, or most of them (BULK_MIN or more and over half), is the zone's deletion in all
-            # but name: the same proof of a second factor. The GUI asks under the same rule (zone-page.ts).
+        if act in ('delete', 'disable'):
+            # a delete or switch-off that takes all the records of a zone, or most of them (BULK_MIN or more and over half), is the zone's
+            # deletion (or switch-off) in all but name: the same proof of a second factor. The GUI asks under the same rule (zone-page.ts).
             emptied = []
             for z, n in qs.values_list('zone').annotate(n=Count('id')):
                 total = Record.objects.filter(zone=z).count()
                 if n == total or (n >= BULK_MIN and n * 2 > total):
                     emptied.append(z)
             if len(emptied) > 1:
-                raise serializers.ValidationError({'ids': 'This deletes most records of more than one zone: do one zone at a time.'})
+                raise serializers.ValidationError({'ids': f'This would {act} most records of more than one zone: do one zone at a time.'})
             if emptied and (denied := need_grant(request, emptied[0])) is not None:
                 return denied
+        if act == 'delete':
             count = qs.count()
             qs.delete()
         else:
