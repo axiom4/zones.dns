@@ -218,7 +218,7 @@ GUI_URL = os.environ.get('GUI_URL', 'http://localhost:4200/')
 # Cache. REDIS_URL set = Redis (shared by processes, survives restarts); empty = in-process memory.
 # The DNS daemon keeps upstream answers in it for their TTL (capped), see DNS_CACHE*.
 REDIS_URL = os.environ.get('REDIS_URL', '')
-REDIS_POOL_SIZE = int(os.environ.get('REDIS_POOL_SIZE', '20'))  # connections kept open to Redis (shared by every thread of the process)
+REDIS_POOL_SIZE = int(os.environ.get('REDIS_POOL_SIZE', str(max(20, int(os.environ.get('DNS_WORKERS', '16')) * 2 + 8))))  # connections kept open to Redis (shared by every thread of the process)
 CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 'LOCATION': REDIS_URL, 'KEY_PREFIX': 'dnsadmin', 'OPTIONS': {
     'pool_class': 'zones.redis_pool.SharedPool',  # one pool for all threads, see zones/redis_pool.py
     'max_connections': REDIS_POOL_SIZE,

@@ -215,3 +215,32 @@ class TsigScopeTests(TestCase):
         with override_settings(DNS_UPDATE_KEYS='a:eHg=:corp.lan/Lab.lan., b:eXk='):
             self.assertEqual(tsig.keys(), {'a': b'xx', 'b': b'yy'})
             self.assertEqual(tsig.scopes(), {'a': {'corp.lan', 'lab.lan'}})  # b is unscoped: any zone
+
+
+class RedisUseTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        resolver._l1.clear()
+
+    def test_l1_serves_a_hot_answer_until_it_is_old(self):
+        entry = (b'raw', time.time() + 60, 60)
+        resolver._l1_put('k', entry)
+        self.assertEqual(resolver._l1_get('k'), entry)
+        with mock.patch('time.monotonic', return_value=time.monotonic() + resolver._L1_TTL + 1):
+            self.assertIsNone(resolver._l1_get('k'))  # old: Redis decides again
+        resolver._l1_put('gone', (b'raw', time.time() - 1, 60))
+        self.assertIsNone(resolver._l1_get('gone'))  # an expired answer is never kept
+        resolver._l1_put('k', entry)
+        with mock.patch.object(resolver, '_L1_MAX', 1):
+            resolver._l1_put('k2', entry)
+        self.assertEqual(list(resolver._l1), ['k2'])  # bounded
+
+    @override_settings(REDIS_URL='redis://unused')
+    def test_a_name_that_is_not_blocked_is_remembered_in_redis_too(self):
+        from django.core.cache import cache
+        resolver.blocked_entry('fine.example')
+        self.assertEqual(cache.get(f'bl:{resolver._data_version}:fine.example'), '')
+        resolver._blocked.clear()  # as another process, or after the in-process copy was pushed out
+        with mock.patch.object(resolver, '_live', side_effect=AssertionError('the database was asked')):
+            self.assertIsNone(resolver.blocked_entry('fine.example'))

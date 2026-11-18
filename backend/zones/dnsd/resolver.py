@@ -68,6 +68,35 @@ def _lease(find, qname):
         return None
 
 
+_L1_MAX = 4096  # answers kept in this process, in front of Redis: a hot name costs no network round trip and no unpickling
+_L1_TTL = 2.0  # seconds: how stale a copy of Redis may be (other processes renew or drop an entry; the TTL of the answer still counts down)
+_l1 = OrderedDict()
+_l1_lock = threading.Lock()
+
+
+def _l1_get(key):
+    with _l1_lock:
+        hit = _l1.get(key)
+        if hit is None:
+            return None
+        if hit[0] < time.monotonic() or hit[1][1] < time.time():
+            del _l1[key]
+            return None
+        _l1.move_to_end(key)
+        return hit[1]
+
+
+def _l1_put(key, entry):
+    local = min(_L1_TTL, entry[1] - time.time())
+    if local <= 0:
+        return
+    with _l1_lock:
+        _l1[key] = (time.monotonic() + local, entry)
+        _l1.move_to_end(key)
+        while len(_l1) > _L1_MAX:
+            _l1.popitem(last=False)
+
+
 def _shared():
     return bool(settings.REDIS_URL)
 
@@ -118,6 +147,7 @@ def _live(qs):
     return qs.filter(Q(expires__isnull=True) | Q(expires__gt=timezone.now()))
 
 
+_NOT_BLOCKED_TTL = 60  # seconds a name that is not blocked is remembered in Redis
 _NESTED_QUANTIFIER = re.compile(r'\([^()]*[+*][^()]*\)[+*{]|[+*}][+*{]')  # a quantified group holding a quantifier
 
 
@@ -316,9 +346,10 @@ def blocked_entry(qname):
     else:
         hit = None
     _remember_blocked(qname, hit, gen)
-    if hit and _shared():  # only blocked names: a name that is not blocked would fill Redis with every random name asked
+    if _shared():  # shared with runproxy, which would otherwise ask the database for every host it has not seen
         try:
-            cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit), settings.DNS_DATA_TTL)
+            # a name that is not blocked lives only _NOT_BLOCKED_TTL: a random-subdomain flood cannot fill Redis for long
+            cache.set(f'bl:{_data_version}:{qname}', '\t'.join(hit) if hit else '', settings.DNS_DATA_TTL if hit else _NOT_BLOCKED_TTL)
         except Exception:
             pass
     return hit
@@ -599,7 +630,11 @@ class Resolver(BaseResolver):
         opt = edns_option(request)  # EDNS, DO and CD change the answer, so they are part of the key
         key = f'dns:{QTYPE[request.q.qtype]}:{str(request.q.qname).lower()}:{int(bool(opt))}{(opt.ttl >> 15) & 1 if opt else 0}{request.header.cd}'
         if settings.DNS_CACHE:
-            entry = self._cache_get(key)
+            entry = _l1_get(key)
+            if entry is None:
+                entry = self._cache_get(key)
+                if isinstance(entry, tuple):
+                    _l1_put(key, entry)
             if entry:
                 if isinstance(entry, (bytes, bytearray)):  # written by an older version: no expiry time stored
                     return self._parse(entry, request), 'cache'
@@ -633,7 +668,9 @@ class Resolver(BaseResolver):
             if ttl > 0:
                 try:
                     raw = reply.pack()
-                    cache.set(key, (raw, time.time() + ttl, ttl), ttl)
+                    entry = (raw, time.time() + ttl, ttl)
+                    cache.set(key, entry, ttl)
+                    _l1_put(key, entry)
                     if settings.DNS_STALE_TTL:
                         cache.set('stale:' + key, raw, settings.DNS_STALE_TTL)
                 except Exception:
