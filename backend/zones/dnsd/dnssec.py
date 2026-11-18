@@ -28,6 +28,8 @@ ROOT_TRUST_ANCHORS = [
     (20326, 8, 2, 'E06D44B80B8F1D39A95C0B0D7C65D08458E880409BBC683457104237C7F8EC8D'),
     (38696, 8, 2, '683D2D0ACB8C9B712A1948B27F741219298D0A450D612C483AF444A4C0FB2B16'),
 ]
+ALGORITHMS = frozenset((8, 10, 13, 14, 15))
+DIGESTS = {1: hashlib.sha1, 2: hashlib.sha256, 4: hashlib.sha384}
 
 
 def _canonical_name_wire(label):
@@ -56,7 +58,7 @@ def verify_ds(owner, flags, protocol, algorithm, key_bytes, ds_key_tag, ds_algo,
         return False
     rdata = struct.pack('!HBB', flags, protocol, algorithm) + key_bytes
     msg = _canonical_name_wire(owner) + rdata
-    h_fn = {1: hashlib.sha1, 2: hashlib.sha256, 4: hashlib.sha384}.get(digest_type)
+    h_fn = DIGESTS.get(digest_type)
     if not h_fn:
         return False
     return h_fn(msg).hexdigest().upper() == digest_hex.strip().upper()
@@ -265,8 +267,11 @@ class Validator:
                     break
             else:
                 return 'bogus', [], 60
-            ds = [(rr.rdata.key_tag, rr.rdata.algorithm, rr.rdata.digest_type, bytes(rr.rdata.digest).hex()) for rr in ds_rrs]
+            ds = [(rr.rdata.key_tag, rr.rdata.algorithm, rr.rdata.digest_type, bytes(rr.rdata.digest).hex()) for rr in ds_rrs
+                  if rr.rdata.algorithm in ALGORITHMS and rr.rdata.digest_type in DIGESTS]
             ttl = min(rr.ttl for rr in ds_rrs)
+            if not ds:
+                return 'insecure', [], ttl  # RFC 4035 §5.2: no DS of an algorithm we support, so no path to authenticate the zone
         ksk = [k for k in dnskeys if any(verify_ds(zone + '.' if zone else '.', k.rdata.flags, k.rdata.protocol, k.rdata.algorithm, bytes(k.rdata.key), *d)
                                          for d in ds)]
         if not ksk or not _signed_by(dnskeys, sigs, ksk, now):
@@ -278,28 +283,39 @@ def validate_reply(reply, validator, now=None):
     """Validate the RRSIGs in `reply.rr` (or `reply.auth` on negative responses) through the chain of trust.
 
     Returns:
-      - 'secure'   if every RRset of the section is signed by trusted keys of a zone that contains it.
-      - 'insecure' if there are no RRSIGs, a signer zone is an unsigned delegation, or some RRset is not signed.
-      - 'bogus'    if an RRSIG fails, the signer does not contain the name, or the signer's keys do not chain to the root.
+      - 'secure'   if every RRset of the answer section has a signature that verifies with trusted keys of a zone that contains it.
+      - 'insecure' if there are no RRSIGs, a signer zone is an unsigned delegation or uses an algorithm we lack, some RRset is not signed,
+                   or the answer is negative (the signatures of the authority section are checked, the denial of existence is not).
+      - 'bogus'    if no signature of an RRset verifies (or its signer does not contain the name), or the signer's keys do not chain to the root.
     """
     section = reply.rr if any(rr.rtype == QTYPE.RRSIG for rr in reply.rr) else reply.auth
-    rrsigs = [rr for rr in section if rr.rtype == QTYPE.RRSIG]
-    if not rrsigs:
+    groups = {}
+    for rr in section:
+        if rr.rtype == QTYPE.RRSIG:
+            groups.setdefault((_name(rr.rname), rr.rdata.covered), []).append(rr)
+    if not groups:
         return 'insecure'
     covered, insecure = set(), False
-    for rrsig in rrsigs:
-        owner, signer = _name(rrsig.rname), _name(rrsig.rdata.name)
-        rrset = [rr for rr in section if rr.rname == rrsig.rname and rr.rtype == rrsig.rdata.covered]
-        if not rrset or not _within(owner, signer):
-            return 'bogus'  # a signature with nothing under it, or a zone signing names that are not its own
-        state, keys = validator.keys(signer, now)
-        if state == 'bogus':
-            return 'bogus'
-        if state == 'insecure':
+    for (owner, rtype), sigs in groups.items():
+        rrset = [rr for rr in section if _name(rr.rname) == owner and rr.rtype == rtype]
+        if not rrset:
+            return 'bogus'  # a signature with nothing under it
+        verdicts = set()  # RFC 4035 §5.3.3: one signature that verifies is enough (rollovers sign twice, maybe with an algorithm we lack)
+        for sig in sigs:
+            signer = _name(sig.rdata.name)
+            if not _within(owner, signer):
+                verdicts.add('bogus')  # a zone signing names that are not its own
+            elif sig.rdata.algorithm not in ALGORITHMS:
+                verdicts.add('insecure')  # RFC 4035 §5.2: an algorithm we cannot check is treated as unsigned
+            else:
+                state, keys = validator.keys(signer, now)
+                verdicts.add('bogus' if state == 'secure' and not verify_rrsig(rrset, sig, keys, now=now) else state)
+        if 'secure' in verdicts:
+            covered.add((owner, rtype))
+        elif 'insecure' in verdicts:
             insecure = True
-            continue
-        if not verify_rrsig(rrset, rrsig, keys, now=now):
+        else:
             return 'bogus'
-        covered.add((owner, rrsig.rdata.covered))
     rrsets = {(_name(rr.rname), rr.rtype) for rr in section if rr.rtype not in (QTYPE.RRSIG, QTYPE.OPT)}
-    return 'insecure' if insecure or not rrsets <= covered else 'secure'
+    # a negative answer is never 'secure': its NSEC / NSEC3 denial proof is not checked, and a signed SOA can be replayed for any name
+    return 'insecure' if insecure or not rrsets <= covered or section is not reply.rr else 'secure'

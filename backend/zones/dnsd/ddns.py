@@ -113,6 +113,7 @@ def handle_update(request, client_ip, wire=None):
 def _apply(request, zone):
     """Prerequisites, then updates; raises _Abort (the caller's transaction rolls back) at the first failure."""
     # 1. Prerequisite Section (carried in the Answer section `request.rr`, RFC 2136 §3.2; failure codes of §3.2.5)
+    wanted = {}  # (name, type) -> values the RRset must have, no more and no less (RFC 2136 §3.2.3)
     for pre in request.rr:
         rel = _rel_name(pre.rname, zone.name)
         if rel is None:
@@ -133,10 +134,12 @@ def _apply(request, zone):
             elif Record.objects.filter(zone=zone, name=rel, type=rtype).exists():  # RRset does not exist
                 raise _Abort(RCODE.YXRRSET)
         elif pre.rclass == CLASS_IN:  # RRset exists (value dependent)
-            if not Record.objects.filter(zone=zone, name=rel, type=rtype, value=_rdata_to_value(pre)).exists():
-                raise _Abort(RCODE.NXRRSET)
+            wanted.setdefault((rel, rtype), set()).add(_rdata_to_value(pre))
         else:
             raise _Abort(RCODE.FORMERR)
+    for (rel, rtype), values in wanted.items():
+        if set(Record.objects.filter(zone=zone, name=rel, type=rtype).values_list('value', flat=True)) != values:
+            raise _Abort(RCODE.NXRRSET)
 
     # 2. Update Section (carried in the Authority section `request.auth`, RFC 2136 §3.4)
     changed = False
@@ -169,10 +172,15 @@ def _apply(request, zone):
         elif upd.rclass == CLASS_ANY:
             # Delete an RRset or all RRsets from a name
             qs = Record.objects.filter(zone=zone, name=rel) if upd.rtype == QTYPE.ANY else Record.objects.filter(zone=zone, name=rel, type=rtype)
+            if rel == '@':
+                qs = qs.exclude(type='NS')  # RFC 2136 §3.4.2.3 / §3.4.2.4: the apex NS RRset is never deleted this way
             changed = qs.delete()[0] > 0 or changed
         elif upd.rclass == CLASS_NONE:
             # Delete a specific RR from an RRset
-            changed = Record.objects.filter(zone=zone, name=rel, type=rtype, value=_rdata_to_value(upd)).delete()[0] > 0 or changed
+            qs = Record.objects.filter(zone=zone, name=rel, type=rtype, value=_rdata_to_value(upd))
+            if rel == '@' and rtype == 'NS' and not Record.objects.filter(zone=zone, name='@', type='NS').exclude(pk__in=qs).exists():
+                continue  # RFC 2136 §3.4.2.4: the last NS of the apex stays
+            changed = qs.delete()[0] > 0 or changed
         else:
             raise _Abort(RCODE.FORMERR)
     if changed:

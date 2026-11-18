@@ -4,16 +4,19 @@ DNS_DDR lists them, space separated: `dot:host[:port]` (DNS over TLS, default po
 each with optional address hints `@ip,ip` (the addresses of the host: the client does not need to look them up first).
 The daemon itself only speaks plain DNS: DoT needs a TLS proxy in front (deploy/nginx/dns-dot.conf), DoH is served by views/doh.py behind nginx.
 """
+import ipaddress
+from functools import lru_cache
+
 from dnslib import RR
 from dnslib.dns import RD
 
 NAME = '_dns.resolver.arpa'
 SVCB = 64
-import ipaddress
 
 ALPN, PORT, IPV4HINT, IPV6HINT, DOHPATH = 1, 3, 4, 6, 7
 
 
+@lru_cache(maxsize=4)  # the resolver asks on every query; callers only read the result
 def parse(text):
     """[(priority, host, {param key: value bytes})] from DNS_DDR; an entry that makes no sense is an error (it would be announced to every client)."""
     out = []

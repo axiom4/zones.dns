@@ -3,12 +3,13 @@ import time
 from datetime import timedelta
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import close_old_connections
 from django.utils import timezone
 
 from zones.stats import partitions, rollup
 from zones.models import QueryLog
+from zones.dnsd import ddr
 from zones.dnsd.resolver import Resolver
 from dnslib.server import DNSServer
 
@@ -42,6 +43,10 @@ class Command(BaseCommand):
 
     def handle(self, *a, address, port, upstream, **o):
         stamp_output(self)
+        try:
+            ddr.parse(settings.DNS_DDR)  # checked by the resolver on every query: a bad value would leave every query unanswered
+        except ValueError as e:
+            raise CommandError(e)
         if settings.REDIS_URL:
             from django.core.cache import cache
             from zones import redis_pool

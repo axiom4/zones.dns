@@ -2,6 +2,7 @@ import logging
 import re
 import secrets
 import socket
+import struct
 import threading
 import time
 from collections import OrderedDict, defaultdict
@@ -12,7 +13,7 @@ from django.core.cache import cache
 from django.db import DatabaseError, connection
 from django.db.models import Q
 from django.utils import timezone
-from dnslib import AAAA, EDNS0, OPCODE, PTR, QTYPE, RCODE, RR, SOA, A, DNSHeader, DNSRecord
+from dnslib import AAAA, EDNS0, OPCODE, PTR, QTYPE, RCODE, RR, SOA, A, DNSError, DNSHeader, DNSRecord
 from dnslib.server import BaseResolver
 
 from .domains import main_domain
@@ -391,15 +392,18 @@ def finish(request, reply, handler):
     """Answer EDNS with an OPT (RFC 6891) and cut a UDP answer that does not fit: TC=1 makes the client retry over TCP (RFC 1035 §4.2.1)."""
     opt = edns_option(request)
     do_bit = bool(opt and (opt.ttl & 0x8000))
-    if not do_bit and request.questions and request.q.qtype not in (QTYPE.RRSIG, QTYPE.ANY):
-        reply.rr = [rr for rr in reply.rr if rr.rtype != QTYPE.RRSIG]
+    if not do_bit:  # RFC 4035 §3.2.1: no DNSSEC records for a client that did not ask for them (the upstream is asked with DO=1)
+        if request.questions and request.q.qtype not in (QTYPE.RRSIG, QTYPE.ANY):
+            reply.rr = [rr for rr in reply.rr if rr.rtype != QTYPE.RRSIG]
+        reply.auth = [rr for rr in reply.auth if rr.rtype not in (QTYPE.RRSIG, QTYPE.NSEC, QTYPE.NSEC3)]
     reply.ar = [rr for rr in reply.ar if rr.rtype != QTYPE.OPT]
     if opt:
         reply.add_ar(EDNS0(udp_len=1232, flags='do' if do_bit else ''))
     if getattr(handler, 'protocol', 'tcp') == 'udp':
         wire = reply.pack()
         if len(wire) > (max(512, min(opt.rclass, 1232)) if opt else 512):
-            reply = reply.truncate()
+            reply, questions = reply.truncate(), reply.questions
+            reply.questions = questions  # dnslib drops the question: clients that match it (dnspython) ignored the answer instead of retrying over TCP
             if opt:
                 reply.add_ar(EDNS0(udp_len=1232, flags='do' if do_bit else ''))
             wire = reply.pack()
@@ -428,10 +432,27 @@ def _udp_exchange(wire, host, port, v6, timeout):
         deadline = time.monotonic() + timeout
         while (left := deadline - time.monotonic()) > 0:
             s.settimeout(left)
-            data = s.recv(8192)
+            data = s.recv(65535)  # the client's EDNS size is passed on: a bigger answer cut by a short read failed to parse and marked the upstream down
             if data[:2] == wire[:2]:
                 return data
     raise TimeoutError('no answer from the upstream')
+
+
+def _tcp_exchange(wire, host, port, timeout):
+    """One question to an upstream over TCP (RFC 1035 §4.2.2), within timeout in all. dnslib's send() looped forever, at full CPU, when the
+    upstream closed the connection in the middle of an answer."""
+    deadline = time.monotonic() + timeout
+    with socket.create_connection((host, port), timeout=timeout) as s:
+        s.sendall(struct.pack('!H', len(wire)) + wire)
+        data = b''
+        while len(data) < 2 or len(data) < 2 + struct.unpack('!H', data[:2])[0]:
+            if (left := deadline - time.monotonic()) <= 0:
+                raise TimeoutError('no complete answer from the upstream')
+            s.settimeout(left)
+            if not (chunk := s.recv(65537 - len(data))):
+                raise ConnectionError('the upstream closed the connection before the end of the answer')
+            data += chunk
+        return data[2:2 + struct.unpack('!H', data[:2])[0]]
 
 
 class Resolver(BaseResolver):
@@ -601,7 +622,7 @@ class Resolver(BaseResolver):
     @staticmethod
     def _store(key, reply):
         if reply.header.rcode in (RCODE.NOERROR, RCODE.NXDOMAIN) and not reply.header.tc:
-            ttl = min([rr.ttl for rr in reply.rr] or [settings.DNS_CACHE_NEG_TTL])
+            ttl = min([rr.ttl for rr in reply.rr] or [settings.DNS_CACHE_NEG_TTL] + [min(rr.ttl, rr.rdata.times[4]) for rr in reply.auth if rr.rtype == QTYPE.SOA])  # RFC 2308 §5
             ttl = min(ttl, settings.DNS_CACHE_MAX_TTL) if reply.rr else min(ttl, settings.DNS_CACHE_NEG_TTL)
             if ttl > 0:
                 try:
@@ -685,7 +706,7 @@ class Resolver(BaseResolver):
                 if reply.header.tc:  # truncated: retry over TCP
                     txid = secrets.randbits(16)
                     out_req.header.id = txid
-                    reply = DNSRecord.parse(out_req.send(host, port, tcp=True, timeout=settings.DNS_UPSTREAM_TIMEOUT, ipv6=v6))
+                    reply = DNSRecord.parse(_tcp_exchange(bytes(out_req.pack()), host, port, settings.DNS_UPSTREAM_TIMEOUT))
                 if reply.header.id != txid or not reply.header.qr or reply.q != request.q:
                     continue
                 reply.header.id = orig_id
@@ -698,6 +719,8 @@ class Resolver(BaseResolver):
                             return bad, f'{server} (DNSSEC bogus)'
                         reply.header.ad = int(state == 'secure')
                     return reply, server
+            except DNSError:
+                continue  # an answer dnslib cannot read (anyone can make an upstream relay one from their own zone): not a dead upstream
             except Exception:
                 self.down[server] = time.monotonic() + settings.DNS_UPSTREAM_DOWN  # no answer at all; a SERVFAIL only moves on to the next
         reply = request.reply()

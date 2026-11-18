@@ -17,7 +17,7 @@ from .token import client_ip
 
 MAX_QUERY = 4096
 log = logging.getLogger(__name__)
-_B64URL_RE = re.compile(r'^[A-Za-z0-9_-]+$')
+_B64URL_RE = re.compile(r'[A-Za-z0-9_-]+')
 
 
 def _proxy_line(client):
@@ -57,7 +57,7 @@ class DohView(View):
         if not settings.DNS_DOH:
             raise Http404
         raw = request.GET.get('dns', '')
-        if not _B64URL_RE.match(raw):
+        if not _B64URL_RE.fullmatch(raw):
             return HttpResponse(status=400)
         try:
             return self.answer(request, base64.urlsafe_b64decode(raw + '=' * (-len(raw) % 4)))
