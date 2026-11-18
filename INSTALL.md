@@ -231,7 +231,21 @@ The virtual host (`deploy/nginx/dns.example.lan`, steps in the comments at the t
 
 The Node build can be done on another machine: only the `dist/frontend/browser` folder is needed on the server.
 
-## 8. systemd (recommended)
+## 8. Run the daemons: systemd or supervisor
+
+Both work; the daemons are the same four programs (`gunicorn`, `rundns`, `rundhcp`, `runproxy`). Pick one, never both on the same host (each daemon would be started twice and fail to bind its port).
+
+| | A. systemd (recommended) | B. supervisor |
+|---|---|---|
+| Needs | nothing: it is already on the host | the `supervisor` package |
+| Port 53, DHCP | `AmbientCapabilities` per unit: no file capability, no root | `setcap` on a private copy of the venv Python, again after every Python upgrade; every process that runs that Python has the capability |
+| Isolation | sandbox per unit (`ProtectSystem=strict`, `NoNewPrivileges`, `RestrictAddressFamilies`...) | none: the processes run as user `dns` |
+| Order and restarts | after PostgreSQL / Redis, `Restart=on-failure`, stop timeout | `autorestart`, no dependency on the database starting first |
+| Logs | `journalctl -u dns-daemon` | files in `/var/log/supervisor/`, `supervisorctl tail` |
+| Open files | `LimitNOFILE=65536` in the unit | `minfds=65536` in `supervisord.conf` |
+| Choose it when | any normal Linux server | no systemd (containers, some appliances), or supervisor already runs your other applications |
+
+### A. systemd (recommended)
 
 Hardened units are in `deploy/systemd/`: `dns-web` (gunicorn), `dns-daemon` (`rundns` on port 53), `dns-dhcp` (`rundhcp`) and `dns-proxy` (`runproxy`). Each runs as `dns` with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `RestrictAddressFamilies`, and writes only under `/opt/dns/app/backend` (SQLite files, `geoip-data`). They read `backend/.env` themselves (Django loads it from the working directory), so there is no `EnvironmentFile`.
 
@@ -252,9 +266,20 @@ If an earlier install ran `setcap` on the venv Python, undo it (`sudo setcap -r 
 
 Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or iptables.
 
-### Alternative: supervisor
+**Moving an installation from supervisor to systemd** (a few seconds without DNS and DHCP; keep the supervisor files until it works):
+```sh
+sudo cp /opt/dns/app/deploy/systemd/dns-*.service /etc/systemd/system/ && sudo systemctl daemon-reload
+sudo systemd-analyze verify /etc/systemd/system/dns-*.service        # no output = fine
+sudo supervisorctl stop 'dns:*'
+sudo setcap -r /opt/dns/.venv/bin/python                              # the units use ambient capabilities instead
+sudo systemctl enable --now dns-daemon dns-web dns-dhcp dns-proxy     # only the ones you ran
+dig +short example.com @127.0.0.1 && systemctl is-active 'dns-*'
+```
+If something does not start: `sudo systemctl stop 'dns-*'`, `sudo setcap cap_net_bind_service,cap_net_raw=ep /opt/dns/.venv/bin/python`, `sudo supervisorctl start 'dns:*'`. When it works: `sudo systemctl disable --now supervisor` and rename `/etc/supervisor/conf.d/dns.conf` (a supervisor that starts again at boot would run every daemon twice). The units set `LimitNOFILE=65536`, so `minfds` is no longer needed. Unit files do not accept a comment at the end of a line: put it on a line of its own.
 
-Use it if you cannot use systemd. Capabilities then come from `setcap` on a private copy of the venv Python (see below), which is weaker.
+### B. supervisor
+
+Use it if you cannot use systemd or already run supervisor. Capabilities then come from `setcap` on a private copy of the venv Python (see below), which is weaker than the systemd units.
 
 ```sh
 sudo apt install supervisor
@@ -290,7 +315,10 @@ programs=dns-api,dns-daemon
 ```sh
 sudo supervisorctl reread && sudo supervisorctl update
 sudo supervisorctl status
+sudo supervisorctl tail -f dns:dns-daemon stderr        # logs; restart one: sudo supervisorctl restart dns:dns-daemon
 ```
+
+For the tuning of section "Tuning": in `[supervisord]` of `/etc/supervisor/supervisord.conf` add `minfds=65536` (soft limit of open files for the children, the default 1024 is too low for the daemon), and in the `dns-daemon` program `startsecs=5` and `stopwaitsecs=20`. The DHCP server and the proxy are programs of the same file, see their sections below.
 
 For low ports without root under supervisor, give the venv a private copy of Python (never the system interpreter: a capability there belongs to every user) and set the capability on it, again after a Python upgrade:
 
@@ -318,8 +346,6 @@ systemd: `sudo systemctl enable --now dns-dhcp`. Supervisor: add to the supervis
 [program:dns-dhcp]
 directory=/opt/dns/app/backend
 command=/opt/dns/.venv/bin/python manage.py rundhcp
-For the tuning of section "Tuning": in `[supervisord]` of `/etc/supervisor/supervisord.conf` add `minfds=65536` (soft limit of open files for the children, the default 1024 is too low for the daemon), and in the `dns-daemon` program `startsecs=5` and `stopwaitsecs=20`. The DHCP server and the proxy are programs of the same file, see their sections below.
-
 user=dns
 autostart=false
 autorestart=true

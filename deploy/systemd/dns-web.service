@@ -1,15 +1,19 @@
 [Unit]
 Description=dns: web API (gunicorn)
-After=network-online.target
+# A database or Redis that is not installed is ignored by After=.
+After=network-online.target postgresql.service mysql.service mariadb.service redis-server.service
 Wants=network-online.target
 
 [Service]
 User=dns
 Group=dns
 WorkingDirectory=/opt/dns/app/backend
-ExecStart=/opt/dns/.venv/bin/gunicorn dnsadmin.wsgi -b 127.0.0.1:8000 --workers 1 --threads 8 --access-logfile -
+ExecStart=/opt/dns/.venv/bin/gunicorn dnsadmin.wsgi -b 127.0.0.1:8000 --workers 1 --threads 16 --access-logfile - --control-socket /run/dns-web/gunicorn.ctl
 Restart=on-failure
 RestartSec=3
+LimitNOFILE=65536
+# gunicorn's control socket lives in /run/dns-web.
+RuntimeDirectory=dns-web
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK

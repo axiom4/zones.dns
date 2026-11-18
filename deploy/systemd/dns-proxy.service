@@ -1,6 +1,7 @@
 [Unit]
 Description=dns: ad-blocking proxy (runproxy)
-After=network-online.target
+# A database or Redis that is not installed is ignored by After=.
+After=network-online.target postgresql.service mysql.service mariadb.service redis-server.service
 Wants=network-online.target
 
 [Service]
@@ -10,6 +11,7 @@ WorkingDirectory=/opt/dns/app/backend
 ExecStart=/opt/dns/.venv/bin/python manage.py runproxy
 Restart=on-failure
 RestartSec=3
+LimitNOFILE=65536
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX

@@ -1,6 +1,7 @@
 [Unit]
 Description=dns: DHCP server (rundhcp)
-After=network-online.target
+# A database or Redis that is not installed is ignored by After=.
+After=network-online.target postgresql.service mysql.service mariadb.service redis-server.service
 Wants=network-online.target
 
 [Service]
@@ -10,6 +11,7 @@ WorkingDirectory=/opt/dns/app/backend
 ExecStart=/opt/dns/.venv/bin/python manage.py rundhcp
 Restart=on-failure
 RestartSec=3
+LimitNOFILE=65536
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE CAP_NET_RAW
 AmbientCapabilities=CAP_NET_BIND_SERVICE CAP_NET_RAW
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK AF_PACKET
