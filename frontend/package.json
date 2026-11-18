@@ -10,7 +10,7 @@
     "api:gen": "../.venv/bin/python ../backend/manage.py spectacular --file openapi.yml && ng-openapi-gen"
   },
   "private": true,
-  "packageManager": "npm@12.2.2",
+  "packageManager": "npm@12.2.3",
   "dependencies": {
     "@angular/common": "^22.2.6",
     "@angular/compiler": "^22.2.6",
