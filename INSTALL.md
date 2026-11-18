@@ -12,7 +12,7 @@ Complete guide for a server install: PostgreSQL or MySQL/MariaDB, Redis, nginx, 
 | nginx ≥ 1.25 with `http_v3` | Only for HTTP/3; older nginx works if you remove the `quic`/`http3` lines from the virtual host. Check: `nginx -V 2>&1 \| grep http_v3`. |
 | PostgreSQL **or** MariaDB/MySQL | Local or on another host. SQLite works but is for development only. |
 | Redis | Upstream DNS cache, sign-in replay and lockout counters. Optional, but recommended: without it each process keeps its own cache in memory (up to 100,000 entries, the DNS daemon's can take a few hundred MB) and the lockout counters are per gunicorn worker. |
-| supervisor | Keeps the API and the DNS daemon running. |
+| systemd (or supervisor) | Keeps the API and the daemons running. |
 | Node.js + npm | Only to build the GUI; can be another machine. Use a Node version supported by Angular 22. |
 
 **Decide first:**
@@ -102,13 +102,25 @@ openssl s_client -connect dns.example.com:443 -servername dns.example.com </dev/
 
 The last line must say `Verify return code: 0 (ok)` (add `-CAfile ca.pem` when using your own CA).
 
+### Optional: signing the Apple profile (`PROFILE_SIGN_CERT` / `PROFILE_SIGN_KEY`)
+
+gunicorn runs as `dns` and must never read the nginx key above. For a signed `/proxy.mobileconfig` use a copy of the certificate and key that only `dns` owns (renew it with the same `--deploy-hook`, e.g. a script that copies and `chown`s them), and point `PROFILE_SIGN_CERT` / `PROFILE_SIGN_KEY` in `.env` at it:
+
+```sh
+sudo install -d -o dns -g dns -m 700 /opt/dns/sign
+sudo install -o dns -g dns -m 644 /etc/letsencrypt/live/dns.example.com/fullchain.pem /opt/dns/sign/fullchain.pem
+sudo install -o dns -g dns -m 600 /etc/letsencrypt/live/dns.example.com/privkey.pem /opt/dns/sign/privkey.pem
+```
+
+Better still, issue a separate certificate for signing, so that a leak of this key does not expose the web server's. Leave both empty for an unsigned profile.
+
 ## 3. System user and code
 
 ```sh
 sudo useradd --system --create-home --home-dir /opt/dns --shell /usr/sbin/nologin dns
-sudo -u dns git clone https://github.com/axiom4/zones.dns.git /opt/dns/app            # or unpack the release archives from release/
+sudo -u dns git clone https://github.com/axiom4/zones.dns.git /opt/dns/app            # a release archive in release/ may be older than the repository: regenerate it before use
 sudo -u dns python3 -m venv /opt/dns/.venv
-sudo -u dns /opt/dns/.venv/bin/pip install -r /opt/dns/app/backend/requirements.txt gunicorn
+sudo -u dns /opt/dns/.venv/bin/pip install -r /opt/dns/app/backend/requirements.txt gunicorn   # gunicorn is not pinned in requirements.txt: pin the version you tested
 ```
 
 ## 4. Database
@@ -186,6 +198,7 @@ GUI_URL=https://dns.example.com/
 WEBAUTHN_RP_ID=dns.example.com
 WEBAUTHN_ORIGINS=https://dns.example.com
 LOGIN_ENCRYPTION=required
+MFA_REQUIRED=true
 ```
 
 Then, once and after every update:
@@ -218,7 +231,30 @@ The virtual host (`deploy/nginx/dns.example.lan`, steps in the comments at the t
 
 The Node build can be done on another machine: only the `dist/frontend/browser` folder is needed on the server.
 
-## 8. Supervisor
+## 8. systemd (recommended)
+
+Hardened units are in `deploy/systemd/`: `dns-web` (gunicorn), `dns-daemon` (`rundns` on port 53), `dns-dhcp` (`rundhcp`) and `dns-proxy` (`runproxy`). Each runs as `dns` with `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome`, `PrivateTmp`, `RestrictAddressFamilies`, and writes only under `/opt/dns/app/backend` (SQLite files, `geoip-data`). They read `backend/.env` themselves (Django loads it from the working directory), so there is no `EnvironmentFile`.
+
+Port 53 and the DHCP ports need no `setcap` and no root: the units grant `AmbientCapabilities=CAP_NET_BIND_SERVICE` (`dns-dhcp` also `CAP_NET_RAW`, for `DHCP_UNICAST`, `DHCP_RA`, the ARP probe and `ping`). The web and proxy units have no capabilities.
+
+```sh
+sudo cp /opt/dns/app/deploy/systemd/dns-*.service /etc/systemd/system/
+# edit paths and `--address` (see the warning below about 0.0.0.0) if yours differ
+sudo systemctl daemon-reload
+sudo systemctl enable --now dns-web dns-daemon
+sudo systemctl enable --now dns-dhcp     # only when DHCP is set up (below)
+sudo systemctl enable --now dns-proxy    # only when the proxy is set up (below)
+systemctl status 'dns-*'
+journalctl -u dns-daemon -f              # logs are in the journal
+```
+
+If an earlier install ran `setcap` on the venv Python, undo it (`sudo setcap -r /opt/dns/.venv/bin/python`, and on the system interpreter `sudo setcap -r "$(readlink -f /usr/bin/python3)"`); the private copy of the interpreter is not needed any more.
+
+Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or iptables.
+
+### Alternative: supervisor
+
+Use it if you cannot use systemd. Capabilities then come from `setcap` on a private copy of the venv Python (see below), which is weaker.
 
 ```sh
 sudo apt install supervisor
@@ -256,19 +292,15 @@ sudo supervisorctl reread && sudo supervisorctl update
 sudo supervisorctl status
 ```
 
-**Is it running?** `rundns`, `rundhcp` and `runproxy` each write a heartbeat to the database every 30 s (`Setting` row `heartbeat:dns`, `heartbeat:dhcp`, `heartbeat:proxy`: time, process id, version; no Redis needed). `GET /api/status/` says for each one whether it is turned on in the settings and whether it was heard from in the last 90 s. In the GUI the LED of the top bar is off and says so when `rundns` is not running; the *DHCP* and *Proxy* pages have a status line (LED and words: running, not running with the command to start, or off in the settings). A daemon that cannot write its heartbeat (database away) keeps serving and says so on stderr.
-
-**Port 53 without root.** `rundns` should not run as root. Give a Python binary of its own the permission to bind low ports. Not the system interpreter the venv links to (`/usr/bin/python3.x`): a capability set there belongs to every user of the machine. Replace the venv symlink with a copy that only `dns` can run, and set the capability on the copy (again after a Python upgrade):
+For low ports without root under supervisor, give the venv a private copy of Python (never the system interpreter: a capability there belongs to every user) and set the capability on it, again after a Python upgrade:
 
 ```sh
 sudo cp --remove-destination "$(readlink -f /opt/dns/.venv/bin/python)" /opt/dns/.venv/bin/python
 sudo chown root:dns /opt/dns/.venv/bin/python && sudo chmod 750 /opt/dns/.venv/bin/python
-sudo setcap cap_net_bind_service=+ep /opt/dns/.venv/bin/python
+sudo setcap 'cap_net_bind_service,cap_net_raw=+ep' /opt/dns/.venv/bin/python   # cap_net_raw only for rundhcp with DHCP_UNICAST / DHCP_RA
 ```
 
-If an earlier install set it on the system interpreter, remove it: `sudo setcap -r "$(readlink -f /usr/bin/python3)"`.
-
-Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or iptables.
+**Is it running?** `rundns`, `rundhcp` and `runproxy` each write a heartbeat to the database every 30 s (`Setting` row `heartbeat:dns`, `heartbeat:dhcp`, `heartbeat:proxy`: time, process id, version; no Redis needed). `GET /api/status/` says for each one whether it is turned on in the settings and whether it was heard from in the last 90 s. In the GUI the LED of the top bar is off and says so when `rundns` is not running; the *DHCP* and *Proxy* pages have a status line (LED and words: running, not running with the command to start, or off in the settings). A daemon that cannot write its heartbeat (database away) keeps serving and says so on stderr.
 
 **Address already in use.** On Ubuntu `systemd-resolved` listens on `127.0.0.53:53`. Bind `rundns` to the server's own address (`--address 192.0.2.10`) or disable the stub (`DNSStubListener=no` in `/etc/systemd/resolved.conf`). Do not leave `--address 0.0.0.0` on a server that is reachable from the internet: an open resolver is abused for DDoS amplification. Firewall port 53 to your own networks.
 
@@ -278,13 +310,9 @@ Alternative: run `rundns` on `5353` and redirect port 53 to it with nftables or 
 
 **Turn off the DHCP server of your router first: two DHCP servers on one network hand out conflicting addresses.** Then, in *DHCP settings*, turn DHCP on and set `DHCP_SERVER` (the address of this host), `DHCP_RANGE` and, on a host with several interfaces, `DHCP_INTERFACE`. While DHCP is off `rundhcp` just waits; a change in the GUI applies within 2 seconds. `DHCP6=true` and `DHCP_RA=true` need `DHCP_INTERFACE`. Run `manage.py migrate` first (tables of leases).
 
-It binds UDP ports 67 and 547: the same `setcap` as port 53 (next section) is enough. `DHCP_UNICAST` and `DHCP_RA` also need `CAP_NET_RAW`, and `DHCP_PROBE` needs the `ping` program (package `iputils-ping`):
+It binds UDP ports 67 and 547: `dns-dhcp.service` grants the capability (supervisor: the `setcap` of step 8). `DHCP_UNICAST` and `DHCP_RA` also need `CAP_NET_RAW`, and `DHCP_PROBE` needs the `ping` program (package `iputils-ping`):
 
-```sh
-sudo setcap 'cap_net_bind_service,cap_net_raw=+ep' /opt/dns/.venv/bin/python   # the private copy made for port 53, never the system interpreter
-```
-
-Add to the supervisor file and start it:
+systemd: `sudo systemctl enable --now dns-dhcp`. Supervisor: add to the supervisor file and start it:
 
 ```ini
 [program:dns-dhcp]
@@ -318,7 +346,7 @@ Settings that send the clients' traffic elsewhere ask for the second factor when
   - **HTTPS modes:** With `PROXY_HTTPS_MITM=false` (default), HTTPS connections use standard `CONNECT` and block ad/popup domains without needing any certificate on clients. With `PROXY_HTTPS_MITM=true`, the proxy intercepts HTTPS traffic using a local Proxy Root CA (downloadable from **DHCP > Proxy** or `http://<server>:8080/ca.crt` / `/proxy-ca.crt`) to filter HTML and block popups inside HTTPS pages as well.
   - **External ad-block lists:** in *Proxy > Settings* add lists as `name=https://…` (e.g. `easylist=https://easylist.to/easylist/easylist.txt`). `manage.py import_blocklist` downloads them together with the blacklists (cron), `runproxy` also every day, and *Sync now* does it at once. Only domain rules, exceptions and element-hiding rules are applied; the rules live in the database, so a list that cannot be downloaded keeps its last good copy.
 
-Add to `/etc/supervisor/conf.d/dns.conf`:
+systemd: `sudo systemctl enable --now dns-proxy` (set `PROXY_ADDRESS=<LAN IP>` in `.env`, or add `--address <LAN IP>` to `ExecStart` in the unit). Supervisor: add to `/etc/supervisor/conf.d/dns.conf`:
 
 ```ini
 [program:dns-proxy]
@@ -341,12 +369,12 @@ sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl sta
 
 ## 9. Firewall
 
-Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). Keep `8000`, the database and Redis closed to the outside. The daemon also refuses the clients outside `DNS_ALLOW_QUERY` (private networks by default): if your clients use public addresses (IPv6 global addresses, a VPS), list their networks there.
+Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). With the proxy (`runproxy`) open `8080/tcp` for the LAN only, and start it with `--address <LAN IP>` rather than all interfaces. With DoT (`deploy/nginx/dns-dot.conf`) open `853/tcp`, and with the DHCP server `67/udp` + `547/udp`, again for the LAN only. DoH (`/dns-query`) has no login: keep the `allow`/`deny` list of its nginx location to your networks. Keep `8000`, the database and Redis closed to the outside. The daemon also refuses the clients outside `DNS_ALLOW_QUERY` (private networks by default): if your clients use public addresses (IPv6 global addresses, a VPS), list their networks there.
 
 ## 10. Verify the installation
 
 ```sh
-sudo supervisorctl status                                   # dns:dns-api and dns:dns-daemon RUNNING
+systemctl is-active dns-web dns-daemon                      # active active  (supervisor: supervisorctl status)
 curl -sI https://dns.example.com/ | head -1                 # HTTP/2 200
 curl -s https://dns.example.com/api/login-key/               # {"key": "..."}  (public key, new after each API restart)
 dig @192.0.2.10 example.com                                 # forwarded upstream: NOERROR
@@ -367,7 +395,7 @@ sudo -u dns ../../.venv/bin/python manage.py migrate
 sudo -u dns ../../.venv/bin/python manage.py rebuild_stats      # only when updating from a version without the hourly statistics counters
 sudo -u dns ../../.venv/bin/python manage.py collectstatic --noinput
 # rebuild the frontend and rsync it (step 7), then:
-sudo supervisorctl restart dns:*
+sudo systemctl restart dns-web dns-daemon   # and dns-dhcp / dns-proxy if used (supervisor: supervisorctl restart dns:*)
 ```
 
 **Updating to the version with the session cookie:** the GUI no longer keeps the token in the browser's storage but in an HttpOnly cookie, so every user signs in again once after the update. Scripts that call the API keep sending `Authorization: Token <key>`.
@@ -390,7 +418,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 
 ## 14. Logs, backup, maintenance
 
-- **Logs:** supervisor writes `/var/log/supervisor/dns-*.log` and rotates them (`stdout_logfile_maxbytes`, default 50 MB, 10 backups). nginx logs are in `/var/log/nginx/` (rotated by logrotate). The DNS query history is in the database and is purged by `rundns` after `QUERY_LOG_DAYS` (default 7), together with the statistics counters.
+- **Logs:** systemd: `journalctl -u dns-daemon` (and `dns-web`, `dns-dhcp`, `dns-proxy`). Supervisor writes `/var/log/supervisor/dns-*.log` and rotates them (`stdout_logfile_maxbytes`, default 50 MB, 10 backups). nginx logs are in `/var/log/nginx/` (rotated by logrotate). The DNS query history is in the database and is purged by `rundns` after `QUERY_LOG_DAYS` (default 7), together with the statistics counters.
 - **Backup:** the database is the only data to protect, plus `.env`. PostgreSQL: `pg_dump -U dns dns | gzip > dns-$(date +%F).sql.gz`. MariaDB: `mariadb-dump --single-transaction dns | gzip > ...`. Run it from cron, copy it off the server, and test a restore (`psql dns < dump.sql` / `mariadb dns < dump.sql`) on a spare machine. Keep `.env` copies in a secret store: without `SECRET_KEY` nobody can use tickets signed before, but data is intact.
 - **Partitioned log (MySQL/MariaDB or PostgreSQL, optional):** `manage.py partition_querylog` once splits the query log into daily partitions; `rundns` then drops old days instantly instead of running a huge `DELETE`. It rebuilds the table and writes wait meanwhile: back up first, run it when the traffic is low (see "Partitioned log" in the README).
 - **Statistics counters:** the Statistics and Geolocation pages read hourly counters, not the log. `manage.py rebuild_stats` recomputes them from the log if they ever look wrong.
@@ -416,7 +444,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 |---|---|
 | The API will not start: weak `SECRET_KEY` | With `DEBUG=false` the key must have at least 50 characters. Generate a new one (README, "Configuration"). |
 | `DisallowedHost: Invalid HTTP_HOST header: '192.168.1.23'` | The browser used an address that is not in `ALLOWED_HOSTS`. Use the configured host name, or add the address: `ALLOWED_HOSTS=dns.example.com,192.168.1.23` (and `CSRF_TRUSTED_ORIGINS=https://dns.example.com,https://192.168.1.23`, and the IP in the certificate SAN). Passkeys never work on an IP address: sign in through the host name. |
-| `502 Bad Gateway` from nginx | gunicorn is down or not on `127.0.0.1:8000`: `supervisorctl status`, `tail /var/log/supervisor/dns-api.err.log`. |
+| `502 Bad Gateway` from nginx | gunicorn is down or not on `127.0.0.1:8000`: `systemctl status dns-web`, `journalctl -u dns-web` (supervisor: `supervisorctl status`, `/var/log/supervisor/dns-api.err.log`). |
 | `403` "CSRF verification failed" | `CSRF_TRUSTED_ORIGINS` is missing the exact `https://host` used in the browser, or `BEHIND_PROXY` is not `true`. |
 | `403` "CSRF Failed: CSRF token missing" from the API | A request that changes something carried the GUI's cookie but not the `X-CSRFToken` header. The GUI sends it by itself (reload the page if the `csrftoken` cookie was deleted); scripts must use `Authorization: Token <key>` instead of the cookie. |
 | A relay agent's Leasequery gets no answer | Its address is not in *DHCP settings > Leasequery from* (`DHCP_LEASEQUERY`), empty by default. |
@@ -424,11 +452,21 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 | "Invalid passkey or domain not allowed" | `WEBAUTHN_RP_ID` must be the host name without port, `WEBAUTHN_ORIGINS` the full `https://…` address; the certificate must be trusted. |
 | The Django admin sends you back to the GUI | Expected: it opens only from **Django admin ↗** for superusers, and the GUI and `/admin` must share the same address. |
 | `OSError: Address already in use` on port 53 | Another resolver (often `systemd-resolved` on `127.0.0.53`): bind `--address` to the server IP or disable its stub listener. |
-| `PermissionError` on port 53 | `setcap cap_net_bind_service` missing, or lost after a Python upgrade (step 8). |
+| `PermissionError` on port 53 | the unit lacks `AmbientCapabilities=CAP_NET_BIND_SERVICE` (systemd), or under supervisor `setcap` is missing or lost after a Python upgrade (step 8). |
 | `Database returned an invalid datetime value` in the admin | The database lacks time zone tables: see step 4 (`mariadb-tzinfo-to-sql`), or set `TIME_ZONE=UTC`. |
-| A `.env` change has no effect | Restart **both** programs: `sudo supervisorctl restart dns:*` (`dns:dns-api` and `dns:dns-daemon`). Only `backend/.env` is read, not `.env.prod`. |
+| A `.env` change has no effect | Restart **all** services: `sudo systemctl restart dns-web dns-daemon` (supervisor: `supervisorctl restart dns:*`). Only `backend/.env` is read, not `.env.prod`. |
 | `mysqlclient` fails to build | Install `libmariadb-dev` (or `default-libmysqlclient-dev`), `pkg-config` and `build-essential`. |
 | `ModuleNotFoundError: psycopg` / `MySQLdb` | The driver of step 4 is not installed in `/opt/dns/.venv`. |
 | HTTP/3 does not work | UDP 443 is blocked, or nginx lacks `http_v3`; browsers fall back to HTTP/2 by themselves, so the site still works. |
 | Redis errors in the log | Wrong `REDIS_URL` or password. The DNS daemon keeps working (it asks the upstream directly). |
 | Sign-in fails right after an API restart | The key changed; the GUI fetches it again and retries once. A second failure: reload the page. |
+
+## Known limits / deferred hardening
+
+- The MITM Root CA (`PROXY_HTTPS_MITM`) has no NameConstraints: whoever gets its key can impersonate any site to every device that enrolled it. Its key lives in the database, encrypted with a password derived from `SECRET_KEY`; rotating `SECRET_KEY` needs the CA to be created again (and re-enrolled on the devices).
+- `Record` has no `UniqueConstraint`: duplicate records are possible under concurrent writes.
+- No DRF throttling in the API (nginx limits only sign-in and second factor).
+- No pagination: the frontend expects plain arrays.
+- The nginx limits for DoH/DoT are estimates, not measured.
+
+**Behaviour changes worth knowing.** Blocklist and rule-list sources must be `https://` on public addresses (no `http://`, no LAN hosts; the list keeps its old copy and the status shows the error). Custom `/regex/` rules and DNS regex entries with nested quantifiers such as `(a+)+` or `(\w+\.)*x` are skipped for safety. The proxy log window "Last 30 days" is the longest one.

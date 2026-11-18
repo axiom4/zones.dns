@@ -1,0 +1,33 @@
+[Unit]
+Description=dns: DNS daemon (rundns)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dns
+Group=dns
+WorkingDirectory=/opt/dns/app/backend
+ExecStart=/opt/dns/.venv/bin/python manage.py rundns --address 0.0.0.0 --port 53
+Restart=on-failure
+RestartSec=3
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+UMask=0077
+# Only the SQLite files (db, -wal, -shm) and geoip-data need writing; with PostgreSQL/MySQL this can be narrowed to /opt/dns/app/backend/geoip-data.
+ReadWritePaths=/opt/dns/app/backend
+
+[Install]
+WantedBy=multi-user.target

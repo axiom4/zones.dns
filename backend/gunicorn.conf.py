@@ -3,6 +3,7 @@ import time
 
 from gunicorn.glogging import Logger
 
+# X-Real-IP is trusted here: it is only safe while gunicorn listens on loopback (-b 127.0.0.1:8000), so that only nginx can set it.
 ACCESS_FORMAT = '%(t)s %(ip)s "%(r)s" %(s)s %(b)s "%(a)s"'
 
 

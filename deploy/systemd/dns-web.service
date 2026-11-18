@@ -1,0 +1,33 @@
+[Unit]
+Description=dns: web API (gunicorn)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=dns
+Group=dns
+WorkingDirectory=/opt/dns/app/backend
+ExecStart=/opt/dns/.venv/bin/gunicorn dnsadmin.wsgi -b 127.0.0.1:8000 --workers 1 --threads 8 --access-logfile -
+Restart=on-failure
+RestartSec=3
+CapabilityBoundingSet=
+AmbientCapabilities=
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX AF_NETLINK
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+LockPersonality=true
+RestrictSUIDSGID=true
+RestrictNamespaces=true
+SystemCallArchitectures=native
+UMask=0077
+# Only the SQLite files (db, -wal, -shm) and geoip-data need writing; with PostgreSQL/MySQL this can be narrowed to /opt/dns/app/backend/geoip-data.
+ReadWritePaths=/opt/dns/app/backend
+
+[Install]
+WantedBy=multi-user.target
