@@ -138,7 +138,10 @@ class StatsView(APIView):
         now = timezone.now()
         start = now - timedelta(hours=hours)
         since_raw = request.query_params.get('since', '')
-        since = parse_datetime(since_raw) if len(since_raw) <= 40 else None
+        try:
+            since = parse_datetime(since_raw) if len(since_raw) <= 40 else None
+        except ValueError:  # well formed but not a date (month 13): was an error 500
+            since = None
         since_key = ''
         if since and timezone.is_aware(since):
             start = min(max(since, now - timedelta(hours=720)), now)

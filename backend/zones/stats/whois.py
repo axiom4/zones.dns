@@ -1,6 +1,7 @@
 """WHOIS of an IP address (RFC 3912): IANA says which regional registry holds it, then that registry is asked."""
 import re
 import socket
+import time
 
 from django.core.cache import cache
 
@@ -14,8 +15,8 @@ def _ask(server, query):
     with socket.create_connection((server, 43), timeout=5) as s:
         s.settimeout(5)
         s.sendall(query.encode() + b'\r\n')
-        out = b''
-        while len(out) < MAX_BYTES and (chunk := s.recv(4096)):
+        out, deadline = b'', time.monotonic() + 15  # the timeout is per read: a server sending a byte now and then held the request for hours
+        while len(out) < MAX_BYTES and time.monotonic() < deadline and (chunk := s.recv(4096)):
             out += chunk
     return out.decode('utf-8', 'replace')
 

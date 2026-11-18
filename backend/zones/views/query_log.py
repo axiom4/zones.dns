@@ -28,14 +28,14 @@ class LogPagination(LimitOffsetPagination):
         """The list with before=<id>: the rows after that one (keyset). A deep page reads only its rows, not every row before it, and rows that
         arrive meanwhile do not shift the next page (with offsets they came back twice). count stays the total of the filters."""
         before = request.query_params.get('before', '')
-        if not (before.isdigit() and getattr(view, 'action', None) == 'list'):
+        if not (before.isdecimal() and getattr(view, 'action', None) == 'list'):
             return super().paginate_queryset(queryset, request, view)
         self.request, self.limit, self.offset = request, self.get_limit(request), 0
         self.count = self.get_count(queryset)
         return list(after_row(queryset, int(before))[:self.limit])
 
     def get_count(self, queryset):
-        fast = stat_count(self.request.query_params)
+        fast = stat_count(self.request.query_params) if queryset.query.group_by is None else None  # grouped: it counts groups, not queries
         if fast is not None:
             return fast
         # exact, but remembered COUNT_TTL seconds per filter: the live refresh asks every few seconds and a COUNT(*) over millions of rows is slow
@@ -251,7 +251,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         """Delete old queries (not filtered by the list filters: it ages the whole log)."""
         s = PurgeRequestSerializer(data=request.data)
         s.is_valid(raise_exception=True)
-        hours, dry = s.validated_data['older_than_hours'], s.validated_data['dry_run']
+        hours, dry = min(s.validated_data['older_than_hours'], MAX_HOURS), s.validated_data['dry_run']  # more made timedelta overflow (error 500)
         qs = QueryLog.objects.filter(time__lt=timezone.now() - timedelta(hours=hours)) if hours else QueryLog.objects.all()
         if dry:
             count = qs.count()
@@ -269,7 +269,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
     @action(detail=False, methods=['get'], pagination_class=None)
     def answers(self, request):
         """Answer records for some queries, loaded on demand."""
-        ids = [int(i) for i in request.query_params.get('ids', '').split(',') if i.strip().isdigit()][:200]
+        ids = [int(i) for i in request.query_params.get('ids', '').split(',') if i.strip().isdecimal()][:200]  # isdigit() lets '²' through to int()
         rows = QueryLog.objects.filter(id__in=ids).values('id', 'answers')
         return Response(QueryLogAnswersSerializer(rows, many=True).data)
 

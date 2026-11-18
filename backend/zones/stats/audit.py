@@ -83,12 +83,28 @@ def dns_query(name, qtype, server=None, tcp=False):
         else:  # the upstream may carry a port (127.0.0.1:5335, [::1]:5335): sent as the host name, every lookup of the audit and of the map failed
             from ..dnsd.resolver import Resolver
             host, port, v6 = Resolver._upstream_addr(settings.UPSTREAMS[0])
-        reply = DNSRecord.parse(DNSRecord.question(name, qtype).send(host, port, tcp=tcp, timeout=TIMEOUT, ipv6=v6))
+        q = DNSRecord.question(name, qtype)
+        reply = DNSRecord.parse(_tcp_send(q.pack(), host, port) if tcp else q.send(host, port, timeout=TIMEOUT, ipv6=v6))
         if reply.header.tc and not tcp:
             return dns_query(name, qtype, server, tcp=True)
         return reply
     except Exception:
         return None
+
+
+def _tcp_send(data, host, port):
+    """One DNS message over TCP. Not dnslib's send: it loops forever when the server closes before the length it announced, and has no
+    deadline (a server sending a byte now and then held the audit for hours)."""
+    deadline = time.monotonic() + 3 * TIMEOUT
+    with socket.create_connection((host, port), timeout=TIMEOUT) as s:
+        s.sendall(len(data).to_bytes(2, 'big') + data)
+        buf = b''
+        while len(buf) < 2 or len(buf) < 2 + int.from_bytes(buf[:2], 'big'):
+            chunk = s.recv(65537)
+            if not chunk or time.monotonic() > deadline:
+                raise OSError('incomplete DNS answer over TCP')
+            buf += chunk
+    return buf[2:2 + int.from_bytes(buf[:2], 'big')]
 
 
 def dns_rdata(name, qtype, server=None):
@@ -112,11 +128,17 @@ def dns_values(name, qtype):
     return out
 
 
+_EMBEDS_V4 = (ipaddress.ip_network('64:ff9b::/96'), ipaddress.ip_network('::/96'))  # NAT64, IPv4-compatible: they reach the IPv4 address inside
+
+
 def is_public(ip):
     try:
-        return ipaddress.ip_address(ip).is_global
+        a = ipaddress.ip_address(ip)
     except ValueError:
         return False
+    if a.version == 6 and any(a in n for n in _EMBEDS_V4):  # is_global calls 64:ff9b::a00:1 and ::127.0.0.1 global
+        a = ipaddress.IPv4Address(int(a) & 0xFFFFFFFF)
+    return a.is_global
 
 
 def public_ips(host):
@@ -177,10 +199,19 @@ def rdap(path):
 
 
 def _vcard(entity, field):
-    for item in (entity.get('vcardArray') or [None, []])[1]:
-        if item[0] == field:
-            return item[3]
-    return None
+    try:
+        return next((item[3] for item in entity['vcardArray'][1] if item[0] == field), None)
+    except (KeyError, IndexError, TypeError):  # missing or malformed vCard (registry data)
+        return None
+
+
+def _iso(s):
+    """An RDAP date as an aware datetime (UTC when it has no zone), None if it is not one."""
+    try:
+        dt = datetime.fromisoformat(str(s).replace('Z', '+00:00'))
+    except ValueError:
+        return None
+    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
 
 
 def registration(domain):
@@ -194,20 +225,14 @@ def registration(domain):
             entities = [e for e in (data.get('entities') or []) if isinstance(e, dict)]
             registrar = next((e for e in entities if 'registrar' in (e.get('roles') or [])), {})
             abuse = next((_vcard(e, 'email') for e in (registrar.get('entities') or []) if isinstance(e, dict) and 'abuse' in (e.get('roles') or [])), None)
-            age = None
-            if ev.get('registration'):
+            created = _iso(ev.get('registration'))
+            age = (datetime.now(timezone.utc) - created).days if created else None
+            if age is not None:
                 try:
-                    dt = datetime.fromisoformat(str(ev['registration']).replace('Z', '+00:00'))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    age = (datetime.now(timezone.utc) - dt).days
-                    try:
-                        from django.core.cache import cache
-                        cache.set(f'dom-age:{name}', age, 86400)
-                    except Exception:
-                        pass
-                except (ValueError, TypeError):
-                    age = None
+                    from django.core.cache import cache
+                    cache.set(f'dom-age:{name}', age, 86400)
+                except Exception:
+                    pass
             return {
                 'name': name, 'registrar': _vcard(registrar, 'fn'), 'created': ev.get('registration'), 'expires': ev.get('expiration'),
                 'updated': ev.get('last changed'), 'status': data.get('status') or [], 'age_days': age,
@@ -426,28 +451,45 @@ def tls_protocols(host, ip):
     return out
 
 
+def http_target(url):
+    """(host, port, tls, path) of a URL the probes may follow (http/https, a valid name, port 80/443), or None."""
+    try:
+        u = urllib.parse.urlsplit(url)
+        port = u.port or (443 if u.scheme == 'https' else 80)
+    except ValueError:  # a Location like http://host:abc/ or http://[::1/ made the whole audit fail
+        return None
+    host = (u.hostname or '').lower()
+    if u.scheme not in ('http', 'https') or not NAME_RE.match(host) or port not in (80, 443):
+        return None
+    return host, port, u.scheme == 'https', (u.path or '/') + (f'?{u.query}' if u.query else '')
+
+
+def next_url(url, location):
+    try:
+        return urllib.parse.urljoin(url, location)
+    except ValueError:
+        return None
+
+
 def redirect_chain(domain, max_hops=6):
     """Follows the redirects from http://domain/ , one validated public host at a time (ports 80/443 only)."""
     url, hops, seen = f'http://{domain}/', [], set()
     for _ in range(max_hops):
-        u = urllib.parse.urlsplit(url)
-        host = (u.hostname or '').lower()
-        port = u.port or (443 if u.scheme == 'https' else 80)
-        if u.scheme not in ('http', 'https') or not NAME_RE.match(host) or url in seen or port not in (80, 443):
+        target = url and url not in seen and http_target(url)
+        if not target:
             break
+        host, port, tls, path = target
         seen.add(url)
         ips = public_ips(host)
         if not ips:
             hops.append({'url': url, 'status': None, 'location': None, 'ip': None})
             break
-        path = (u.path or '/') + (f'?{u.query}' if u.query else '')
-        status, headers, _c, _b = fetch(host, ips[0], port, u.scheme == 'https', path)
+        status, headers, _c, _b = fetch(host, ips[0], port, tls, path)
         loc = headers.get('location')
         hops.append({'url': url, 'status': status, 'location': loc, 'ip': ips[0]})
-        if status in (301, 302, 303, 307, 308) and loc:
-            url = urllib.parse.urljoin(url, loc)
-        else:
+        if status not in (301, 302, 303, 307, 308) or not loc:
             break
+        url = next_url(url, loc)
     return hops
 
 
@@ -760,9 +802,9 @@ def audit(domain, deep=False):
 
     # --- registration ---
     if reg:
-        if reg['expires']:
-            days = (datetime.fromisoformat(reg['expires'].replace('Z', '+00:00')) - datetime.now(timezone.utc)).days
-            add('bad' if days < 14 else 'warn' if days < 60 else 'ok', 'Registration', f'The domain expires in {days} days' if days >= 0 else 'The domain has expired', reg['expires'][:10])
+        if expires := _iso(reg['expires']):  # a date without a zone, or not a date, made the audit fail
+            days = (expires - datetime.now(timezone.utc)).days
+            add('bad' if days < 14 else 'warn' if days < 60 else 'ok', 'Registration', f'The domain expires in {days} days' if days >= 0 else 'The domain has expired', str(reg['expires'])[:10])
         if reg['age_days'] is not None:
             add('info' if reg['age_days'] < 180 else 'ok', 'Registration', f'Domain registered {reg["age_days"] // 365} years and {reg["age_days"] % 365 // 30} months ago' if reg['age_days'] >= 365 else f'Domain registered {reg["age_days"]} days ago',
                 'A very recent domain deserves more caution.' if reg['age_days'] < 180 else '')
@@ -810,7 +852,7 @@ def audit(domain, deep=False):
                 add(SECURITY_HEADERS[h][0], 'HTTP headers', SECURITY_HEADERS[h][1], SECURITY_HEADERS[h][2])
         if 'x-frame-options' not in headers and 'frame-ancestors' not in headers.get('content-security-policy', ''):
             add('info', 'HTTP headers', 'No clickjacking protection', 'X-Frame-Options and CSP frame-ancestors are missing: the page can be embedded in other sites.')
-        if re.search(r'\d+\.\d+', headers.get('server', '') + headers.get('x-powered-by', '')):
+        if re.search(r'\d\.\d', headers.get('server', '') + headers.get('x-powered-by', '')):
             add('info', 'HTTP headers', 'Software version exposed', f'{headers.get("server", "")} {headers.get("x-powered-by", "")}'.strip())
         if headers.get('access-control-allow-origin') == '*':
             add('info', 'HTTP headers', 'CORS open to any origin (*)')

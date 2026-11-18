@@ -1,6 +1,4 @@
-import urllib.parse
-
-from .audit import NAME_RE, fetch, public_ips
+from .audit import fetch, http_target, next_url, public_ips
 from ..dnsd.domains import main_domain
 
 REDIRECTS = (301, 302, 303, 307, 308)
@@ -20,16 +18,15 @@ def probe(domain, max_hops=6):
     """
     url, seen, cookies, target, page, pixel = f'http://{domain}/', set(), [], None, True, False
     for _ in range(max_hops):
-        u = urllib.parse.urlsplit(url)
-        host = (u.hostname or '').lower()
-        port = u.port or (443 if u.scheme == 'https' else 80)
-        if u.scheme not in ('http', 'https') or not NAME_RE.match(host) or url in seen or port not in (80, 443):
+        t = url and url not in seen and http_target(url)  # a bad Location (http://host:abc/) ended the whole scan
+        if not t:
             break
+        host, port, tls, path = t
         seen.add(url)
         ips = public_ips(host)  # public addresses only: no SSRF into the LAN
         if not ips:
             break
-        status, headers, raw, body = fetch(host, ips[0], port, u.scheme == 'https', (u.path or '/') + (f'?{u.query}' if u.query else ''), 'GET', body_limit=256)
+        status, headers, raw, body = fetch(host, ips[0], port, tls, path, 'GET', body_limit=256)
         cookies += [c.split('=', 1)[0] for c in raw if _tracking_cookie(c)]
         page = not (status and status < 400 and not headers.get('content-type', '').lower().startswith('text/html'))
         ctype = headers.get('content-type', '').lower()
@@ -37,7 +34,7 @@ def probe(domain, max_hops=6):
         if main_domain(host) != domain:
             target = main_domain(host)
         if status in REDIRECTS and headers.get('location'):
-            url = urllib.parse.urljoin(url, headers['location'])
+            url = next_url(url, headers['location'])
         else:
             break
     return (None if page else target), cookies, pixel
