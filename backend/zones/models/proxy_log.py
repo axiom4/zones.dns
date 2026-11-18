@@ -8,6 +8,7 @@ class ProxyLog(models.Model):
         ('filtered', 'filtered'),
         ('blocked', 'blocked'),
         ('error', 'error'),
+        ('timeout', 'timeout'),  # counted apart in the statistics: a wait that ran out says nothing about the site's speed or the proxy's error rate
     ]
 
     time = models.DateTimeField(default=timezone.now, editable=False, db_index=True)

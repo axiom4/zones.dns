@@ -23,5 +23,7 @@ class StatsSerializer(serializers.Serializer):
     top_domains = CountSerializer(many=True)
     top_blocked = CountSerializer(many=True)
     top_clients = CountSerializer(many=True)
+    timeouts = serializers.IntegerField(help_text='Proxy requests that timed out (upstream connect/read/write): not part of total, the outcomes or the average time')
+    top_timeouts = CountSerializer(many=True, help_text='The sites with the most proxy timeouts')
     step = serializers.IntegerField(help_text='Length of one series entry in seconds: 60 or 3600')
     series = BucketSerializer(many=True)

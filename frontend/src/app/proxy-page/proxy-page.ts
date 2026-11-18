@@ -374,9 +374,9 @@ export class ProxyPage implements OnDestroy {
 
   /** The outcome chip: its own word and the state colour (blocked red, error amber, filtered blue, allowed green). */
   outcomeColour(outcome: string) {
-    return ({ blocked: 'blocked', error: 'error', filtered: 'forwarded' } as Record<string, string>)[outcome] ?? 'local';
+    return ({ blocked: 'blocked', error: 'error', timeout: 'error', filtered: 'forwarded' } as Record<string, string>)[outcome] ?? 'local';
   }
   outcomeLabel(outcome: string) {
-    return ({ blocked: 'Blocked', error: 'Error', filtered: 'Filtered', allowed: 'Allowed' } as Record<string, string>)[outcome] ?? outcome;
+    return ({ blocked: 'Blocked', error: 'Error', timeout: 'Timeout', filtered: 'Filtered', allowed: 'Allowed' } as Record<string, string>)[outcome] ?? outcome;
   }
 }

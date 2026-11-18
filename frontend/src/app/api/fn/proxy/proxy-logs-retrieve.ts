@@ -34,7 +34,7 @@ export interface ProxyLogsRetrieve$Params {
 /**
  * Filter by outcome
  */
-  outcome?: 'allowed' | 'blocked' | 'error' | 'filtered';
+  outcome?: 'allowed' | 'blocked' | 'error' | 'filtered' | 'timeout';
 
 /**
  * Search host, URL or reason (case-insensitive)

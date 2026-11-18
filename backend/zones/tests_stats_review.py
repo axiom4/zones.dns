@@ -63,6 +63,18 @@ class StatsViewReviewTests(TestCase):
         self.api = APIClient()
         self.api.force_authenticate(get_user_model().objects.create_user('adm', is_staff=True))
 
+    def test_proxy_timeouts_are_counted_apart(self):
+        from .models import ProxyLog
+        for outcome, ms in (('allowed', 100), ('allowed', 300), ('error', 200), ('timeout', 120000), ('timeout', 120000)):
+            ProxyLog.objects.create(client='10.0.0.1', method='GET', host='slow.example' if outcome == 'timeout' else 'ok.example', outcome=outcome, ms=ms)
+        d = self.api.get('/api/stats/?source=proxy').json()
+        self.assertEqual((d['total'], d['avg_ms'], d['timeouts']), (3, 200, 2))  # the two waits that ran out change neither the total nor the average
+        self.assertNotIn('timeout', [c['name'] for c in d['by_outcome']])
+        self.assertEqual(d['top_timeouts'], [{'name': 'slow.example', 'count': 2}])
+        self.assertEqual(self.api.get('/api/stats/?source=dns').json()['timeouts'], 0)
+        self.assertEqual(self.api.get('/api/stats/').json()['timeouts'], 2)
+        self.assertEqual(self.api.get('/api/proxy/logs/?outcome=timeout').json()['count'], 2)  # the log still lists them
+
     def test_since_that_is_not_a_date_is_ignored(self):
         self.assertEqual(self.api.get('/api/stats/?since=2024-13-45T00:00:00Z').status_code, 200)
 

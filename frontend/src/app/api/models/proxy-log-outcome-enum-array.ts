@@ -10,5 +10,6 @@ export const PROXY_LOG_OUTCOME_ENUM: ProxyLogOutcomeEnum[] = [
   'allowed',
   'filtered',
   'blocked',
-  'error'
+  'error',
+  'timeout'
 ];

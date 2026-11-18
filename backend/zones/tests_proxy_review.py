@@ -231,6 +231,12 @@ class ProxyHardeningTests(TestCase):
     def test_redact_url_drops_userinfo(self):
         self.assertEqual(ps._redact_url('http://u:pw@h/p?a=1'), 'http://h/p?a=…')
 
+    def test_a_timeout_is_its_own_outcome(self):
+        import httpcore
+        self.assertEqual(ps._gateway(TimeoutError()), ('timeout', 504))
+        self.assertEqual(ps._gateway(httpcore.ReadTimeout('x')), ('timeout', 504))
+        self.assertEqual(ps._gateway(ConnectionRefusedError()), ('error', 502))
+
     def test_header_outside_latin1_is_escaped(self):
         self.assertEqual(ps.H1Exchange._encode([('X-Blocked-By', 'a中')]), [(b'X-Blocked-By', b'a\\u4e2d')])
 

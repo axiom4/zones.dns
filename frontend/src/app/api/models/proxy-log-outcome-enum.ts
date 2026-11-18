@@ -7,6 +7,7 @@
  * * `filtered` - filtered
  * * `blocked` - blocked
  * * `error` - error
+ * * `timeout` - timeout
  */
-export type ProxyLogOutcomeEnum = 'allowed' | 'filtered' | 'blocked' | 'error';
+export type ProxyLogOutcomeEnum = 'allowed' | 'filtered' | 'blocked' | 'error' | 'timeout';
 

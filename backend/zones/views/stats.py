@@ -70,7 +70,9 @@ def _from_counters(start):
 def _from_proxy(start, step):
     """The filtering proxy's own log in the same shape as the DNS statistics. Its outcomes are named proxied (allowed), filtered, blocked, error;
     the methods stand in for the query types; what it did is an answer kind too (blocked, error, proxied)."""
-    qs = ProxyLog.objects.filter(time__gte=start if step == 60 else floor_hour(start))
+    base = ProxyLog.objects.filter(time__gte=start if step == 60 else floor_hour(start))
+    qs = base.exclude(outcome='timeout')  # a wait that ran out would inflate the total, the error share and the average time: counted apart
+    timeouts = base.filter(outcome='timeout')
     outcomes = list(qs.values('outcome').annotate(count=Count('id'), ms=Sum('ms')))
     total = sum(r['count'] for r in outcomes)
     trunc = TruncMinute if step == 60 else TruncHour
@@ -89,6 +91,8 @@ def _from_proxy(start, step):
         'top_blocked': _counts(qs.filter(outcome='blocked'), 'host', 10),
         'top_clients': _counts(qs, 'client', 10),
         'series': list(series),
+        'timeouts': timeouts.count(),
+        'top_timeouts': _counts(timeouts, 'host', 10),
     }
 
 
@@ -120,6 +124,8 @@ def _merge(d, p):
         'top_blocked': _sum_counts(d['top_blocked'], p['top_blocked'], 10),
         'top_clients': _sum_counts(d['top_clients'], p['top_clients'], 10),
         'series': [series[t] for t in sorted(series)],
+        'timeouts': p['timeouts'],
+        'top_timeouts': p['top_timeouts'],
     }
 
 
@@ -160,6 +166,8 @@ class StatsView(APIView):
         dns = (_from_log if step == 60 else _from_counters)(start) if source != 'proxy' else None
         prx = _from_proxy(start, step) if source != 'dns' else None
         data = dns if prx is None else prx if dns is None else _merge(dns, prx)
+        data.setdefault('timeouts', 0)
+        data.setdefault('top_timeouts', [])
         data['step'] = step
         try:
             # shortcut: numbers up to 30 s old (5 min for periods over a day, which read the hourly counters of every name), to spare the repeated scans

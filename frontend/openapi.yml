@@ -1992,6 +1992,7 @@ paths:
           - blocked
           - error
           - filtered
+          - timeout
         description: Filter by outcome
       - in: query
         name: q
@@ -4690,12 +4691,14 @@ components:
       - filtered
       - blocked
       - error
+      - timeout
       type: string
       description: |-
         * `allowed` - allowed
         * `filtered` - filtered
         * `blocked` - blocked
         * `error` - error
+        * `timeout` - timeout
     ProxyLogPurgeRequestRequest:
       type: object
       properties:
@@ -5329,6 +5332,14 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Count'
+        timeouts:
+          type: integer
+          description: 'Proxy requests that timed out (upstream connect/read/write): not part of total, the outcomes or the average time'
+        top_timeouts:
+          type: array
+          items:
+            $ref: '#/components/schemas/Count'
+          description: The sites with the most proxy timeouts
         step:
           type: integer
           description: 'Length of one series entry in seconds: 60 or 3600'
@@ -5344,8 +5355,10 @@ components:
       - series
       - step
       - top_blocked
+      - timeouts
       - top_clients
       - top_domains
+      - top_timeouts
       - total
     Status:
       type: object

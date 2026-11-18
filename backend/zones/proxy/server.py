@@ -418,6 +418,15 @@ def _why(e):
     return f'{type(e).__name__}: {e}'[:200]
 
 
+def _timed_out(e):
+    return isinstance(e, (TimeoutError, httpcore.TimeoutException))
+
+
+def _gateway(e):
+    """(outcome, status) of a failed upstream exchange for the log: a timeout is its own outcome, so the statistics can leave it out."""
+    return ('timeout', 504) if _timed_out(e) else ('error', 502)
+
+
 def _warn(msg):
     print(f'Proxy: {msg}', file=sys.stderr, flush=True)
 
@@ -967,7 +976,7 @@ class Client:
             try:
                 status, reason, resp_headers, raw_body = await _run(_WORK, fetcher, target_scheme, host, port, ex.method, path_query, body, fwd)
             except Exception as e:
-                self.log(log_method, host, full_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
+                self.log(log_method, host, full_url, *_gateway(e), f'Bad Gateway: {_why(e)}', t0)
                 return await self.text(ex, 502, 'Bad Gateway')
             return await self.page(info, status, reason, list(resp_headers), raw_body)
 
@@ -1006,10 +1015,10 @@ class Client:
             pass  # HTTP/2: the client reset the stream
         except Exception as e:
             if ex.started:
-                self.log(log_method, host, full_url, 'error', info.status, f'Upstream failed while streaming: {_why(e)}', t0)
+                self.log(log_method, host, full_url, 'timeout' if _timed_out(e) else 'error', info.status, f'Upstream failed while streaming: {_why(e)}', t0)
                 await self.abort(ex)
             else:
-                self.log(log_method, host, full_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
+                self.log(log_method, host, full_url, *_gateway(e), f'Bad Gateway: {_why(e)}', t0)
                 await self.text(ex, 502, 'Bad Gateway')
         finally:
             upstream.target_rules.reset(token)
@@ -1033,7 +1042,7 @@ class Client:
         try:
             stream = await upload.open_h1(scheme, host, port, addrs, ctx, UPSTREAM_TIMEOUTS['connect'])
         except (OSError, TimeoutError, ssl.SSLError) as e:
-            self.log(info.log_method, host, info.full_url, 'error', 502, f'Bad Gateway: {_why(e)}', info.t0)
+            self.log(info.log_method, host, info.full_url, *_gateway(e), f'Bad Gateway: {_why(e)}', info.t0)
             return await self.text(ex, 502, 'Bad Gateway')
         try:
             conn, ev = await upload.websocket_handshake(stream, path_query, fwd, UPSTREAM_TIMEOUTS['read'])
@@ -1057,7 +1066,7 @@ class Client:
                 await _pipe(client, up)
         except (OSError, TimeoutError, ssl.SSLError, h11.ProtocolError, ConnectionError) as e:
             if not ex.started and not getattr(ex.conn, 'taken', False):
-                self.log(info.log_method, host, info.full_url, 'error', 502, f'Bad Gateway: {_why(e)}', info.t0)
+                self.log(info.log_method, host, info.full_url, *_gateway(e), f'Bad Gateway: {_why(e)}', info.t0)
                 await self.text(ex, 502, 'Bad Gateway')
         finally:
             await stream.aclose()
@@ -1196,7 +1205,7 @@ class Client:
         try:
             up = await self.open_tunnel(host, port, addrs)
         except (OSError, TimeoutError) as e:
-            self.log('CONNECT', host, target_url, 'error', 502, f'Bad Gateway: {_why(e)}', t0)
+            self.log('CONNECT', host, target_url, *_gateway(e), f'Bad Gateway: {_why(e)}', t0)
             return await self.text(ex, 502, 'Bad Gateway')
         self.log('CONNECT', host, target_url, 'allowed', 200, 'CONNECT tunnel (MITM auto-bypass)' if bypassed else 'CONNECT tunnel', t0)
         try:

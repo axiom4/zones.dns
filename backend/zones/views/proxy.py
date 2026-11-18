@@ -254,7 +254,7 @@ class ProxyLogsView(APIView):
     @extend_schema(
         parameters=[
             OpenApiParameter('q', str, description='Search host, URL or reason (case-insensitive)'),
-            OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error'], description='Filter by outcome'),
+            OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error', 'timeout'], description='Filter by outcome'),
             OpenApiParameter('client', str, description='Filter by client IP'),
             OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
             OpenApiParameter('hours', int, description='Only the last N hours (default 24, max 720)'),

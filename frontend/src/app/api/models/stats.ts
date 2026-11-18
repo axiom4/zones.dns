@@ -21,5 +21,15 @@ export interface Stats {
   top_blocked: Array<Count>;
   top_clients: Array<Count>;
   top_domains: Array<Count>;
+
+  /**
+   * The sites with the most proxy timeouts
+   */
+  top_timeouts: Array<Count>;
+
+  /**
+   * Proxy requests that timed out (upstream connect/read/write): not part of total, the outcomes or the average time
+   */
+  timeouts: number;
   total: number;
 }

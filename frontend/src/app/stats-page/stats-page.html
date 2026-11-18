@@ -35,6 +35,7 @@
       }
       <div><dt>Failed</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'error' })">{{ outcome('error') | number }}</a></dd></div>
       <div><dt>Average time</dt><dd>{{ st.avg_ms | number: '1.0-0' }} ms</dd></div>
+      @if (st.timeouts) { <div><dt>Proxy timeouts</dt><dd>{{ st.timeouts | number }}</dd></div> }
     </dl>
   </section>
 
