@@ -107,13 +107,13 @@
       <li class="empty">No queries match these filters.</li>
     }
   </ul>
-  @if (groups().length < gCount()) { <div class="more"><button class="ghost" (click)="more()">Show more domains</button></div> }
+  @if (groups().length < gCount()) { <div class="more">@for (n of [groups().length]; track n) { <div (appInView)="more()"></div> }<button class="ghost" (click)="more()">Show more domains</button></div> }
 } @else {
   <ul class="records logs">
     @for (l of rows(); track l.id) { <ng-container *ngTemplateOutlet="row; context: { $implicit: l, sub: false }" /> }
     @empty { <li class="empty">No queries match these filters.</li> }
   </ul>
-  @if (rows().length < count()) { <div class="more"><button class="ghost" (click)="more()">Show {{ PAGE }} more</button></div> }
+  @if (rows().length < count()) { <div class="more">@for (n of [rows().length]; track n) { <div (appInView)="more()"></div> }<button class="ghost" (click)="more()">Show {{ PAGE }} more</button></div> }
 }
 </div>
 

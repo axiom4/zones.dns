@@ -7,6 +7,7 @@ import { Api } from '../api/api';
 import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve, geoWhoisRetrieve } from '../api/functions';
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
+import { InView } from '../lib/in-view';
 import { countryName, flag } from '../lib/geo-util';
 import { byIp } from '../lib/ip';
 import { StepUp } from '../services/step-up';
@@ -25,7 +26,7 @@ interface Open { subs: QueryLogGroup[] | null; total: number; rows: QueryLog[]; 
 
 @Component({
   selector: 'app-logs-page',
-  imports: [FormsModule, NgTemplateOutlet, RouterLink, RouterLinkActive, DecimalPipe, Autocomplete],
+  imports: [FormsModule, NgTemplateOutlet, RouterLink, RouterLinkActive, DecimalPipe, Autocomplete, InView],
   templateUrl: './logs-page.html',
 })
 export class LogsPage implements OnDestroy {
@@ -210,7 +211,13 @@ export class LogsPage implements OnDestroy {
     }, { silent });
   }
 
-  more() {
+  private paging = false; // a page is on its way: the scroll must not ask for the same one twice
+  async more() {
+    if (this.paging) return;
+    this.paging = true;
+    try { await this.page(); } finally { this.paging = false; }
+  }
+  private page() {
     return this.ui.run(async () => {
       if (this.grouped) {
         const r = await this.api.invoke(logsGroupedList, { ...this.filters(), by: 'domain', ordering: this.ordering, limit: PAGE, offset: this.groups().length });

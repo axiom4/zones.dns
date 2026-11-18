@@ -12,6 +12,11 @@ import { ProxyLogsResponse } from '../../models/proxy-logs-response';
 export interface ProxyLogsRetrieve$Params {
 
 /**
+ * Only the rows older than this id (the next page: the id of the last row shown)
+ */
+  before?: number;
+
+/**
  * Filter by client IP
  */
   client?: string;
@@ -55,6 +60,7 @@ export interface ProxyLogsRetrieve$Params {
 export function proxyLogsRetrieve(http: HttpClient, rootUrl: string, params?: ProxyLogsRetrieve$Params, context?: HttpContext): Observable<StrictHttpResponse<ProxyLogsResponse>> {
   const rb = new RequestBuilder(rootUrl, proxyLogsRetrieve.PATH, 'get');
   if (params) {
+    rb.query('before', params.before, {});
     rb.query('client', params.client, {});
     rb.query('detail', params.detail, {});
     rb.query('hours', params.hours, {});

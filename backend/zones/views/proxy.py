@@ -262,13 +262,14 @@ class ProxyLogsView(APIView):
             OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
             OpenApiParameter('hours', int, description='Only the last N hours (default 24, max 720)'),
             OpenApiParameter('limit', int, description='Maximum rows returned (default 150, max 500)'),
+            OpenApiParameter('before', int, description='Only the rows older than this id (the next page: the id of the last row shown)'),
         ],
         responses=ProxyLogsResponseSerializer,
     )
     def get(self, request):
         """Return recent HTTP/HTTPS proxy log entries with filters and summary counts."""
         p = request.query_params
-        qs = ProxyLog.objects.order_by('-time', '-id')
+        qs = ProxyLog.objects.order_by('-id')  # newest first by id (the proxy writes in time order): a page is a keyset, rows logged meanwhile do not shift it
         hours_str = p.get('hours', '24').strip()
         hours = int(hours_str) if hours_str.isdigit() else 24
         hours = min(hours, 720) or 720  # 0 (= all) made every filter scan the whole table: it means the longest window
@@ -292,7 +293,8 @@ class ProxyLogsView(APIView):
         total = qs.count()
         blocked_count = qs.filter(outcome='blocked').count()
         filtered_count = qs.filter(outcome='filtered').count()
-        rows = list(qs[:limit])
+        before = p.get('before', '').strip()
+        rows = list((qs.filter(id__lt=int(before)) if before.isdecimal() and len(before) < 19 else qs)[:limit])  # counts above are of every row that matches, the page is of the rows after `before`
         return Response(ProxyLogsResponseSerializer({
             'count': total,
             'blocked_count': blocked_count,

@@ -1964,6 +1964,11 @@ paths:
         counts.
       parameters:
       - in: query
+        name: before
+        schema:
+          type: integer
+        description: Only the rows older than this id (the next page: the id of the last row shown)
+      - in: query
         name: client
         schema:
           type: string

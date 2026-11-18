@@ -83,6 +83,13 @@
       </li>
     }
   </ul>
+  @if (logsData().results.length < logsData().count) {
+    <div class="more">
+      @for (n of [logsData().results.length]; track n) { <div (appInView)="more()"></div> }
+      <button class="ghost" type="button" (click)="more()">Show more requests</button>
+    </div>
+  }
+  @if (paged && live) { <p class="notice" role="status">Live updates wait while you browse older requests. <button class="mini" type="button" (click)="loadLogs()">Back to the latest</button></p> }
 } @else {
   <header>
     <div>

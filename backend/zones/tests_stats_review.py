@@ -87,6 +87,15 @@ class StatsViewReviewTests(TestCase):
         self.assertEqual((count(status='4xx'), count(status='404'), count(status='5xx'), count(status='2xx'), count(status='bogus')), (1, 1, 1, 1, 3))
         self.assertEqual(count(client='10.0.0.1', status='5xx'), 1)
 
+    def test_proxy_log_pages_by_id(self):
+        from .models import ProxyLog
+        ids = [ProxyLog.objects.create(client='10.0.0.1', method='GET', host=f'h{i}.example', outcome='allowed').id for i in range(5)]
+        first = self.api.get('/api/proxy/logs/', {'limit': 2}).json()
+        self.assertEqual([r['id'] for r in first['results']], ids[::-1][:2])  # newest first
+        nxt = self.api.get('/api/proxy/logs/', {'limit': 2, 'before': first['results'][-1]['id']}).json()
+        self.assertEqual(([r['id'] for r in nxt['results']], nxt['count']), (ids[::-1][2:4], 5))  # the next rows; count is still all of them
+        self.assertEqual(self.api.get('/api/proxy/logs/', {'before': 'x'}).status_code, 200)
+
     def test_since_that_is_not_a_date_is_ignored(self):
         self.assertEqual(self.api.get('/api/stats/?since=2024-13-45T00:00:00Z').status_code, 200)
 

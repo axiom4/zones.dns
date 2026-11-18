@@ -21,6 +21,7 @@ import {
 } from '../api/functions';
 import { ProxyAllow, ProxyRuleList, QueryLogClient, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
+import { InView } from '../lib/in-view';
 import { byIp } from '../lib/ip';
 import { DaemonStatusLine } from '../daemon-status/daemon-status';
 import { blockLayer } from '../lib/proxy-reason';
@@ -51,7 +52,7 @@ const LISTS: SettingField[] = [
 
 @Component({
   selector: 'app-proxy-page',
-  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine, Autocomplete],
+  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine, Autocomplete, InView],
   templateUrl: './proxy-page.html',
 })
 export class ProxyPage implements OnDestroy {
@@ -174,23 +175,42 @@ export class ProxyPage implements OnDestroy {
   }
 
   private logSeq = 0;
+  private logParams() {
+    return {
+      q: this.logQ.trim() || undefined,
+      detail: this.logDetail.trim() || undefined,
+      outcome: this.logOutcome || undefined,
+      client: this.clientIp() || undefined,
+      method: this.logMethod || undefined,
+      status: this.logStatus || undefined,
+      hours: this.logHours,
+    };
+  }
+  /** Older requests were added by scrolling: the live refresh would replace them with the newest ones, so it waits (the notice offers the way back). */
+  paged = false;
+  /** Infinite scroll: the next 100 requests after the last one shown (keyset by id). */
+  async more() {
+    const d = this.logsData();
+    if (this.logBusy || !d.results.length || d.results.length >= d.count) return;
+    this.logBusy = true;
+    const seq = this.logSeq;
+    try {
+      const res = await this.api.invoke(proxyLogsRetrieve, { ...this.logParams(), before: d.results[d.results.length - 1].id, limit: 100 });
+      if (seq === this.logSeq) { this.logsData.update(x => ({ ...x, count: res.count, results: [...x.results, ...res.results] })); this.paged = true; }
+    } catch (e) {
+      console.warn('proxy log: next page failed', e);
+    } finally {
+      this.logBusy = false;
+    }
+  }
   private logBusy = false; // a request is in flight: the poll skips its tick
   async loadLogs() {
     this.logBusy = true;
     const seq = ++this.logSeq; // an older answer (a slow poll) must not replace the one for the filters just chosen
     if (!this.logsLoaded()) this.api.invoke(statusRetrieve).then(st => this.status.set(st), () => {}); // for the empty log: is runproxy running
     try {
-      const res = await this.api.invoke(proxyLogsRetrieve, {
-        q: this.logQ.trim() || undefined,
-        detail: this.logDetail.trim() || undefined,
-        outcome: this.logOutcome || undefined,
-        client: this.clientIp() || undefined,
-        method: this.logMethod || undefined,
-        status: this.logStatus || undefined,
-        hours: this.logHours,
-        limit: 200,
-      });
-      if (seq === this.logSeq) { this.logsData.set(res); this.logsLoaded.set(true); }
+      const res = await this.api.invoke(proxyLogsRetrieve, { ...this.logParams(), limit: 200 });
+      if (seq === this.logSeq) { this.logsData.set(res); this.logsLoaded.set(true); this.paged = false; }
     } catch (e) {
       console.warn('proxy log refresh failed', e); // background poll: the list on screen stays
     } finally {
@@ -221,7 +241,7 @@ export class ProxyPage implements OnDestroy {
   private syncPoll() {
     this.stopPoll();
     if (this.live && this.mode() === 'logs') {
-      this.pollTimer = setInterval(() => { if (!document.hidden && !this.logBusy) this.loadLogs(); }, 3000);
+      this.pollTimer = setInterval(() => { if (!document.hidden && !this.logBusy && !this.paged) this.loadLogs(); }, 3000);
     }
   }
 
