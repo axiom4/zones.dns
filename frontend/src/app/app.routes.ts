@@ -32,6 +32,7 @@ export const routes: Routes = [
       { path: 'logs/proxy', title: 'Proxy log', data: { tab: 'logs' }, loadComponent: () => import('./proxy-page/proxy-page').then(m => m.ProxyPage) },
       { path: 'security', title: 'Security', loadComponent: () => import('./security-page/security-page').then(m => m.SecurityPage) },
       { path: 'device/:client', title: 'Device story', loadComponent: () => import('./device-story/device-story').then(m => m.DeviceStoryPage) },
+      { path: 'pulse', title: 'Network pulse', loadComponent: () => import('./pulse/pulse').then(m => m.PulsePage) },
       { path: 'stats', title: 'Statistics', loadComponent: () => import('./stats-page/stats-page').then(m => m.StatsPage) },
     ],
   },
