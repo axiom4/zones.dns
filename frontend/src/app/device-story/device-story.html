@@ -38,7 +38,7 @@
            (keydown)="key($event)" (mouseleave)="sel.set(-1)" (blur)="sel.set(-1)">
         @for (c of ribbon().data.cells; track c.start; let i = $index) {
           <button type="button" class="cell" tabindex="-1" [class.sel]="i === sel()" [class.zero]="!c.count" [attr.aria-label]="label(c)" [attr.title]="label(c)"
-                  [style.--a.%]="alpha(c)" [style.--b.%]="c.count ? c.blocked * 100 / c.count : 0" (mouseenter)="sel.set(i)" (focus)="sel.set(i)"></button>
+                  [style.--a.%]="alpha(c)" [style.--b.%]="c.count ? c.blocked * 100 / c.count : 0" (mouseenter)="sel.set(i)" (focus)="sel.set(i)" (click)="sel.set(i)"></button>
         }
       </div>
       <p class="readout" aria-live="polite">

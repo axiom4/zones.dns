@@ -163,6 +163,7 @@ const bez = (a: number, b: number, c: number, u: number) => (1 - u) * (1 - u) * 
 canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 .node { position: absolute; width: 34px; height: 34px; margin: -17px 0 0 -17px; border-radius: 50%; border: 0; background: transparent; padding: 0; }
 .node:hover, .node[aria-pressed=true] { box-shadow: 0 0 0 2px var(--brand); }
+@media (pointer: coarse) { .node { width: 44px; height: 44px; margin: -22px 0 0 -22px; } }
 .tip { position: absolute; transform: translate(-50%, calc(-100% - 22px)); display: grid; gap: .1rem; min-width: 12rem; max-width: 18rem; pointer-events: none;
   background: var(--raised); color: var(--ink); border-radius: var(--radius-s); padding: .5rem .7rem; font-size: 13px; box-shadow: var(--shadow-pop); z-index: 2; }
 .tip.below { transform: translate(-50%, 22px); }

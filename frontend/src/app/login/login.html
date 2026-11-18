@@ -44,7 +44,7 @@
           @if (key.active()) { <p class="soft secure">Encrypted sign-in: your password never travels in clear text.</p> }
           <div class="field">
             <label class="lbl" for="lg-user">User name</label>
-            <input id="lg-user" name="u" [(ngModel)]="user" autocomplete="username" aria-required="true" autofocus
+            <input id="lg-user" name="u" [(ngModel)]="user" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" aria-required="true" autofocus
                    [attr.aria-invalid]="!!ui.error() || null" [attr.aria-describedby]="ui.error() ? 'lg-err' : null">
           </div>
           <div class="field">
