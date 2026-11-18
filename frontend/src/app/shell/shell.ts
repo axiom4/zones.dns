@@ -22,7 +22,7 @@ const SECTIONS: { path: string; label: string; icon: IconName; primary: boolean 
   { path: '/logs', label: 'Logs', icon: 'logs', primary: true },
   { path: '/proxy', label: 'Proxy', icon: 'proxy', primary: false },
   { path: '/stats', label: 'Statistics', icon: 'stats', primary: false },
-  { path: '/pulse', label: 'Network pulse', icon: 'map', primary: false },
+  { path: '/pulse', label: 'Network pulse', icon: 'radar', primary: false },
   { path: '/geo', label: 'Traffic map', icon: 'map', primary: false },
   { path: '/audit', label: 'Domain check', icon: 'audit', primary: false },
 ];

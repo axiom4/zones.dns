@@ -3,6 +3,8 @@
 ## Unreleased
 - **Fixed**
   - Sign-in page: the card is exactly in the middle of the screen (it was centred together with the line under it, so it sat a little above the middle); on a short screen, such as a phone held sideways, it starts at the top.
+- **Changed** (GUI)
+  - *Network pulse* has a radar icon in the menu (it shared the pin of the Traffic map).
 
 ## 1.5.0 — 2026-11-18
 - **Upgrading from 1.1.0:** run `manage.py migrate` (0032 to 0040: new tables `DhcpReservation`, `Dhcp6Reservation`, `MacVendor` and `ProxyLog`; 0034 also copies the `DHCP*` settings of `.env` into the database, once; 0039 adds an index on `StatCount.hour`; 0040 adds the `timeout` outcome), then `manage.py update_oui` once to fill the vendor table (about 52,000 blocks). Restart `rundns`, `rundhcp`, `runproxy` and gunicorn and publish the new GUI build. Before restarting, check these behaviour changes (see Security): with `DNS_PROXY_PROTOCOL=true` every TCP connection from this machine to the daemon must start with a PROXY line; list sources must be `https://` on public addresses; `BEHIND_PROXY=true` believes `X-Real-IP` only from `TRUSTED_PROXIES` (default loopback); the proxy log window `hours=0` means 720; nested-quantifier regex rules are skipped. Copy `deploy/nginx/dns.example.lan` and `dns-dot.conf` again (new rate limits). `INSTALL.md` has a second way to run the daemons (systemd units with ambient capabilities instead of `setcap` on the Python, section 8), a Tuning section, and the cron jobs in one place.
