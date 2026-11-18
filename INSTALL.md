@@ -301,6 +301,8 @@ sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl sta
 
 Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving the whole network. Open the **DHCP** page in the GUI to check that the lease appears with its IP/prefix, MAC or DUID, client host name and expiry time (tick **include ended** to see expired leases, or click **✕** to end a lease). With `DHCP_NAMES=true` and `DHCP_DOMAIN=lan`, check forward and reverse resolution with `dig @192.0.2.10 <hostname>.lan` and `dig @192.0.2.10 -x <leased-ip>`. Router Advertisements: this host announces itself as *not* a default router (`DHCP_RA_ROUTER_LIFETIME=0`), so your real router keeps that role.
 
+Settings that send the clients' traffic elsewhere ask for the second factor when changed (step-up scope `dhcp-change`): gateway, DNS servers (IPv4 and IPv6), NTP, search domains, routes, PXE boot server and file, relayed subnets (`DHCP_SUBNETS`) and the RA router lifetime.
+
 ### Optional: HTTP/HTTPS Ad-blocking & Popup-blocking Proxy (`runproxy`)
 
 `runproxy` is an HTTP and HTTPS forward proxy integrated with the Zones.dns Blacklist (Personal blocks and Public lists), configurable in the GUI under **Proxy** (own section: Settings and Logs; the WPAD announcement is there too):

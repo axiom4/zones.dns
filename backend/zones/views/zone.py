@@ -13,7 +13,7 @@ from ..serializers import (ReverseZoneRequestSerializer, SyncPtrResultSerializer
 
 
 GRANT = OpenApiParameter('X-MFA-Grant', str, OpenApiParameter.HEADER, required=False,
-                         description='Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.')
+                         description='Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log, proxy-change and dhcp-change for settings that redirect the traffic of the clients). Required when the user has a second factor.')
 
 
 def need_grant(request, zone_id=None, scope=None):

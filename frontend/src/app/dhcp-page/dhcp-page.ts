@@ -10,6 +10,7 @@ import { DhcpNeighbors } from '../dhcp-neighbors/dhcp-neighbors';
 import { DhcpReservations6 } from '../dhcp-reservations6/dhcp-reservations6';
 import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
+import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -20,6 +21,7 @@ import { Ui } from '../services/ui';
 export class DhcpPage {
   private api = inject(Api);
   private ui = inject(Ui);
+  private stepUp = inject(StepUp);
   ping = inject(Ping);
   live = viewChild(PingLive);
   leases = signal<DhcpLease[]>([]);
@@ -54,7 +56,18 @@ export class DhcpPage {
   saveSettings() {
     this.saved.set(false);
     return this.ui.run(async () => {
-      this.cfg.set(await this.api.invoke(dhcpSettingsPartialUpdate, { body: this.cfg() }));
+      // the gateway, DNS, routes, boot server, Leasequery... need a second factor (scope dhcp-change): asked only when the server says so
+      const save = (g?: string) => this.api.invoke(dhcpSettingsPartialUpdate, { body: this.cfg(), 'X-MFA-Grant': g });
+      let cfg: DhcpSettings;
+      try {
+        cfg = await save();
+      } catch (e: any) {
+        if (e?.status !== 403 || !e?.error?.mfa_required) throw e;
+        const grant = await this.stepUp.request('dhcp-change');
+        if (grant === null) return;
+        cfg = await save(grant || undefined);
+      }
+      this.cfg.set(cfg);
       this.saved.set(true);
     });
   }

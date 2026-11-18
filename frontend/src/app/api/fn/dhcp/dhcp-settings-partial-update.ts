@@ -11,12 +11,18 @@ import { DhcpSettings } from '../../models/dhcp-settings';
 import { PatchedDhcpSettingsRequest } from '../../models/patched-dhcp-settings-request';
 
 export interface DhcpSettingsPartialUpdate$Params {
+
+/**
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log, proxy-change and dhcp-change for settings that redirect the traffic of the clients). Required when the user has a second factor.
+ */
+  'X-MFA-Grant'?: string;
       body?: PatchedDhcpSettingsRequest
 }
 
 export function dhcpSettingsPartialUpdate(http: HttpClient, rootUrl: string, params?: DhcpSettingsPartialUpdate$Params, context?: HttpContext): Observable<StrictHttpResponse<DhcpSettings>> {
   const rb = new RequestBuilder(rootUrl, dhcpSettingsPartialUpdate.PATH, 'patch');
   if (params) {
+    rb.header('X-MFA-Grant', params['X-MFA-Grant'], {});
     rb.body(params.body, 'application/json');
   }
 

@@ -572,7 +572,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - dhcp
       requestBody:
@@ -746,7 +747,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - dhcp
       requestBody:
@@ -782,8 +784,19 @@ paths:
           description: ''
     patch:
       operationId: dhcp_settings_partial_update
-      description: Update DHCPv4, DHCPv6 and Router Advertisement settings and validate
-        them before saving.
+      description: |-
+        Update DHCPv4, DHCPv6 and Router Advertisement settings and validate them before saving.
+        Changing the gateway, DNS, NTP, search domains, routes, boot server or file, subnets, DHCPv6 DNS or the RA router lifetime needs a
+        second-factor grant (scope dhcp-change).
+      parameters:
+      - in: header
+        name: X-MFA-Grant
+        schema:
+          type: string
+        description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
+          for deleting, switching off or emptying a zone, log-purge for the query
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - dhcp
       requestBody:
@@ -1314,7 +1327,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - logs
       requestBody:
@@ -1717,7 +1731,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - proxy
       security:
@@ -1794,7 +1809,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - proxy
       requestBody:
@@ -1874,7 +1890,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - proxy
       requestBody:
@@ -2052,7 +2069,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       tags:
       - records
       requestBody:
@@ -2217,7 +2235,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -2250,7 +2269,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -2282,7 +2302,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       - in: path
         name: id
         schema:
@@ -2327,7 +2348,8 @@ paths:
           type: string
         description: Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id>
           for deleting, switching off or emptying a zone, log-purge for the query
-          log). Required when the user has a second factor.
+          log, proxy-change and dhcp-change for settings that redirect the traffic
+          of the clients). Required when the user has a second factor.
       - in: path
         name: id
         schema:

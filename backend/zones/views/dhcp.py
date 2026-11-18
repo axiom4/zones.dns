@@ -11,6 +11,7 @@ from .. import netcheck, oui
 from ..dhcp import v4 as dhcp, v6 as dhcp6, ra
 from ..dhcp.neighbors import neighbors
 from ..dhcp.v6 import duid_mac
+from .zone import GRANT, need_grant
 from ..models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, Setting
 from ..serializers import (
     DhcpLeaseSerializer,
@@ -89,6 +90,12 @@ class DhcpLeaseView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+# Settings that send the clients' traffic or time somewhere else (gateway, DNS, routes, boot server, search domains, this host as IPv6 router):
+# changing them needs a second-factor grant (scope dhcp-change), like WPAD and the proxy (proxy-change)
+SENSITIVE = ('DHCP_ROUTER', 'DHCP_DNS', 'DHCP_NTP', 'DHCP_SEARCH', 'DHCP_ROUTES', 'DHCP_BOOT_SERVER', 'DHCP_BOOT_FILE', 'DHCP_SUBNETS',
+             'DHCP6_DNS', 'DHCP_RA_ROUTER_LIFETIME')
+
+
 class DhcpSettingsView(APIView):
     @staticmethod
     def _serialize(s):
@@ -99,11 +106,17 @@ class DhcpSettingsView(APIView):
         """Current DHCPv4, DHCPv6 and Router Advertisement configuration (settings overlaid with GUI changes)."""
         return Response(DhcpSettingsSerializer(self._serialize(dhcp.dhcp_settings())).data)
 
-    @extend_schema(request=DhcpSettingsSerializer, responses=DhcpSettingsSerializer)
+    @extend_schema(request=DhcpSettingsSerializer, responses=DhcpSettingsSerializer, parameters=[GRANT])
     def patch(self, request):
-        """Update DHCPv4, DHCPv6 and Router Advertisement settings and validate them before saving."""
+        """Update DHCPv4, DHCPv6 and Router Advertisement settings and validate them before saving.
+        Changing the gateway, DNS, NTP, search domains, routes, boot server or file, subnets, DHCPv6 DNS or the RA router lifetime needs a
+        second-factor grant (scope dhcp-change)."""
         ser = DhcpSettingsSerializer(data=request.data, partial=True)
         ser.is_valid(raise_exception=True)
+        cur = dhcp.dhcp_settings()
+        if any(k in ser.validated_data and ser.validated_data[k] != getattr(cur, k) for k in SENSITIVE) \
+                and (denied := need_grant(request, scope='dhcp-change')) is not None:
+            return denied
         cand = dhcp.dhcp_settings(overrides=ser.validated_data)
         try:
             if cand.DHCP:

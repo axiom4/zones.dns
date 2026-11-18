@@ -12,7 +12,7 @@ import { ProxyInfo } from '../../models/proxy-info';
 export interface ProxyInfoCreate$Params {
 
 /**
- * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log). Required when the user has a second factor.
+ * Proof of a second factor (POST /api/mfa/stepup/...; scope zone-delete:<id> for deleting, switching off or emptying a zone, log-purge for the query log, proxy-change and dhcp-change for settings that redirect the traffic of the clients). Required when the user has a second factor.
  */
   'X-MFA-Grant'?: string;
 }

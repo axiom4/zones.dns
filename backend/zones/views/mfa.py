@@ -82,7 +82,7 @@ def _stepup(d, auth):
     if not (auth and auth.is_authenticated and auth.is_staff):
         raise mfa.MfaError('forbidden')
     scope = str(d.get('scope', ''))
-    if not re.fullmatch(r'zone-delete:\d+|mfa-change|admin|log-purge|dhcp-replace|proxy-change', scope):
+    if not re.fullmatch(r'zone-delete:\d+|mfa-change|admin|log-purge|dhcp-replace|dhcp-change|proxy-change', scope):
         raise mfa.MfaError('forbidden')
     return auth, scope
 

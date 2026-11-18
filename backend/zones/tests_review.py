@@ -304,6 +304,13 @@ class MoreStepUpTests(TestCase):
         self.assertEqual(self.api.post('/api/proxy/info/').status_code, 403)  # a new Root CA
         self.assertEqual(self.api.post('/api/proxy/info/', **self._grant('proxy-change')).status_code, 200)
 
+    def test_dhcp_changes_that_move_traffic_need_their_grant(self):
+        patch = lambda body, **kw: self.api.patch('/api/dhcp/settings/', body, format='json', **kw).status_code
+        self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}), 403)
+        self.assertEqual(patch({'DHCP_LEASE': 7200}), 200)  # other options need no proof
+        self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}, **self._grant('dhcp-change')), 200)
+        self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}), 200)  # unchanged value: nothing to prove
+
     def test_bulk_delete_of_most_of_a_zone_needs_the_zone_grant(self):
         ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]
         post = lambda some, **kw: self.api.post('/api/records/bulk/', {'ids': some, 'action': 'delete'}, format='json', **kw).status_code
