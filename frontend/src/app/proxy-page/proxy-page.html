@@ -9,12 +9,13 @@
       <p class="soft">
         @if (logsLoaded()) {
           {{ logsData().count }} requests, {{ logsData().blocked_count }} blocked, {{ logsData().filtered_count }} filtered.
-          @if (logsData().results.length < logsData().count) { Showing the latest {{ logsData().results.length }} of {{ logsData().count }}: narrow the filters to see others. }
+          @if (!grouped && logsData().results.length < logsData().count) { Showing the latest {{ logsData().results.length }} of {{ logsData().count }}: narrow the filters to see others. }
         } @else { Loading… }
       </p>
       <app-daemon-status name="Proxy" [d]="status()?.proxy" />
     </div>
     <div class="actions">
+      <label class="check"><input type="checkbox" name="grouped" [(ngModel)]="grouped" (ngModelChange)="filtersChanged()"> Group by site</label>
       <label class="check"><input type="checkbox" name="live" [(ngModel)]="live" (ngModelChange)="toggleLive()"> Refresh automatically</label>
       <button class="ghost" type="button" (click)="purgeLogs()">Delete old requests…</button>
       <button class="ghost" type="button" (click)="loadLogs()">Refresh</button>
@@ -53,10 +54,15 @@
       <option [ngValue]="168">Last 7 days</option>
       <option [ngValue]="720">Last 30 days</option>
     </select>
+    @if (grouped) {
+      <select name="logOrder" [(ngModel)]="ordering" (ngModelChange)="filtersChanged()" aria-label="Order">
+        <option value="last">Most recent</option>
+        <option value="count">Most requested</option>
+      </select>
+    }
   </div>
 
-  <ul class="records proxy-log" [attr.aria-busy]="!logsLoaded()">
-    @for (row of logsData().results; track row.id) {
+  <ng-template #reqrow let-row>
       <li>
         <span class="out" [attr.data-o]="outcomeColour(row.outcome)">{{ outcomeLabel(row.outcome) }}</span>
         <span class="rname">
@@ -74,6 +80,41 @@
           {{ isHostAllowed(row.host) ? 'Allowed' : 'Allow' }}
         </button>
       </li>
+  </ng-template>
+
+  @if (grouped) {
+  <ul class="records proxy-log" [attr.aria-busy]="!logsLoaded()">
+    @for (g of groups(); track g.host) {
+      <li class="grp" [class.open]="!!openHosts()[g.host]">
+        <button class="chev" type="button" (click)="toggleHost(g)" [attr.aria-expanded]="!!openHosts()[g.host]" [attr.aria-label]="(openHosts()[g.host] ? 'Hide' : 'Show') + ' the requests to ' + g.host">▸</button>
+        <button class="rvalue linkish" type="button" (click)="toggleHost(g)">{{ g.host }}</button>
+        <span class="mix">
+          @if (g.blocked) { <span class="out sm" data-o="blocked" title="Blocked">{{ g.blocked | number }}<span class="sr-only"> blocked</span></span> }
+          @if (g.failed) { <span class="out sm" data-o="error" title="Errors and timeouts">{{ g.failed | number }}<span class="sr-only"> failed</span></span> }
+        </span>
+        <span class="ttlv wide"><b>{{ g.count | number }}</b> {{ g.count === 1 ? 'request' : 'requests' }}</span>
+        <span class="ttlv wide nclients">{{ g.clients | number }} {{ g.clients === 1 ? 'device' : 'devices' }}</span>
+        <span class="ttlv wide">{{ g.avg_ms | number: '1.0-0' }} ms</span>
+        <span class="when">{{ whenLog(g.last) }}</span>
+      </li>
+      @if (openHosts()[g.host]; as o) {
+        @for (row of o.rows; track row.id) { <ng-container *ngTemplateOutlet="reqrow; context: { $implicit: row }" /> }
+        @if (o.rows.length < o.count) { <li class="more"><button class="ghost" type="button" (click)="moreHost(g)">Show more ({{ o.count - o.rows.length | number }})</button></li> }
+      }
+    } @empty {
+      <li class="empty">@if (!logsLoaded()) { Loading requests… } @else { No proxy requests match these filters. }</li>
+    }
+  </ul>
+  @if (groups().length < gCount()) {
+    <div class="more">
+      @for (n of [groups().length]; track n) { <div (appInView)="more()"></div> }
+      <button class="ghost" type="button" (click)="more()">Show more sites</button>
+    </div>
+  }
+  } @else {
+  <ul class="records proxy-log" [attr.aria-busy]="!logsLoaded()">
+    @for (row of logsData().results; track row.id) {
+      <ng-container *ngTemplateOutlet="reqrow; context: { $implicit: row }" />
     } @empty {
       <li class="empty">
         @if (!logsLoaded()) { Loading requests… }
@@ -88,6 +129,7 @@
       @for (n of [logsData().results.length]; track n) { <div (appInView)="more()"></div> }
       <button class="ghost" type="button" (click)="more()">Show more requests</button>
     </div>
+  }
   }
   @if (paged && live) { <p class="notice" role="status">Live updates wait while you browse older requests. <button class="mini" type="button" (click)="loadLogs()">Back to the latest</button></p> }
 } @else {

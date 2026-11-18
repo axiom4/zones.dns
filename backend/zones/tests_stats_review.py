@@ -87,6 +87,19 @@ class StatsViewReviewTests(TestCase):
         self.assertEqual((count(status='4xx'), count(status='404'), count(status='5xx'), count(status='2xx'), count(status='bogus')), (1, 1, 1, 1, 3))
         self.assertEqual(count(client='10.0.0.1', status='5xx'), 1)
 
+    def test_proxy_log_grouped_by_site(self):
+        from .models import ProxyLog
+        for host, outcome, ms, client in (('a.example', 'allowed', 100, '10.0.0.1'), ('a.example', 'blocked', 300, '10.0.0.2'), ('a.example', 'timeout', 50, '10.0.0.1'),
+                                          ('b.example', 'allowed', 10, '10.0.0.1')):
+            ProxyLog.objects.create(client=client, method='GET', host=host, outcome=outcome, ms=ms)
+        d = self.api.get('/api/proxy/logs/grouped/', {'ordering': 'count'}).json()
+        self.assertEqual(d['count'], 2)
+        a = d['results'][0]
+        self.assertEqual((a['host'], a['count'], a['blocked'], a['failed'], a['clients'], a['avg_ms']), ('a.example', 3, 1, 1, 2, 150))
+        self.assertEqual(self.api.get('/api/proxy/logs/grouped/', {'limit': 1, 'offset': 1, 'ordering': 'count'}).json()['results'][0]['host'], 'b.example')
+        self.assertEqual(self.api.get('/api/proxy/logs/grouped/', {'outcome': 'blocked'}).json()['count'], 1)  # the filters of the list apply
+        self.assertEqual(self.api.get('/api/proxy/logs/', {'host': 'a.example'}).json()['count'], 3)  # a group opens with the exact host
+
     def test_proxy_log_pages_by_id(self):
         from .models import ProxyLog
         ids = [ProxyLog.objects.create(client='10.0.0.1', method='GET', host=f'h{i}.example', outcome='allowed').id for i in range(5)]

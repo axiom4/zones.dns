@@ -27,7 +27,12 @@ export interface ProxyLogsRetrieve$Params {
   detail?: string;
 
 /**
- * Only the last N hours (0 = all)
+ * Exactly this host name
+ */
+  host?: string;
+
+/**
+ * Only the last N hours (default 24, max 720)
  */
   hours?: number;
 
@@ -63,6 +68,7 @@ export function proxyLogsRetrieve(http: HttpClient, rootUrl: string, params?: Pr
     rb.query('before', params.before, {});
     rb.query('client', params.client, {});
     rb.query('detail', params.detail, {});
+    rb.query('host', params.host, {});
     rb.query('hours', params.hours, {});
     rb.query('limit', params.limit, {});
     rb.query('method', params.method, {});

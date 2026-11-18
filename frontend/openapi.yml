@@ -1967,7 +1967,8 @@ paths:
         name: before
         schema:
           type: integer
-        description: Only the rows older than this id (the next page: the id of the last row shown)
+        description: 'Only the rows older than this id (the next page: the id of the
+          last row shown)'
       - in: query
         name: client
         schema:
@@ -1979,10 +1980,15 @@ paths:
           type: string
         description: Search the URL or the reason (case-insensitive)
       - in: query
+        name: host
+        schema:
+          type: string
+        description: Exactly this host name
+      - in: query
         name: hours
         schema:
           type: integer
-        description: Only the last N hours (0 = all)
+        description: Only the last N hours (default 24, max 720)
       - in: query
         name: limit
         schema:
@@ -2025,6 +2031,88 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ProxyLogsResponse'
+          description: ''
+  /api/proxy/logs/grouped/:
+    get:
+      operationId: proxy_logs_grouped_retrieve
+      description: 'The proxy log grouped by site (host name): requests, blocked,
+        failed, last request, average time and devices of each.'
+      parameters:
+      - in: query
+        name: client
+        schema:
+          type: string
+        description: Filter by client IP
+      - in: query
+        name: detail
+        schema:
+          type: string
+        description: Search the URL or the reason (case-insensitive)
+      - in: query
+        name: host
+        schema:
+          type: string
+        description: Exactly this host name
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours (default 24, max 720)
+      - in: query
+        name: limit
+        schema:
+          type: integer
+        description: Maximum sites returned (default 50, max 500)
+      - in: query
+        name: method
+        schema:
+          type: string
+        description: Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)
+      - in: query
+        name: offset
+        schema:
+          type: integer
+        description: Sites to skip (the next page)
+      - in: query
+        name: ordering
+        schema:
+          type: string
+          enum:
+          - count
+          - last
+        description: Most recent first (default) or most requested first
+      - in: query
+        name: outcome
+        schema:
+          type: string
+          enum:
+          - allowed
+          - blocked
+          - error
+          - filtered
+          - timeout
+        description: Filter by outcome
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Search the host name (case-insensitive)
+      - in: query
+        name: status
+        schema:
+          type: string
+        description: 'HTTP status: a code (404) or a class (2xx, 3xx, 4xx, 5xx)'
+      tags:
+      - proxy
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyLogGroupsResponse'
           description: ''
   /api/proxy/logs/purge/:
     post:
@@ -2491,8 +2579,8 @@ paths:
           description: ''
     put:
       operationId: zones_update
-      description: 'Switching a zone off stops serving it, like deleting it: the same
-        proof of a second factor (scope zone-delete:<id>).'
+      description: 'Switching a zone off, or renaming it, stops serving it under its
+        name, like deleting it: the same proof of a second factor (scope zone-delete:<id>).'
       parameters:
       - in: header
         name: X-MFA-Grant
@@ -3045,6 +3133,7 @@ components:
           type: array
           items:
             type: integer
+          maxItems: 5000
         action:
           $ref: '#/components/schemas/ActionEnum'
       required:
@@ -4700,6 +4789,48 @@ components:
       - status
       - time
       - url
+    ProxyLogGroup:
+      type: object
+      properties:
+        host:
+          type: string
+        count:
+          type: integer
+        blocked:
+          type: integer
+        failed:
+          type: integer
+          description: Errors and timeouts
+        last:
+          type: string
+          format: date-time
+        avg_ms:
+          type: number
+          format: double
+        clients:
+          type: integer
+          description: Distinct devices
+      required:
+      - avg_ms
+      - blocked
+      - clients
+      - count
+      - failed
+      - host
+      - last
+    ProxyLogGroupsResponse:
+      type: object
+      properties:
+        count:
+          type: integer
+          description: Sites that match
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/ProxyLogGroup'
+      required:
+      - count
+      - results
     ProxyLogOutcomeEnum:
       enum:
       - allowed
@@ -5349,7 +5480,8 @@ components:
             $ref: '#/components/schemas/Count'
         timeouts:
           type: integer
-          description: 'Proxy requests that timed out (upstream connect/read/write): not part of total, the outcomes or the average time'
+          description: 'Proxy requests that timed out (upstream connect/read/write):
+            not part of total, the outcomes or the average time'
         top_timeouts:
           type: array
           items:
@@ -5369,8 +5501,8 @@ components:
       - by_type
       - series
       - step
-      - top_blocked
       - timeouts
+      - top_blocked
       - top_clients
       - top_domains
       - top_timeouts
@@ -5707,6 +5839,7 @@ components:
         text:
           type: string
           minLength: 1
+          maxLength: 5000000
         replace:
           type: boolean
           default: false

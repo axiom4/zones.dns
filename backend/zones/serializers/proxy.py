@@ -43,7 +43,7 @@ class ProxyLogSerializer(serializers.Serializer):
     method = serializers.CharField()
     host = serializers.CharField()
     url = serializers.CharField(allow_blank=True)
-    outcome = serializers.ChoiceField(choices=['allowed', 'filtered', 'blocked', 'error'])
+    outcome = serializers.ChoiceField(choices=['allowed', 'filtered', 'blocked', 'error', 'timeout'])
     status = serializers.IntegerField()
     reason = serializers.CharField(allow_blank=True)
     ms = serializers.IntegerField()
@@ -55,6 +55,21 @@ class ProxyLogsResponseSerializer(serializers.Serializer):
     filtered_count = serializers.IntegerField()
     clients = serializers.ListField(child=serializers.CharField())
     results = ProxyLogSerializer(many=True)
+
+
+class ProxyLogGroupSerializer(serializers.Serializer):
+    host = serializers.CharField()
+    count = serializers.IntegerField()
+    blocked = serializers.IntegerField()
+    failed = serializers.IntegerField(help_text='Errors and timeouts')
+    last = serializers.DateTimeField()
+    avg_ms = serializers.FloatField()
+    clients = serializers.IntegerField(help_text='Distinct devices')
+
+
+class ProxyLogGroupsResponseSerializer(serializers.Serializer):
+    count = serializers.IntegerField(help_text='Sites that match')
+    results = ProxyLogGroupSerializer(many=True)
 
 
 class ProxyLogPurgeRequestSerializer(serializers.Serializer):

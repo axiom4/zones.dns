@@ -7,7 +7,7 @@ from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import DisallowedHost
 from django.db import transaction
-from django.db.models import Q
+from django.db.models import Avg, Count, Max, Q
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.utils import timezone
 from django.views import View
@@ -27,6 +27,7 @@ from ..serializers import (
     ProxyInfoSerializer,
     ProxyLogPurgeRequestSerializer,
     ProxyLogPurgeResultSerializer,
+    ProxyLogGroupsResponseSerializer,
     ProxyLogsResponseSerializer,
     ProxyRuleListSerializer,
     ProxySettingsSerializer,
@@ -251,16 +252,55 @@ class ProxyAllowUndoView(APIView):
         return Response(status=204)
 
 
+LOG_FILTERS = [
+    OpenApiParameter('q', str, description='Search the host name (case-insensitive)'),
+    OpenApiParameter('host', str, description='Exactly this host name'),
+    OpenApiParameter('detail', str, description='Search the URL or the reason (case-insensitive)'),
+    OpenApiParameter('status', str, description='HTTP status: a code (404) or a class (2xx, 3xx, 4xx, 5xx)'),
+    OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error', 'timeout'], description='Filter by outcome'),
+    OpenApiParameter('client', str, description='Filter by client IP'),
+    OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
+    OpenApiParameter('hours', int, description='Only the last N hours (default 24, max 720)'),
+]
+
+
+def _log_filter(p):
+    """The proxy log rows that match the filters of the query string (newest first by id), and the window in hours."""
+    qs = ProxyLog.objects.order_by('-id')  # newest first by id (the proxy writes in time order): a page is a keyset, rows logged meanwhile do not shift it
+    hours_str = p.get('hours', '24').strip()
+    hours = int(hours_str) if hours_str.isdigit() else 24
+    hours = min(hours, 720) or 720  # 0 (= all) made every filter scan the whole table: it means the longest window
+    qs = qs.filter(time__gte=timezone.now() - timedelta(hours=hours))
+    return qs, p
+
+
+def _log_narrow(qs, p):
+    if q := p.get('q', '').strip().lower():
+        qs = qs.filter(host__icontains=q)
+    if host := p.get('host', '').strip().lower():
+        qs = qs.filter(host=host)
+    if detail := p.get('detail', '').strip().lower():
+        qs = qs.filter(Q(url__icontains=detail) | Q(reason__icontains=detail))
+    if (status := p.get('status', '').strip().lower()) and re.fullmatch(r'[1-5]\d\d|[1-5]xx', status):
+        qs = qs.filter(status__gte=int(status[0]) * 100, status__lt=int(status[0]) * 100 + 100) if status.endswith('xx') else qs.filter(status=int(status))
+    if outcome := p.get('outcome', '').strip().lower():
+        qs = qs.filter(outcome=outcome)
+    if client := p.get('client', '').strip():
+        qs = qs.filter(client=client)
+    if method := p.get('method', '').strip().upper():
+        qs = qs.filter(method__icontains=method)
+    return qs
+
+
+def _page_size(p, default=150):
+    s = p.get('limit', str(default)).strip()
+    return min(max(int(s) if s.isdigit() else default, 1), 500)
+
+
 class ProxyLogsView(APIView):
     @extend_schema(
         parameters=[
-            OpenApiParameter('q', str, description='Search the host name (case-insensitive)'),
-            OpenApiParameter('detail', str, description='Search the URL or the reason (case-insensitive)'),
-            OpenApiParameter('status', str, description='HTTP status: a code (404) or a class (2xx, 3xx, 4xx, 5xx)'),
-            OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error', 'timeout'], description='Filter by outcome'),
-            OpenApiParameter('client', str, description='Filter by client IP'),
-            OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
-            OpenApiParameter('hours', int, description='Only the last N hours (default 24, max 720)'),
+            *LOG_FILTERS,
             OpenApiParameter('limit', int, description='Maximum rows returned (default 150, max 500)'),
             OpenApiParameter('before', int, description='Only the rows older than this id (the next page: the id of the last row shown)'),
         ],
@@ -269,27 +309,10 @@ class ProxyLogsView(APIView):
     def get(self, request):
         """Return recent HTTP/HTTPS proxy log entries with filters and summary counts."""
         p = request.query_params
-        qs = ProxyLog.objects.order_by('-id')  # newest first by id (the proxy writes in time order): a page is a keyset, rows logged meanwhile do not shift it
-        hours_str = p.get('hours', '24').strip()
-        hours = int(hours_str) if hours_str.isdigit() else 24
-        hours = min(hours, 720) or 720  # 0 (= all) made every filter scan the whole table: it means the longest window
-        if hours > 0:
-            qs = qs.filter(time__gte=timezone.now() - timedelta(hours=min(hours, 720)))
+        qs, _ = _log_filter(p)
         clients = list(qs.order_by('client').values_list('client', flat=True).distinct()[:200])
-        if q := p.get('q', '').strip().lower():
-            qs = qs.filter(host__icontains=q)
-        if detail := p.get('detail', '').strip().lower():
-            qs = qs.filter(Q(url__icontains=detail) | Q(reason__icontains=detail))
-        if (status := p.get('status', '').strip().lower()) and re.fullmatch(r'[1-5]\d\d|[1-5]xx', status):
-            qs = qs.filter(status__gte=int(status[0]) * 100, status__lt=int(status[0]) * 100 + 100) if status.endswith('xx') else qs.filter(status=int(status))
-        if outcome := p.get('outcome', '').strip().lower():
-            qs = qs.filter(outcome=outcome)
-        if client := p.get('client', '').strip():
-            qs = qs.filter(client=client)
-        if method := p.get('method', '').strip().upper():
-            qs = qs.filter(method__icontains=method)
-        lim_str = p.get('limit', '150').strip()
-        limit = min(max(int(lim_str) if lim_str.isdigit() else 150, 1), 500)
+        qs = _log_narrow(qs, p)
+        limit = _page_size(p)
         total = qs.count()
         blocked_count = qs.filter(outcome='blocked').count()
         filtered_count = qs.filter(outcome='filtered').count()
@@ -301,6 +324,34 @@ class ProxyLogsView(APIView):
             'filtered_count': filtered_count,
             'clients': clients,
             'results': rows,
+        }).data)
+
+
+class ProxyLogsGroupedView(APIView):
+    @extend_schema(
+        parameters=[
+            *LOG_FILTERS,
+            OpenApiParameter('ordering', str, enum=['last', 'count'], description='Most recent first (default) or most requested first'),
+            OpenApiParameter('limit', int, description='Maximum sites returned (default 50, max 500)'),
+            OpenApiParameter('offset', int, description='Sites to skip (the next page)'),
+        ],
+        responses=ProxyLogGroupsResponseSerializer,
+    )
+    def get(self, request):
+        """The proxy log grouped by site (host name): requests, blocked, failed, last request, average time and devices of each."""
+        p = request.query_params
+        qs, _ = _log_filter(p)
+        qs = _log_narrow(qs, p).order_by()  # no ordering: it would be part of the GROUP BY
+        limit = _page_size(p, 50)
+        off = p.get('offset', '').strip()
+        offset = int(off) if off.isdecimal() and len(off) < 9 else 0
+        groups = (qs.values('host').annotate(
+            count=Count('id'), blocked=Count('id', filter=Q(outcome='blocked')), failed=Count('id', filter=Q(outcome__in=['error', 'timeout'])),
+            last=Max('time'), avg_ms=Avg('ms'), clients=Count('client', distinct=True))
+            .order_by('-count' if p.get('ordering') == 'count' else '-last', 'host'))
+        return Response(ProxyLogGroupsResponseSerializer({
+            'count': qs.values('host').distinct().count(),
+            'results': list(groups[offset:offset + limit]),
         }).data)
 
 

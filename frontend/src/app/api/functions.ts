@@ -161,6 +161,8 @@ export type { ProxyInfoCreate$Params as ProxyInfoCreate$Params } from './fn/prox
 export { proxyInfoCreate as proxyInfoCreate } from './fn/proxy/proxy-info-create';
 export type { ProxyLogsRetrieve$Params as ProxyLogsRetrieve$Params } from './fn/proxy/proxy-logs-retrieve';
 export { proxyLogsRetrieve as proxyLogsRetrieve } from './fn/proxy/proxy-logs-retrieve';
+export type { ProxyLogsGroupedRetrieve$Params as ProxyLogsGroupedRetrieve$Params } from './fn/proxy/proxy-logs-grouped-retrieve';
+export { proxyLogsGroupedRetrieve as proxyLogsGroupedRetrieve } from './fn/proxy/proxy-logs-grouped-retrieve';
 export type { ProxyLogsPurgeCreate$Params as ProxyLogsPurgeCreate$Params } from './fn/proxy/proxy-logs-purge-create';
 export { proxyLogsPurgeCreate as proxyLogsPurgeCreate } from './fn/proxy/proxy-logs-purge-create';
 export type { ProxyRulesList$Params as ProxyRulesList$Params } from './fn/proxy/proxy-rules-list';

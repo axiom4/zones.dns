@@ -87,6 +87,8 @@ export type { ProxyAllowRequestRequest } from './models/proxy-allow-request-requ
 export type { ProxyAllowUndoRequest } from './models/proxy-allow-undo-request';
 export type { ProxyInfo } from './models/proxy-info';
 export type { ProxyLog } from './models/proxy-log';
+export type { ProxyLogGroup } from './models/proxy-log-group';
+export type { ProxyLogGroupsResponse } from './models/proxy-log-groups-response';
 export type { ProxyLogOutcomeEnum } from './models/proxy-log-outcome-enum';
 export type { ProxyLogPurgeRequestRequest } from './models/proxy-log-purge-request-request';
 export type { ProxyLogPurgeResult } from './models/proxy-log-purge-result';

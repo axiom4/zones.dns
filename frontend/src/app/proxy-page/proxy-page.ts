@@ -1,5 +1,6 @@
 import { Component, ElementRef, OnDestroy, computed, effect, inject, untracked, input, signal, viewChild } from '@angular/core';
 import qrcode from 'qrcode-generator';
+import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -13,13 +14,14 @@ import {
   proxyRulesList,
   proxyLogsPurgeCreate,
   logsClientsList,
+  proxyLogsGroupedRetrieve,
   proxyLogsRetrieve,
   proxyTestCreate,
   proxySettingsPartialUpdate,
   proxySettingsRetrieve,
   statusRetrieve,
 } from '../api/functions';
-import { ProxyAllow, ProxyRuleList, QueryLogClient, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
+import { ProxyAllow, ProxyLogGroup, ProxyRuleList, QueryLogClient, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
 import { InView } from '../lib/in-view';
 import { byIp } from '../lib/ip';
@@ -52,7 +54,7 @@ const LISTS: SettingField[] = [
 
 @Component({
   selector: 'app-proxy-page',
-  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine, Autocomplete, InView],
+  imports: [FormsModule, NgTemplateOutlet, DecimalPipe, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine, Autocomplete, InView],
   templateUrl: './proxy-page.html',
 })
 export class ProxyPage implements OnDestroy {
@@ -100,6 +102,11 @@ export class ProxyPage implements OnDestroy {
   logClient = '';
   logMethod = '';
   logStatus = '';
+  grouped = false; // one row per site, a click opens its requests (the DNS log's "Group by domain")
+  ordering: 'last' | 'count' = 'last';
+  groups = signal<ProxyLogGroup[]>([]);
+  gCount = signal(0);
+  openHosts = signal<{ [host: string]: { rows: ProxyLog[]; count: number } }>({});
   logDetail = '';
   logHours = 24;
   // the client filter works as the DNS log's: a list of the devices (names from the default zone) and an IP or name typed
@@ -141,6 +148,8 @@ export class ProxyPage implements OnDestroy {
       this.logMethod = p.get('method') ?? '';
       this.logStatus = /^([1-5]\d\d|[1-5]xx)$/.test(p.get('status') ?? '') ? p.get('status')! : '';
       this.logClient = p.get('client') ?? '';
+      this.grouped = p.get('group') === '1';
+      this.ordering = p.get('order') === 'count' ? 'count' : 'last';
       this.logHours = hp !== null && [1, 24, 168, 720].includes(h) ? h : this.periodStore.pick([1, 24, 168, 720]);
       if (this.mode() === 'logs') this.loadLogs();
     });
@@ -188,8 +197,38 @@ export class ProxyPage implements OnDestroy {
   }
   /** Older requests were added by scrolling: the live refresh would replace them with the newest ones, so it waits (the notice offers the way back). */
   paged = false;
+  /** Infinite scroll of the sites: the next 50. */
+  private async moreGroups() {
+    if (this.logBusy || this.groups().length >= this.gCount()) return;
+    this.logBusy = true;
+    const seq = this.logSeq;
+    try {
+      const res = await this.api.invoke(proxyLogsGroupedRetrieve, { ...this.logParams(), ordering: this.ordering, limit: 50, offset: this.groups().length });
+      if (seq === this.logSeq) { this.groups.update(x => [...x, ...res.results]); this.gCount.set(res.count); this.paged = true; }
+    } catch (e) {
+      console.warn('proxy log: next sites failed', e);
+    } finally {
+      this.logBusy = false;
+    }
+  }
+  /** Opens or closes the requests of one site. */
+  async toggleHost(g: ProxyLogGroup) {
+    if (this.openHosts()[g.host]) { this.openHosts.update(({ [g.host]: _, ...rest }) => rest); return; }
+    await this.fetchHost(g, undefined);
+  }
+  moreHost(g: ProxyLogGroup) { const o = this.openHosts()[g.host]; return this.fetchHost(g, o?.rows.at(-1)?.id); }
+  private async fetchHost(g: ProxyLogGroup, before?: number) {
+    const seq = this.logSeq;
+    try {
+      const res = await this.api.invoke(proxyLogsRetrieve, { ...this.logParams(), host: g.host, limit: 50, before });
+      if (seq === this.logSeq) { this.openHosts.update(x => ({ ...x, [g.host]: { count: res.count, rows: [...(x[g.host]?.rows ?? []), ...res.results] } })); this.paged = true; }
+    } catch (e) {
+      console.warn('proxy log: requests of a site failed', e);
+    }
+  }
   /** Infinite scroll: the next 100 requests after the last one shown (keyset by id). */
   async more() {
+    if (this.grouped) return this.moreGroups();
     const d = this.logsData();
     if (this.logBusy || !d.results.length || d.results.length >= d.count) return;
     this.logBusy = true;
@@ -209,6 +248,14 @@ export class ProxyPage implements OnDestroy {
     const seq = ++this.logSeq; // an older answer (a slow poll) must not replace the one for the filters just chosen
     if (!this.logsLoaded()) this.api.invoke(statusRetrieve).then(st => this.status.set(st), () => {}); // for the empty log: is runproxy running
     try {
+      if (this.grouped) {
+        const [res, flat] = await Promise.all([
+          this.api.invoke(proxyLogsGroupedRetrieve, { ...this.logParams(), ordering: this.ordering, limit: 50 }),
+          this.api.invoke(proxyLogsRetrieve, { ...this.logParams(), limit: 1 }), // the totals of the header
+        ]);
+        if (seq === this.logSeq) { this.groups.set(res.results); this.gCount.set(res.count); this.logsData.set({ ...flat, results: [] }); this.openHosts.set({}); this.logsLoaded.set(true); this.paged = false; }
+        return;
+      }
       const res = await this.api.invoke(proxyLogsRetrieve, { ...this.logParams(), limit: 200 });
       if (seq === this.logSeq) { this.logsData.set(res); this.logsLoaded.set(true); this.paged = false; }
     } catch (e) {
@@ -228,6 +275,7 @@ export class ProxyPage implements OnDestroy {
     const queryParams = {
       outcome: this.logOutcome || null, q: this.logQ.trim() || null, detail: this.logDetail.trim() || null, method: this.logMethod || null, status: this.logStatus || null,
       client: this.logClient.trim() || null, hours: this.logHours === 24 ? null : this.logHours,
+      group: this.grouped ? 1 : null, order: this.grouped && this.ordering === 'count' ? 'count' : null,
     };
     const cur = this.route.snapshot.queryParamMap;
     if (Object.entries(queryParams).every(([k, v]) => cur.get(k) === (v == null ? null : String(v)))) this.loadLogs(); // address unchanged (e.g. a method filter): no subscription event
