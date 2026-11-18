@@ -176,3 +176,17 @@ class DbPoolTimeoutTests(TestCase):
             with mock.patch('zones.proxy.filter.run_on_db_pool', side_effect=DatabaseError('slow')):
                 self.assertIsNone(pfilter._check_domain_blocked('ads.example'))
                 self.assertEqual(rules.loaded(), rules._cache['data'])
+
+
+class TlsOnPlainPortTests(TestCase):
+    def test_the_server_name_of_a_client_hello(self):
+        import ssl
+        ctx = ssl.create_default_context()
+        inc, out = ssl.MemoryBIO(), ssl.MemoryBIO()
+        tls = ctx.wrap_bio(inc, out, server_hostname='www.example.org')
+        with self.assertRaises(ssl.SSLWantReadError):
+            tls.do_handshake()
+        hello = out.read()
+        self.assertEqual(ps._tls_sni(hello), 'www.example.org')
+        self.assertIsNone(ps._tls_sni(b'GET / HTTP/1.1\r\n'))
+        self.assertIsNone(ps._tls_sni(hello[:20]))  # cut short

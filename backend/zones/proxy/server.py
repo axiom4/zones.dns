@@ -578,6 +578,27 @@ class H1Exchange:
         return RawStream(stream.reader, stream.writer, prefix=bytes(data) + stream.take_prefix())
 
 
+def _tls_sni(data):
+    """The server name (SNI) of a TLS ClientHello, '' if there is none, None if data is not a ClientHello."""
+    try:
+        if data[0] != 0x16 or data[5] != 1:  # handshake record, ClientHello
+            return None
+        i = 9 + 2 + 32  # record (5) and handshake (4) headers, version, random
+        i += 1 + data[i]  # session id
+        i += 2 + int.from_bytes(data[i:i + 2], 'big')  # cipher suites
+        i += 1 + data[i]  # compression methods
+        end = i + 2 + int.from_bytes(data[i:i + 2], 'big')
+        i += 2
+        while i + 4 <= end:
+            kind, n = int.from_bytes(data[i:i + 2], 'big'), int.from_bytes(data[i + 2:i + 4], 'big')
+            if kind == 0 and data[i + 6] == 0:  # server_name: list length (2), host_name type (1), name length (2), name
+                return data[i + 9:i + 9 + int.from_bytes(data[i + 7:i + 9], 'big')].decode('ascii', 'replace')
+            i += 4 + n
+        return ''
+    except IndexError:
+        return None
+
+
 class H1Connection:
     def __init__(self, client, stream, mitm=None):
         self.client = client
@@ -587,12 +608,16 @@ class H1Connection:
         self.handled = 0
         self.taken = False
         self.broken = False
+        self.first = None  # the first bytes of the connection
 
     async def next_event(self, timeout):
         while True:
             ev = self.h11.next_event()
             if ev is h11.NEED_DATA:
-                self.h11.receive_data(await self.stream.read(65536, timeout))
+                data = await self.stream.read(65536, timeout)
+                if not self.handled and self.first is None:
+                    self.first = data  # to tell a TLS handshake from a bad request
+                self.h11.receive_data(data)
                 continue
             return ev
 
@@ -609,6 +634,11 @@ class H1Connection:
                     ev = await self.next_event(timeout)
                 except h11.RemoteProtocolError as e:
                     status = e.error_status_hint or 400
+                    if not self.handled and not self.mitm and (sni := _tls_sni(self.first or b'')) is not None:
+                        # TLS to the plain port: an https:// link to the proxy, or a client set to use it as an HTTPS (TLS) proxy
+                        self.client.log('TLS', sni[:253], '', 'error', 400, 'TLS sent to the plain proxy port (https:// to the proxy, or an HTTPS proxy setting): '
+                                        'use the proxy as an HTTP proxy, with CONNECT for https sites', None)
+                        return  # a TLS client cannot read an HTTP answer
                     self.client.log('', '', '', 'error', status, f'Bad request: {e}'[:255], None)
                     body = f'{_phrase(status)}\n'.encode()
                     await self.stream.write(f'HTTP/1.1 {status} {_phrase(status)}\r\nContent-Type: text/plain; charset=utf-8\r\n'
