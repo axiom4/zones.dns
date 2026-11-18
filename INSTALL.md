@@ -364,6 +364,8 @@ sudo -u dns ../../.venv/bin/python manage.py collectstatic --noinput
 sudo supervisorctl restart dns:*
 ```
 
+**Updating to the version with the session cookie:** the GUI no longer keeps the token in the browser's storage but in an HttpOnly cookie, so every user signs in again once after the update. Scripts that call the API keep sending `Authorization: Token <key>`.
+
 **Updating to the version with the Leasequery list:** if relay agents use Leasequery, list them in *Leasequery from* (see *DHCP*): until then their Leasequery is not answered.
 
 Restarting `dns-api` makes a new sign-in key: the GUI downloads it again by itself, so users are not disconnected, but a sign-in in progress is retried.
@@ -410,6 +412,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 | `DisallowedHost: Invalid HTTP_HOST header: '192.168.1.23'` | The browser used an address that is not in `ALLOWED_HOSTS`. Use the configured host name, or add the address: `ALLOWED_HOSTS=dns.example.com,192.168.1.23` (and `CSRF_TRUSTED_ORIGINS=https://dns.example.com,https://192.168.1.23`, and the IP in the certificate SAN). Passkeys never work on an IP address: sign in through the host name. |
 | `502 Bad Gateway` from nginx | gunicorn is down or not on `127.0.0.1:8000`: `supervisorctl status`, `tail /var/log/supervisor/dns-api.err.log`. |
 | `403` "CSRF verification failed" | `CSRF_TRUSTED_ORIGINS` is missing the exact `https://host` used in the browser, or `BEHIND_PROXY` is not `true`. |
+| `403` "CSRF Failed: CSRF token missing" from the API | A request that changes something carried the GUI's cookie but not the `X-CSRFToken` header. The GUI sends it by itself (reload the page if the `csrftoken` cookie was deleted); scripts must use `Authorization: Token <key>` instead of the cookie. |
 | A relay agent's Leasequery gets no answer | Its address is not in *DHCP settings > Leasequery from* (`DHCP_LEASEQUERY`), empty by default. |
 | Sign-in answers `403` | `LOGIN_ENCRYPTION=required` refuses plain requests: use the GUI (it encrypts), not `curl` on `/api/token/`. |
 | "Invalid passkey or domain not allowed" | `WEBAUTHN_RP_ID` must be the host name without port, `WEBAUTHN_ORIGINS` the full `https://…` address; the certificate must be trusted. |

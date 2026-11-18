@@ -3,7 +3,7 @@ from django.urls import include, path
 from drf_spectacular.views import SpectacularAPIView, SpectacularSwaggerView
 from zones.security import admin_sso
 from zones import views as v
-from zones.views import EncryptedTokenView, LoginKeyView, TokenView
+from zones.views import EncryptedTokenView, LoginKeyView, LogoutView, TokenView
 from zones.views.proxy import ProxyCaCertView, ProxyMobileConfigView, WpadView
 from zones.views.doh import DohView
 
@@ -18,6 +18,7 @@ urlpatterns = [
     path('proxy.mobileconfig', ProxyMobileConfigView.as_view()),
     path('api/token/', TokenView.as_view()),
     path('api/token/encrypted/', EncryptedTokenView.as_view()),
+    path('api/logout/', LogoutView.as_view()),
     path('api/login-key/', LoginKeyView.as_view()),
     path('api/me/', v.MeView.as_view()),
     path('api/admin-ticket/', v.AdminTicketView.as_view()),

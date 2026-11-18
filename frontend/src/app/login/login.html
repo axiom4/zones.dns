@@ -24,7 +24,7 @@
       <div class="form">
         <h2>Protect your account</h2>
         <p class="soft">A second factor is required to use the app. Choose how you want to confirm future sign-ins.</p>
-        <app-mfa-enrol [ticket]="step()!.ticket" (done)="finish($event)" />
+        <app-mfa-enrol [ticket]="step()!.ticket" (done)="finish()" />
         @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
         <button type="button" class="link" (click)="back()">Back to sign in</button>
       </div>

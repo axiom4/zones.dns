@@ -17,7 +17,7 @@ export class MfaEnrol {
   private ui = inject(Ui);
   private stepUp = inject(StepUp);
   ticket = input('');
-  done = output<string>(); // API token
+  done = output<void>(); // the factor is stored (at sign-in: the session cookie is set)
   mode = signal<'choose' | 'totp'>('choose');
   secret = signal('');
   qr = signal('');
@@ -36,7 +36,8 @@ export class MfaEnrol {
     return this.ui.run(async () => {
       const grant = await this.grant();
       if (grant === null) return;
-      this.done.emit((await this.mfa.call('totp-confirm', { ticket: this.ticket(), code: this.code, grant })).token);
+      await this.mfa.call('totp-confirm', { ticket: this.ticket(), code: this.code, grant });
+      this.done.emit();
     });
   }
 
@@ -50,7 +51,8 @@ export class MfaEnrol {
       try { credential = await createPasskey(options); } catch (e) { throw { message: passkeyError(e) }; }
       const grant = await this.grant();
       if (grant === null) return;
-      this.done.emit((await this.mfa.call('passkey-register', { ticket: this.ticket(), credential, name: deviceName(), grant })).token);
+      await this.mfa.call('passkey-register', { ticket: this.ticket(), credential, name: deviceName(), grant });
+      this.done.emit();
     });
   }
 }

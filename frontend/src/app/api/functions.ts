@@ -97,6 +97,8 @@ export type { HostsPartialUpdate$Params as HostsPartialUpdate$Params } from './f
 export { hostsPartialUpdate as hostsPartialUpdate } from './fn/hosts/hosts-partial-update';
 export type { LoginKeyRetrieve$Params as LoginKeyRetrieve$Params } from './fn/login-key/login-key-retrieve';
 export { loginKeyRetrieve as loginKeyRetrieve } from './fn/login-key/login-key-retrieve';
+export type { LogoutCreate$Params as LogoutCreate$Params } from './fn/logout/logout-create';
+export { logoutCreate as logoutCreate } from './fn/logout/logout-create';
 export type { LogsList$Params as LogsList$Params } from './fn/logs/logs-list';
 export { logsList as logsList } from './fn/logs/logs-list';
 export type { LogsRetrieve$Params as LogsRetrieve$Params } from './fn/logs/logs-retrieve';

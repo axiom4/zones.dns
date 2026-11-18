@@ -35,7 +35,7 @@ export class Login {
   }
 
   verifyTotp() {
-    return this.ui.run(async () => this.finish((await this.mfa.call('totp', { ticket: this.step()!.ticket, code: this.code })).token));
+    return this.ui.run(async () => { await this.mfa.call('totp', { ticket: this.step()!.ticket, code: this.code }); this.finish(); });
   }
 
   verifyPasskey() {
@@ -44,10 +44,11 @@ export class Login {
       const { options } = await this.mfa.call('passkey-options', { ticket });
       let credential: unknown;
       try { credential = await usePasskey(options); } catch (e) { throw { message: passkeyError(e) }; }
-      this.finish((await this.mfa.call('passkey-verify', { ticket, credential })).token);
+      await this.mfa.call('passkey-verify', { ticket, credential });
+      this.finish();
     });
   }
 
-  finish(token: string) { this.auth.accept(token); this.router.navigateByUrl('/'); }
+  finish() { this.auth.accept(); this.router.navigateByUrl('/'); }
   back() { this.step.set(null); this.code = ''; this.ui.error.set(''); }
 }

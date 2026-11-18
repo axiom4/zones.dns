@@ -21,6 +21,7 @@ paths:
       - admin-ticket
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -43,6 +44,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -56,6 +58,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -78,6 +81,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '201':
           content:
@@ -98,6 +102,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -125,6 +130,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -150,6 +156,7 @@ paths:
               $ref: '#/components/schemas/PatchedBlockedDomainRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -169,6 +176,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '204':
@@ -200,6 +208,7 @@ paths:
       - blocked
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -214,6 +223,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -232,6 +242,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -253,6 +264,7 @@ paths:
               $ref: '#/components/schemas/PatchedPersonalSwitchRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -268,6 +280,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -288,6 +301,7 @@ paths:
             schema:
               $ref: '#/components/schemas/PatchedPersonalSwitchRequest'
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -311,6 +325,7 @@ paths:
       tags:
       - blocked
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -341,6 +356,7 @@ paths:
       - dhcp
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -370,6 +386,7 @@ paths:
       - dhcp
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -382,6 +399,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -407,6 +425,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -423,6 +442,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -446,6 +466,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '201':
           content:
@@ -467,6 +488,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -495,6 +517,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -521,6 +544,7 @@ paths:
               $ref: '#/components/schemas/PatchedDhcpReservationRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -542,6 +566,7 @@ paths:
       - dhcp
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -552,6 +577,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -584,6 +610,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -598,6 +625,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -621,6 +649,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '201':
           content:
@@ -642,6 +671,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -670,6 +700,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -696,6 +727,7 @@ paths:
               $ref: '#/components/schemas/PatchedDhcp6ReservationRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -717,6 +749,7 @@ paths:
       - dhcp
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -727,6 +760,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -759,6 +793,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -774,6 +809,7 @@ paths:
       tags:
       - dhcp
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -806,6 +842,7 @@ paths:
               $ref: '#/components/schemas/PatchedDhcpSettingsRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -829,6 +866,7 @@ paths:
       - dhcp
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -849,6 +887,7 @@ paths:
       tags:
       - geo
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -872,6 +911,7 @@ paths:
       - geo
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -894,6 +934,7 @@ paths:
       - geo
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -908,6 +949,7 @@ paths:
       tags:
       - hosts
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -931,6 +973,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '201':
           content:
@@ -952,6 +995,7 @@ paths:
       tags:
       - hosts
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -980,6 +1024,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1006,6 +1051,7 @@ paths:
               $ref: '#/components/schemas/PatchedStaticHostRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1027,6 +1073,7 @@ paths:
       - hosts
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -1046,6 +1093,20 @@ paths:
               schema:
                 $ref: '#/components/schemas/LoginKey'
           description: ''
+  /api/logout/:
+    post:
+      operationId: logout_create
+      description: 'Sign out: the token stops working and the GUI''s cookie is deleted
+        (a script cannot delete an HttpOnly cookie).'
+      tags:
+      - logout
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      - {}
+      responses:
+        '204':
+          description: No response body
   /api/logs/:
     get:
       operationId: logs_list
@@ -1133,6 +1194,7 @@ paths:
       - logs
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1154,6 +1216,7 @@ paths:
       - logs
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1174,6 +1237,7 @@ paths:
       tags:
       - logs
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1199,6 +1263,7 @@ paths:
       tags:
       - logs
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1308,6 +1373,7 @@ paths:
       - logs
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1339,6 +1405,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1369,6 +1436,7 @@ paths:
       - logs
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1386,6 +1454,7 @@ paths:
       - me
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1400,6 +1469,7 @@ paths:
       tags:
       - mfa
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1423,6 +1493,7 @@ paths:
               $ref: '#/components/schemas/EncryptedPacketRequest'
         required: true
       security:
+      - tokenAuth: []
       - tokenAuth: []
       - {}
       responses:
@@ -1454,6 +1525,7 @@ paths:
       - mfa
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -1470,6 +1542,7 @@ paths:
             schema:
               $ref: '#/components/schemas/MfaTicketRequest'
       security:
+      - tokenAuth: []
       - tokenAuth: []
       - {}
       responses:
@@ -1494,6 +1567,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       - {}
       responses:
         '200':
@@ -1515,6 +1589,7 @@ paths:
             schema:
               $ref: '#/components/schemas/MfaTicketRequest'
       security:
+      - tokenAuth: []
       - tokenAuth: []
       - {}
       responses:
@@ -1539,6 +1614,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       - {}
       responses:
         '200':
@@ -1561,6 +1637,7 @@ paths:
               $ref: '#/components/schemas/StepUpScopeRequest'
         required: true
       security:
+      - tokenAuth: []
       - tokenAuth: []
       - {}
       responses:
@@ -1585,6 +1662,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       - {}
       responses:
         '200':
@@ -1607,6 +1685,7 @@ paths:
               $ref: '#/components/schemas/StepUpCodeRequest'
         required: true
       security:
+      - tokenAuth: []
       - tokenAuth: []
       - {}
       responses:
@@ -1631,6 +1710,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       - {}
       responses:
         '200':
@@ -1653,6 +1733,7 @@ paths:
               $ref: '#/components/schemas/MfaCodeRequest'
         required: true
       security:
+      - tokenAuth: []
       - tokenAuth: []
       - {}
       responses:
@@ -1679,6 +1760,7 @@ paths:
       - mfa
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -1696,6 +1778,7 @@ paths:
               $ref: '#/components/schemas/MfaTicketRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       - {}
       responses:
         '200':
@@ -1712,6 +1795,7 @@ paths:
       tags:
       - proxy
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1736,6 +1820,7 @@ paths:
       tags:
       - proxy
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1789,6 +1874,7 @@ paths:
       - proxy
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1820,6 +1906,7 @@ paths:
               $ref: '#/components/schemas/ProxyLogPurgeRequestRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1835,6 +1922,7 @@ paths:
       tags:
       - proxy
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1853,6 +1941,7 @@ paths:
       - proxy
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1870,6 +1959,7 @@ paths:
       tags:
       - proxy
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1901,6 +1991,7 @@ paths:
               $ref: '#/components/schemas/PatchedProxySettingsRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1923,6 +2014,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -1942,6 +2034,7 @@ paths:
       tags:
       - records
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -1964,6 +2057,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '201':
           content:
@@ -1984,6 +2078,7 @@ paths:
       tags:
       - records
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -2011,6 +2106,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2036,6 +2132,7 @@ paths:
               $ref: '#/components/schemas/PatchedRecordRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2055,6 +2152,7 @@ paths:
       tags:
       - records
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '204':
@@ -2080,6 +2178,7 @@ paths:
               $ref: '#/components/schemas/BulkActionRequest'
         required: true
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -2117,6 +2216,7 @@ paths:
       tags:
       - stats
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -2175,6 +2275,7 @@ paths:
       - zones
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2196,6 +2297,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '201':
           content:
@@ -2216,6 +2318,7 @@ paths:
       tags:
       - zones
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -2253,6 +2356,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2286,6 +2390,7 @@ paths:
               $ref: '#/components/schemas/PatchedZoneRequest'
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2314,6 +2419,7 @@ paths:
       - zones
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '204':
           description: No response body
@@ -2330,6 +2436,7 @@ paths:
       tags:
       - zones
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '200':
@@ -2366,6 +2473,7 @@ paths:
         required: true
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2389,6 +2497,7 @@ paths:
       - zones
       security:
       - tokenAuth: []
+      - tokenAuth: []
       responses:
         '200':
           content:
@@ -2409,6 +2518,7 @@ paths:
               $ref: '#/components/schemas/ReverseZoneRequestRequest'
         required: true
       security:
+      - tokenAuth: []
       - tokenAuth: []
       responses:
         '201':

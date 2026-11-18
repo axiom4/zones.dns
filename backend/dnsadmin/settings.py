@@ -168,7 +168,8 @@ MAILERS = {
 }
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': ['zones.security.authentication.ExpiringTokenAuthentication'],
+    # scripts: Authorization: Token <key>; the GUI: the same token in an HttpOnly cookie, with the CSRF header on changes
+    'DEFAULT_AUTHENTICATION_CLASSES': ['zones.security.authentication.ExpiringTokenAuthentication', 'zones.security.authentication.CookieTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAdminUser'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
@@ -178,7 +179,7 @@ SPECTACULAR_SETTINGS = {
     'TITLE': 'Zones.dns API',
     'VERSION': __version__,
     'SERVE_PERMISSIONS': ['rest_framework.permissions.IsAdminUser'],  # the map of the API is not public: staff only
-    'SERVE_AUTHENTICATION': ['rest_framework.authentication.SessionAuthentication', 'zones.security.authentication.ExpiringTokenAuthentication'],  # the Django admin session opens the docs in the browser
+    'SERVE_AUTHENTICATION': ['rest_framework.authentication.SessionAuthentication', 'zones.security.authentication.ExpiringTokenAuthentication', 'zones.security.authentication.CookieTokenAuthentication'],  # the Django admin session opens the docs in the browser
     'SERVE_INCLUDE_SCHEMA': False,
     'COMPONENT_SPLIT_REQUEST': True,  # request bodies without read-only fields (id)
 }

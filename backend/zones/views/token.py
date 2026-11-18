@@ -11,6 +11,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..security import login_crypto, mfa
+from ..security.authentication import CookieTokenAuthentication, ExpiringTokenAuthentication, drop_token_cookie, with_token_cookie
 from ..serializers import EncryptedPacketSerializer, LoginKeySerializer, LoginResultSerializer
 
 
@@ -54,7 +55,20 @@ class TokenView(APIView):
             return Response({'detail': 'Wrong credentials.'}, status=400)
         if not user.is_staff:  # only someone who knows the password sees this
             return Response({'detail': NOT_STAFF}, status=400)
-        return Response(mfa.login_result(user))
+        body = mfa.login_result(user)
+        return with_token_cookie(request, Response(body), body)
+
+
+class LogoutView(APIView):
+    """Sign out: the token stops working and the GUI's cookie is deleted (a script cannot delete an HttpOnly cookie)."""
+    authentication_classes = [ExpiringTokenAuthentication, CookieTokenAuthentication]
+    permission_classes = [AllowAny]  # a stale cookie must still be deleted
+
+    @extend_schema(request=None, responses={204: None})
+    def post(self, request):
+        if request.auth is not None:
+            request.auth.delete()
+        return drop_token_cookie(Response(status=204))
 
 
 class EncryptedView(APIView):
@@ -86,7 +100,7 @@ class EncryptedView(APIView):
         if not cache.add(f'login-nonce:{payload["n"]}', 1, timeout=2 * login_crypto.MAX_SKEW_MS // 1000):
             return answer({'error': 'Packet already used.'}, 400)
         body, status = self.handle(request, payload)
-        return answer(body, status)
+        return with_token_cookie(request, answer(body, status), body)
 
 
 class EncryptedTokenView(EncryptedView):

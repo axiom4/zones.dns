@@ -12,7 +12,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from ..security import mfa
-from ..security.authentication import ExpiringTokenAuthentication
+from ..security.authentication import CookieTokenAuthentication, ExpiringTokenAuthentication, with_token_cookie
 from ..models import Passkey, TotpDevice
 from ..serializers import (AdminTicketSerializer, MeSerializer, MfaCodeSerializer, MfaCredentialSerializer, MfaOptionsSerializer, MfaStatusSerializer, MfaTicketSerializer,
                            StepUpCodeSerializer, StepUpCredentialSerializer, StepUpGrantSerializer, StepUpScopeSerializer, TokenResultSerializer, TotpSetupSerializer)
@@ -160,7 +160,7 @@ ACTIONS = {'totp': totp_verify, 'passkey-options': passkey_options, 'passkey-ver
 
 class _Plain(APIView):
     """One step over a plain request. Refused when LOGIN_ENCRYPTION=required: use the encrypted endpoint."""
-    authentication_classes = [ExpiringTokenAuthentication]  # only the enrolment steps use it (Security page)
+    authentication_classes = [ExpiringTokenAuthentication, CookieTokenAuthentication]  # only the enrolment steps use it (Security page)
     permission_classes = [AllowAny]
     parser_classes = [JSONParser]
     action = ''
@@ -171,7 +171,8 @@ class _Plain(APIView):
         if not isinstance(request.data, dict):
             return Response({'detail': 'Invalid request.'}, status=400)
         try:
-            return Response(ACTIONS[self.action](request.data, request.user))
+            body = ACTIONS[self.action](request.data, request.user)
+            return with_token_cookie(request, Response(body), body)
         except mfa.MfaError as e:
             return Response({'detail': e.text}, status=400)
 
@@ -198,7 +199,7 @@ PasskeyStepUpVerifyView = _plain('stepup-passkey-verify', StepUpCredentialSerial
 
 class MfaEncryptedView(EncryptedView):
     """Every second-factor step inside the encrypted channel: payload {a: step, d: its data}, reply = the step's body. Nothing readable on the wire."""
-    authentication_classes = [ExpiringTokenAuthentication]  # a logged-in user adding a factor from the Security page
+    authentication_classes = [ExpiringTokenAuthentication, CookieTokenAuthentication]  # a logged-in user adding a factor from the Security page
 
     def handle(self, request, payload):
         step, data = ACTIONS.get(payload.get('a')), payload.get('d')
