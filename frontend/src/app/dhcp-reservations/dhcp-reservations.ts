@@ -7,7 +7,7 @@ import { byIp } from '../lib/ip';
 import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { StepUp } from '../services/step-up';
-import { Ui } from '../services/ui';
+import { Ui, saveFile } from '../services/ui';
 
 type Draft = { mac: string; ip: string; hostname: string; note: string };
 const empty = (): Draft => ({ mac: '', ip: '', hostname: '', note: '' });
@@ -59,8 +59,10 @@ export class DhcpReservations {
   async lookupVendor() {
     const mac = this.draft.mac.trim();
     if (mac.replace(/[^0-9a-f]/gi, '').length !== 12) { this.vendorHint.set(''); return; }
-    const v = await this.api.invoke(dhcpVendorRetrieve, { mac });
-    this.vendorHint.set(v.vendor ?? (v.private ? 'Private (random) address: no maker' : 'Unknown maker'));
+    try {
+      const v = await this.api.invoke(dhcpVendorRetrieve, { mac });
+      if (mac === this.draft.mac.trim()) this.vendorHint.set(v.vendor ?? (v.private ? 'Private (random) address: no maker' : 'Unknown maker'));
+    } catch { this.vendorHint.set(''); } // only a hint: the form still works
   }
   startEdit(r: DhcpReservation) { this.edit = { mac: r.mac, ip: r.ip, hostname: r.hostname ?? '', note: r.note ?? '' }; this.editing.set(r.id); }
   save(r: DhcpReservation) {
@@ -76,12 +78,7 @@ export class DhcpReservations {
 
   exportCsv() {
     return this.ui.run(async () => {
-      const text = await this.api.invoke(dhcpReservationsExportRetrieve);
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
-      a.download = 'dhcp-reservations.csv';
-      a.click();
-      URL.revokeObjectURL(a.href);
+      saveFile(await this.api.invoke(dhcpReservationsExportRetrieve), 'dhcp-reservations.csv', 'text/csv');
     });
   }
   openImport() { this.importText = ''; this.importReplace = false; this.importResult.set(null); this.imp().nativeElement.showModal(); }

@@ -2,9 +2,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import nacl from 'tweetnacl';
+import { errorText } from './error-text.ts';
 import { countryName, flag } from './geo-util.ts';
 import { LoginError, seal } from './login-crypto.ts';
-import { SPEC, TYPE_SPECS, compose, parse, tokenize } from './record-types.ts';
+import { SPEC, TYPE_SPECS, compose, parse, tokenize, validate } from './record-types.ts';
 import { cidrToZone, ptrToIp } from './reverse.ts';
 
 const b64 = (u: Uint8Array) => Buffer.from(u).toString('base64');
@@ -63,4 +64,18 @@ test('record types: RDATA parses into the form fields and composes back', () => 
   assert.deepEqual(tokenize('"a \\"b\\" c" d'), [{ t: 'a "b" c', q: true }, { t: 'd', q: false }]);
   assert.equal(compose(SPEC['TXT'], { text: 'x'.repeat(300) }).split(' ').length, 2); // strings of 255 at most
   for (const spec of TYPE_SPECS) assert.equal(SPEC[spec.type], spec);
+});
+
+test('validate: numbers are plain digits', () => {
+  const prio = SPEC['MX'].fields[0];
+  assert.equal(validate(prio, '10'), '');
+  for (const bad of ['1e3', '0x10', '1.0', '-1', '70000']) assert.notEqual(validate(prio, bad), '', bad);
+});
+
+test('errorText: only the strings of the error body', () => {
+  assert.equal(errorText({ error: { name: ['Taken.'], ip: ['Bad.'] } }), 'Taken. Bad.');
+  assert.equal(errorText({ error: { detail: 'Second factor required.', mfa_required: true } }), 'Second factor required.');
+  assert.equal(errorText({ error: '<html>502</html>', message: 'Http failure response: 502' }), 'Http failure response: 502');
+  assert.equal(errorText({ error: { isTrusted: true }, message: 'Http failure response: 0 Unknown Error' }), 'Http failure response: 0 Unknown Error'); // network error
+  assert.equal(errorText({ message: 'Cancelled or timed out.' }), 'Cancelled or timed out.');
 });

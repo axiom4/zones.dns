@@ -85,7 +85,7 @@
     <div class="actions">
       <button type="button" class="ghost" (click)="step.close()">Cancel</button>
       @if (stepUp.pending()?.passkey) { <button type="button" class="ghost" [disabled]="stepUp.busy()" (click)="stepUp.passkey()">Use a passkey</button> }
-      @if (stepUp.pending()?.totp) { <button class="danger" [disabled]="stepUp.busy() || !code.trim()">Confirm and delete</button> }
+      @if (stepUp.pending()?.totp) { <button class="danger" [disabled]="stepUp.busy() || !code.trim()">Confirm</button> }
     </div>
   </form>
 </dialog>

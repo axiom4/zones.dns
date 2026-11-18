@@ -6,7 +6,7 @@ import { ActionEnum, Record, Zone, ZoneImportResult } from '../api/models';
 import { RecordForm } from '../record-form/record-form';
 import { ptrToIp } from '../lib/reverse';
 import { StepUp } from '../services/step-up';
-import { Ui } from '../services/ui';
+import { Ui, saveFile } from '../services/ui';
 import { ZonesStore } from '../services/zones-store';
 
 @Component({
@@ -136,12 +136,7 @@ export class ZonePage {
   // --- zone file import / export ---
   async exportZone() {
     await this.ui.run(async () => {
-      const text = await this.api.invoke(zonesExportRetrieve, { id: +this.id() });
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain' }));
-      a.download = `${this.zone()!.name}.zone`;
-      a.click();
-      URL.revokeObjectURL(a.href);
+      saveFile(await this.api.invoke(zonesExportRetrieve, { id: +this.id() }), `${this.zone()!.name}.zone`, 'text/plain');
     });
   }
   openImport() { this.importText = ''; this.importReplace = false; this.importResult.set(null); this.imp()!.nativeElement.showModal(); }

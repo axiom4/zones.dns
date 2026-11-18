@@ -1,6 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { Auth } from './auth';
+import { errorText } from '../lib/error-text';
 
 /** Shared error banner and confirm dialog. */
 @Injectable({ providedIn: 'root' })
@@ -23,7 +24,14 @@ export class Ui {
     try { await f(); this.error.set(''); }
     catch (e: any) {
       if (e.status === 401) { this.auth.logout(); this.router.navigateByUrl('/login'); }
-      this.error.set(e.error ? Object.values(e.error).flat().join(' ') : e.message);
+      this.error.set(errorText(e));
     }
   }
+}
+
+/** Saves text as a file through the browser's download. */
+export function saveFile(text: string, name: string, type: string) {
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(new Blob([text], { type })), download: name });
+  a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href)); // revoked at once, some browsers drop the download
 }

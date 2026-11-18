@@ -30,14 +30,15 @@ export class GeoPage implements OnDestroy {
   private retries = 0;
 
   constructor() { this.load(); }
-  ngOnDestroy() { clearTimeout(this.timer); }
+  private destroyed = false;
+  ngOnDestroy() { this.destroyed = true; clearTimeout(this.timer); }
 
   async load(auto = false) {
     clearTimeout(this.timer);
     if (!auto) this.retries = 0;
     await this.ui.run(async () => this.data.set(await this.api.invoke(geoDestinationsRetrieve, { hours: this.hours })));
     // Unknown addresses are looked up in batches: ask again a few times until they are all located.
-    if ((this.data()?.pending ?? 0) > 0 && this.retries++ < 8) this.timer = setTimeout(() => this.load(true), 2500);
+    if (!this.destroyed && (this.data()?.pending ?? 0) > 0 && this.retries++ < 8) this.timer = setTimeout(() => this.load(true), 2500);
   }
 
   date(iso: string) { return new Date(iso).toLocaleDateString(); }

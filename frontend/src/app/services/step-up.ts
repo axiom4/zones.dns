@@ -25,6 +25,7 @@ export class StepUp {
     const s = await this.api.invoke(mfaRetrieve);
     if (!s.totp && !s.passkeys.length) return '';
     return new Promise(resolve => {
+      this.pending()?.resolve(null); // a second request (double click) cancels the first instead of leaving it waiting forever
       this.error.set('');
       this.pending.set({ scope, totp: s.totp, passkey: s.passkeys.length > 0 && passkeysSupported(), resolve });
       this.dlg?.showModal();

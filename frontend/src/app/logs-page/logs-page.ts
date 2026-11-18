@@ -7,11 +7,9 @@ import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsL
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
 import { countryName, flag } from '../lib/geo-util';
+import { byIp } from '../lib/ip';
 import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
-
-/** Sort key of an address: IPv4 as 4 zero-padded numbers, ahead of everything else. */
-const ipKey = (ip: string) => /^\d+(\.\d+){3}$/.test(ip) ? '0' + ip.split('.').map(n => n.padStart(3, '0')).join('.') : '1' + ip;
 
 const PAGE = 50;
 const SUB = 20; // individual queries loaded per expansion step
@@ -60,7 +58,7 @@ export class LogsPage implements OnDestroy {
   // distinct client IPs (with their name in the default zone) for the filter; refreshed when the list is opened and when the period changes
   clients = signal<QueryLogClient[]>([]);
   // sorted by address: IPv4 numerically, then IPv6 and anything else as text
-  clientOptions = computed(() => this.clients().map(c => ({ value: c.ip, label: c.host })).sort((a, b) => ipKey(a.value).localeCompare(ipKey(b.value))));
+  clientOptions = computed(() => this.clients().map(c => ({ value: c.ip, label: c.host })).sort((a, b) => byIp(a.value, b.value)));
   clientNames = signal<{ [ip: string]: string }>({});
   /** What was typed or picked, as an IP: a name of the default zone is looked up in the list. */
   private clientIp() { const c = this.client.trim().toLowerCase(); return c && this.clients().find(x => x.host === c || x.name === c)?.ip || this.client.trim(); }
@@ -143,7 +141,8 @@ export class LogsPage implements OnDestroy {
     });
   }
 
-  ngOnDestroy() { clearTimeout(this.timer); clearTimeout(this.poll); }
+  private destroyed = false;
+  ngOnDestroy() { this.destroyed = true; clearTimeout(this.timer); clearTimeout(this.poll); }
 
   time(iso: string) { return new Date(iso).toLocaleString([], { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' }); }
   isOpen(name: string, level: number) { return name in (level === 0 ? this.domains() : this.names()); }
@@ -282,7 +281,7 @@ export class LogsPage implements OnDestroy {
     this.poll = setTimeout(async () => {
       let next = delay;
       if (!document.hidden) { const t = Date.now(); await this.reset(); next = Math.max(3000, 3 * (Date.now() - t)); }
-      if (this.live) this.refresh(next);
+      if (this.live && !this.destroyed) this.refresh(next); // a refresh still running when the page was left must not start the loop again
     }, delay);
   }
 

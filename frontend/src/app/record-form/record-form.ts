@@ -27,7 +27,6 @@ export class RecordForm {
   groups = GROUPS;
   ttlPresets = TTL_PRESETS;
   txtTemplates = TXT_TEMPLATES;
-  Number = Number;
   parse_ = (v: string) => !!parse(this.spec(), v);
 
   type = signal<TypeEnum>('A');
@@ -71,8 +70,10 @@ export class RecordForm {
   previewLine() { return `${this.name.trim() || '@'} ${this.ttl} IN ${this.type()} ${this.rdata()}`; }
   error(f: { key: string } & Parameters<typeof validate>[0]) { return this.submitted() ? validate(f, this.vals[f.key]) : ''; }
 
+  ttlOk() { return /^\d+$/.test(String(this.ttl ?? '').trim()); } // an emptied box is null or '', and +'' is 0
+
   private valid() {
-    if (!this.name.trim() || !(Number.isInteger(+this.ttl) && +this.ttl >= 0)) return false;
+    if (!this.name.trim() || !this.ttlOk()) return false;
     return this.raw() ? !!this.rawText.trim() : this.spec().fields.every(f => !validate(f, this.vals[f.key]));
   }
 

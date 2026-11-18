@@ -87,7 +87,7 @@
         @for (p of ttlPresets; track p.value) { <button type="button" class="mini" [class.on]="+ttl === p.value" (click)="ttl = p.value">{{ p.label }}</button> }
       </span>
       <small id="h-ttl" class="help">How long clients may reuse the answer without asking again. Low = changes show up quickly; high = less traffic.</small>
-      @if (submitted() && !(Number.isInteger(+ttl) && +ttl >= 0)) { <small class="bad">Enter a whole number greater than or equal to 0.</small> }
+      @if (submitted() && !ttlOk()) { <small class="bad">Enter a whole number greater than or equal to 0.</small> }
     </label>
 
     <label class="field">

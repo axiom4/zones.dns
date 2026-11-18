@@ -181,7 +181,8 @@ export function validate(f: Field, v: string): string {
   if (!x) return f.optional ? '' : 'Required field.';
   if (f.kind === 'number') {
     const n = Number(x);
-    if (!Number.isInteger(n) || n < (f.min ?? 0) || n > (f.max ?? 65535)) return `Enter a whole number between ${f.min ?? 0} and ${f.max ?? 65535}.`;
+    if (!/^\d+$/.test(x) || // Number() also takes 1e3, 0x10 and 1.0, which the zone file would get as typed
+        n < (f.min ?? 0) || n > (f.max ?? 65535)) return `Enter a whole number between ${f.min ?? 0} and ${f.max ?? 65535}.`;
   }
   if (f.pattern && !f.pattern.test(x)) return f.patternMsg ?? 'Invalid value.';
   return '';

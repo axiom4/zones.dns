@@ -1,4 +1,4 @@
-import { Component, ElementRef, computed, inject, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
 import { Ping } from '../services/ping';
 
 /** A window that pings one host every second and prints what `ping` prints (iputils format), until Stop or Close. */
@@ -6,7 +6,7 @@ import { Ping } from '../services/ping';
   selector: 'app-ping-live',
   templateUrl: './ping-live.html',
 })
-export class PingLive {
+export class PingLive implements OnDestroy {
   private ping = inject(Ping);
   private dlg = viewChild.required<ElementRef<HTMLDialogElement>>('dlg');
   private out = viewChild<ElementRef<HTMLTextAreaElement>>('out');
@@ -19,6 +19,8 @@ export class PingLive {
   private times: number[] = [];
   private sent = 0;
   private started = 0;
+
+  ngOnDestroy() { this.run++; } // left with the window open (Back button): the dialog's close event never comes
 
   open(address: string) {
     this.address.set(address);

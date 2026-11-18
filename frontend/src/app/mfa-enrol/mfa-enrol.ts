@@ -57,6 +57,7 @@ export class MfaEnrol {
 
 function deviceName() {
   const ua = navigator.userAgent;
-  const os = /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /iPhone|iPad/.test(ua) ? 'iOS' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'Device';
+  // iOS first: its user agent says "like Mac OS X"
+  const os = /iPhone|iPad/.test(ua) ? 'iOS' : /Mac/.test(ua) ? 'Mac' : /Windows/.test(ua) ? 'Windows' : /Android/.test(ua) ? 'Android' : /Linux/.test(ua) ? 'Linux' : 'Device';
   return `${os} · ${new Date().toLocaleDateString()}`;
 }

@@ -7,7 +7,7 @@ import { byIp } from '../lib/ip';
 import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { StepUp } from '../services/step-up';
-import { Ui } from '../services/ui';
+import { Ui, saveFile } from '../services/ui';
 
 type Draft = { duid: string; ip: string; note: string };
 const empty = (): Draft => ({ duid: '', ip: '', note: '' });
@@ -68,12 +68,7 @@ export class DhcpReservations6 {
 
   exportCsv() {
     return this.ui.run(async () => {
-      const text = await this.api.invoke(dhcpReservations6ExportRetrieve);
-      const a = document.createElement('a');
-      a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' }));
-      a.download = 'dhcp6-reservations.csv';
-      a.click();
-      URL.revokeObjectURL(a.href);
+      saveFile(await this.api.invoke(dhcpReservations6ExportRetrieve), 'dhcp6-reservations.csv', 'text/csv');
     });
   }
   openImport() { this.importText = ''; this.importReplace = false; this.importResult.set(null); this.imp().nativeElement.showModal(); }

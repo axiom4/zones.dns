@@ -15,7 +15,7 @@ import {
 } from '../api/functions';
 import { ProxyRuleList, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
 import { StepUp } from '../services/step-up';
-import { Ui } from '../services/ui';
+import { Ui, saveFile } from '../services/ui';
 
 @Component({
   selector: 'app-proxy-page',
@@ -92,13 +92,12 @@ export class ProxyPage implements OnDestroy {
       this.cfg.set(cfg);
       this.info.set(info);
       this.rules.set(rules);
-      if (this.mode() === 'logs') {
-        await this.loadLogs();
-      }
     });
   }
 
+  private logSeq = 0;
   async loadLogs() {
+    const seq = ++this.logSeq; // an older answer (a slow poll) must not replace the one for the filters just chosen
     try {
       const res = await this.api.invoke(proxyLogsRetrieve, {
         q: this.logQ.trim() || undefined,
@@ -108,7 +107,7 @@ export class ProxyPage implements OnDestroy {
         hours: this.logHours,
         limit: 200,
       });
-      this.logsData.set(res);
+      if (seq === this.logSeq) this.logsData.set(res);
     } catch {
       /* background poll ignore */
     }
@@ -126,7 +125,7 @@ export class ProxyPage implements OnDestroy {
   private syncPoll() {
     this.stopPoll();
     if (this.live && this.mode() === 'logs') {
-      this.pollTimer = setInterval(() => this.loadLogs(), 3000);
+      this.pollTimer = setInterval(() => { if (!document.hidden) this.loadLogs(); }, 3000);
     }
   }
 
@@ -218,14 +217,7 @@ export class ProxyPage implements OnDestroy {
 
   downloadCa() {
     const pem = this.info()?.pem;
-    if (!pem) return;
-    const blob = new Blob([pem], { type: 'application/x-x509-ca-cert' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'zones-proxy-ca.crt';
-    a.click();
-    URL.revokeObjectURL(url);
+    if (pem) saveFile(pem, 'zones-proxy-ca.crt', 'application/x-x509-ca-cert');
   }
 
   regenerateCa() {
