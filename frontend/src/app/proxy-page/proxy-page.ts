@@ -1,9 +1,12 @@
 import { Component, ElementRef, OnDestroy, computed, effect, inject, input, signal, viewChild } from '@angular/core';
+import qrcode from 'qrcode-generator';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Api } from '../api/api';
 import {
+  proxyAllowCreate,
+  proxyAllowUndoCreate,
   proxyInfoCreate,
   proxyInfoRetrieve,
   proxyRulesCreate,
@@ -13,8 +16,11 @@ import {
   proxyTestCreate,
   proxySettingsPartialUpdate,
   proxySettingsRetrieve,
+  statusRetrieve,
 } from '../api/functions';
-import { ProxyRuleList, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult } from '../api/models';
+import { ProxyAllow, ProxyRuleList, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
+import { DaemonStatusLine } from '../daemon-status/daemon-status';
+import { blockLayer } from '../lib/proxy-reason';
 import { fieldErrors } from '../lib/error-text';
 import { SettingField, SettingsFields, changed } from '../dhcp-page/settings-fields';
 import { StepUp } from '../services/step-up';
@@ -41,7 +47,7 @@ const LISTS: SettingField[] = [
 
 @Component({
   selector: 'app-proxy-page',
-  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields],
+  imports: [FormsModule, RouterLink, RouterLinkActive, SettingsFields, DaemonStatusLine],
   templateUrl: './proxy-page.html',
 })
 export class ProxyPage implements OnDestroy {
@@ -65,6 +71,17 @@ export class ProxyPage implements OnDestroy {
   rules = signal<ProxyRuleList[]>([]);
   testUrl = '';
   testResult = signal<ProxyTestResult | null>(null);
+  status = signal<Status | null>(null); // is runproxy running (its heartbeat)
+  allowedNow = signal<ReadonlySet<string>>(new Set()); // hosts allowed in DNS from this log (an @@ rule shows in the settings)
+  copied = signal('');
+  readonly blockLayer = blockLayer;
+  /** Where devices download the setup files: https only (plain http is sent to GUI_URL), so this page's address when it is https, else GUI_URL. */
+  setupBase = computed(() => location.protocol === 'https:' ? location.origin : (this.info()?.gui_url || location.origin));
+  setup = computed(() => ['/proxy.mobileconfig', '/proxy-ca.crt'].map(path => {
+    const url = this.setupBase() + path, q = qrcode(0, 'M');
+    q.addData(url); q.make();
+    return { url, qr: q.createDataURL(4, 8) };
+  }));
 
   logsData = signal<ProxyLogsResponse>({
     count: 0,
@@ -125,11 +142,13 @@ export class ProxyPage implements OnDestroy {
 
   load() {
     return this.ui.run(async () => {
-      const [cfg, info, rules] = await Promise.all([
+      const [cfg, info, rules, status] = await Promise.all([
         this.api.invoke(proxySettingsRetrieve),
         this.api.invoke(proxyInfoRetrieve),
         this.api.invoke(proxyRulesList),
+        this.api.invoke(statusRetrieve).catch(() => null), // unreadable: the line says “checking”
       ]);
+      this.status.set(status);
       this.cfg.set(cfg);
       this.savedCfg = structuredClone(cfg);
       this.info.set(info);
@@ -141,6 +160,7 @@ export class ProxyPage implements OnDestroy {
   private logSeq = 0;
   async loadLogs() {
     const seq = ++this.logSeq; // an older answer (a slow poll) must not replace the one for the filters just chosen
+    if (!this.logsLoaded()) this.api.invoke(statusRetrieve).then(st => this.status.set(st), () => {}); // for the empty log: is runproxy running
     try {
       const res = await this.api.invoke(proxyLogsRetrieve, {
         q: this.logQ.trim() || undefined,
@@ -212,6 +232,7 @@ export class ProxyPage implements OnDestroy {
 
   isHostAllowed(host: string) {
     const h = (host || '').toLowerCase();
+    if (this.allowedNow().has(h)) return true;
     const allowed = this.allowedDomains();
     const parts = h.split('.');
     for (let i = 0; i < parts.length; i++) {
@@ -233,21 +254,35 @@ export class ProxyPage implements OnDestroy {
     return call(grant || undefined);
   }
 
-  /** Adds an @@host exception (no filtering, no HTTPS inspection for that site); Undo puts the rules back as they were. */
+  /** Allows the site wherever it is blocked now: a personal allow entry when the DNS blacklist blocks it (DNS and proxy both), an @@host rule when
+   * a proxy rule does (or nothing blocks it: then the site is no longer filtered nor inspected). Undo takes back exactly that. */
   allowHost(row: ProxyLog) {
     const host = (row.host || '').trim().toLowerCase();
     if (!host || this.isHostAllowed(host)) return;
-    const setRules = async (rules: string) => {
-      const updated = await this.api.invoke(proxySettingsPartialUpdate, { body: { PROXY_CUSTOM_RULES: rules } });
-      this.cfg.set(updated);
-      this.savedCfg = structuredClone(updated);
-    };
     return this.ui.run(async () => {
-      const before = this.cfg().PROXY_CUSTOM_RULES || '';
-      await setRules(before.trim() ? `${before.trim()}\n@@${host}` : `@@${host}`);
-      this.ui.toast(`Allowed ${host} through the proxy`, () => setRules(before));
+      const done = await this.api.invoke(proxyAllowCreate, { body: { host, url: row.url || undefined } });
+      await this.allowed(done, true);
+      const where = done.dns_id ? 'in DNS and the proxy' : done.proxy_rule ? 'through the proxy' : ''; // a DNS exception lets the proxy through too
+      if (!where) { this.ui.toast(`${host} is already allowed`); return; }
+      this.ui.toast(`Allowed ${host} ${where}${done.note ? '. ' + done.note : ''}`, async () => {
+        await this.api.invoke(proxyAllowUndoCreate, { body: done });
+        await this.allowed(done, false);
+      });
     });
   }
+  /** Shows the outcome of Allow (or of its undo): the button state, and the proxy rules as the server now has them (unsaved edits of other fields stay). */
+  private async allowed(done: ProxyAllow, on: boolean) {
+    const now = new Set(this.allowedNow());
+    if (done.dns_id) { if (on) now.add(done.host); else now.delete(done.host); }
+    this.allowedNow.set(now);
+    if (done.proxy_rule) {
+      const rules = (await this.api.invoke(proxySettingsRetrieve)).PROXY_CUSTOM_RULES;
+      this.cfg.update(c => ({ ...c, PROXY_CUSTOM_RULES: rules }));
+      this.savedCfg = { ...this.savedCfg, PROXY_CUSTOM_RULES: rules };
+    }
+  }
+
+  copy(url: string) { navigator.clipboard?.writeText(url).then(() => this.copied.set(url), () => {}); }
 
   dirty() { return changed(this.savedCfg, this.cfg()).length > 0; }
   /** The list of ad-block lists was edited and not saved yet: syncing must save it first, and says so on the button. */

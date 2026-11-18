@@ -2,12 +2,12 @@ import { DecimalPipe } from '@angular/common';
 import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { Api } from '../api/api';
-import { statsRetrieve } from '../api/functions';
+import { statsRetrieve, statusRetrieve } from '../api/functions';
 import { MINUTES, byMinute } from '../lib/activity';
 
 const W = 120, H = 28;
 
-/** The live trace at the top of every page: queries per minute over the last hour, blocked ones in red, and a status LED.
+/** The live trace at the top of every page: queries per minute over the last hour, blocked ones in red, and a status LED (off when rundns is not running).
  * Refreshed every 30 s while the page is visible (the server keeps the answer 30 s). */
 @Component({
   selector: 'app-activity',
@@ -21,7 +21,8 @@ const W = 120, H = 28;
         <path class="blk" [attr.d]="paths().blocked" />
       </svg>
       <span class="num"><b>{{ perMin() | number }}</b> <span>per min</span></span>
-      <span class="num pct"><b>{{ pct() }}%</b> <span>blocked</span></span>
+      @if (dnsDown()) { <span class="num pct"><b>DNS</b> <span>not running</span></span> }
+      @else { <span class="num pct"><b>{{ pct() }}%</b> <span>blocked</span></span> }
     </a>`,
 })
 export class Activity {
@@ -30,6 +31,7 @@ export class Activity {
   private counts = signal<number[]>([]);
   private blocked = signal<number[]>([]);
   private failed = signal(false);
+  protected dnsDown = signal(false); // rundns sent no heartbeat for 90 s
 
   constructor() {
     const tick = () => { if (!document.hidden) this.load(); };
@@ -40,6 +42,7 @@ export class Activity {
   }
 
   private async load() {
+    this.api.invoke(statusRetrieve).then(st => this.dnsDown.set(!st.dns.running), () => this.dnsDown.set(false)); // status unknown: judged by the queries alone
     try {
       const s = await this.api.invoke(statsRetrieve, { hours: 1 });
       const [c, b] = byMinute(s.series, Date.now());
@@ -55,8 +58,9 @@ export class Activity {
     const all = this.counts().reduce((a, b) => a + b, 0), blk = this.blocked().reduce((a, b) => a + b, 0);
     return all ? Math.round((blk / all) * 100) : 0;
   });
-  state = computed(() => this.failed() ? 'off' : this.counts().slice(-3).some(n => n > 0) ? 'ok' : this.counts().some(n => n > 0) ? 'idle' : 'off');
-  label = computed(() => this.failed() ? 'Activity unavailable. Open statistics.'
+  state = computed(() => this.failed() || this.dnsDown() ? 'off' : this.counts().slice(-3).some(n => n > 0) ? 'ok' : this.counts().some(n => n > 0) ? 'idle' : 'off');
+  label = computed(() => this.dnsDown() ? 'The DNS server is not running: start manage.py rundns. Open statistics.'
+    : this.failed() ? 'Activity unavailable. Open statistics.'
     : this.state() === 'off' ? 'No queries in the last hour. Open statistics.'
     : `${this.perMin()} queries a minute, ${this.pct()}% blocked in the last hour${this.state() === 'idle' ? ', quiet for the last 3 minutes' : ''}. Open statistics.`);
   paths = computed(() => {

@@ -4,6 +4,11 @@
 export interface ProxyInfo {
   expires: string;
   fingerprint: string;
+
+  /**
+   * GUI_URL without the final /: where /proxy.mobileconfig and /proxy-ca.crt are served over https
+   */
+  gui_url: string;
   pac: string;
   pem: string;
   subject: string;

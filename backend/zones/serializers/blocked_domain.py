@@ -133,3 +133,32 @@ class PublicListSerializer(serializers.Serializer):
 class ImportedBlockedSerializer(serializers.Serializer):
     count = serializers.IntegerField()
     names = serializers.ListField(child=serializers.CharField())
+
+
+class BlocklistSourceSerializer(serializers.Serializer):
+    """One public list of Blacklist > Public lists and what the last import did with it."""
+    name = serializers.CharField()
+    url = serializers.CharField()
+    domains = serializers.IntegerField(help_text='Domains it blocks now (imported entries labelled with this list)')
+    synced = serializers.DateTimeField(allow_null=True, help_text='Last download that worked; null = never')
+    tried = serializers.DateTimeField(allow_null=True, help_text='Last attempt')
+    error = serializers.CharField(allow_blank=True, help_text='Why the last attempt failed (its old entries were kept); empty = it worked')
+    in_use = serializers.BooleanField(help_text='Its domains are blocked now: it has entries and the Public lists switch is on')
+
+
+class BlocklistSourcesSerializer(serializers.Serializer):
+    text = serializers.CharField(allow_blank=True, max_length=200_000, help_text='The lists, `name=https://…` one per line. Saving it replaces them; the next import (nightly, or Sync now) applies it.')
+    saved = serializers.BooleanField(read_only=True, help_text='false = nothing saved in the GUI yet: these are the BLOCKLISTS of .env')
+    lists = BlocklistSourceSerializer(many=True, read_only=True)
+    running = serializers.BooleanField(read_only=True, help_text='An import is running now')
+    started = serializers.DateTimeField(read_only=True, allow_null=True)
+    finished = serializers.DateTimeField(read_only=True, allow_null=True)
+    error = serializers.CharField(read_only=True, help_text='The last run stopped with this error (not a single list: see lists[].error)')
+
+    def validate(self, d):
+        from ..blocklists import ListError, split_lists
+        try:
+            d['entries'] = split_lists(d['text'])
+        except ListError as e:
+            raise serializers.ValidationError({e.field: str(e)}) from None  # name / url / text: the input of the GUI it concerns
+        return d

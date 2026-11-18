@@ -16,6 +16,7 @@ from dnslib.server import DNSServer
 from zones.stats.logwriter import LogWriter
 from zones.dnsd.dnsserver import Handler, PooledTCPServer, PooledUDPServer, logger
 from zones.logfmt import stamp_output
+from zones import heartbeat
 
 
 class Command(BaseCommand):
@@ -69,6 +70,7 @@ class Command(BaseCommand):
             self.stderr.write(f'Database is not reachable yet ({e}): connections are opened as queries arrive')
         for s in servers:
             s.start_thread()
+        heartbeat.start('dns')  # the GUI's status line and top-bar LED
         self.stdout.write(f'DNS on {address}:{port} (udp+tcp), upstream {upstream}')
         def stop(*_):
             raise KeyboardInterrupt

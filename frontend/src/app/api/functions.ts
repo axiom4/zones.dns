@@ -29,6 +29,14 @@ export type { BlockedPublicRetrieve$Params as BlockedPublicRetrieve$Params } fro
 export { blockedPublicRetrieve as blockedPublicRetrieve } from './fn/blocked/blocked-public-retrieve';
 export type { BlockedPublicPartialUpdate$Params as BlockedPublicPartialUpdate$Params } from './fn/blocked/blocked-public-partial-update';
 export { blockedPublicPartialUpdate as blockedPublicPartialUpdate } from './fn/blocked/blocked-public-partial-update';
+export type { BlockedSourcesRetrieve$Params as BlockedSourcesRetrieve$Params } from './fn/blocked/blocked-sources-retrieve';
+export { blockedSourcesRetrieve as blockedSourcesRetrieve } from './fn/blocked/blocked-sources-retrieve';
+export type { BlockedSourcesUpdate$Params as BlockedSourcesUpdate$Params } from './fn/blocked/blocked-sources-update';
+export { blockedSourcesUpdate as blockedSourcesUpdate } from './fn/blocked/blocked-sources-update';
+export type { BlockedSourcesPartialUpdate$Params as BlockedSourcesPartialUpdate$Params } from './fn/blocked/blocked-sources-partial-update';
+export { blockedSourcesPartialUpdate as blockedSourcesPartialUpdate } from './fn/blocked/blocked-sources-partial-update';
+export type { BlockedSourcesSyncCreate$Params as BlockedSourcesSyncCreate$Params } from './fn/blocked/blocked-sources-sync-create';
+export { blockedSourcesSyncCreate as blockedSourcesSyncCreate } from './fn/blocked/blocked-sources-sync-create';
 export type { BlockedSuggestionsList$Params as BlockedSuggestionsList$Params } from './fn/blocked/blocked-suggestions-list';
 export { blockedSuggestionsList as blockedSuggestionsList } from './fn/blocked/blocked-suggestions-list';
 export type { DhcpLeasesList$Params as DhcpLeasesList$Params } from './fn/dhcp/dhcp-leases-list';
@@ -143,6 +151,10 @@ export type { MfaTotpRemoveDestroy$Params as MfaTotpRemoveDestroy$Params } from 
 export { mfaTotpRemoveDestroy as mfaTotpRemoveDestroy } from './fn/mfa/mfa-totp-remove-destroy';
 export type { MfaTotpSetupCreate$Params as MfaTotpSetupCreate$Params } from './fn/mfa/mfa-totp-setup-create';
 export { mfaTotpSetupCreate as mfaTotpSetupCreate } from './fn/mfa/mfa-totp-setup-create';
+export type { ProxyAllowCreate$Params as ProxyAllowCreate$Params } from './fn/proxy/proxy-allow-create';
+export { proxyAllowCreate as proxyAllowCreate } from './fn/proxy/proxy-allow-create';
+export type { ProxyAllowUndoCreate$Params as ProxyAllowUndoCreate$Params } from './fn/proxy/proxy-allow-undo-create';
+export { proxyAllowUndoCreate as proxyAllowUndoCreate } from './fn/proxy/proxy-allow-undo-create';
 export type { ProxyInfoRetrieve$Params as ProxyInfoRetrieve$Params } from './fn/proxy/proxy-info-retrieve';
 export { proxyInfoRetrieve as proxyInfoRetrieve } from './fn/proxy/proxy-info-retrieve';
 export type { ProxyInfoCreate$Params as ProxyInfoCreate$Params } from './fn/proxy/proxy-info-create';
@@ -177,6 +189,8 @@ export type { RecordsBulkCreate$Params as RecordsBulkCreate$Params } from './fn/
 export { recordsBulkCreate as recordsBulkCreate } from './fn/records/records-bulk-create';
 export type { StatsRetrieve$Params as StatsRetrieve$Params } from './fn/stats/stats-retrieve';
 export { statsRetrieve as statsRetrieve } from './fn/stats/stats-retrieve';
+export type { StatusRetrieve$Params as StatusRetrieve$Params } from './fn/status/status-retrieve';
+export { statusRetrieve as statusRetrieve } from './fn/status/status-retrieve';
 export type { TokenCreate$Params as TokenCreate$Params } from './fn/token/token-create';
 export { tokenCreate as tokenCreate } from './fn/token/token-create';
 export type { TokenEncryptedCreate$Params as TokenEncryptedCreate$Params } from './fn/token/token-encrypted-create';

@@ -12,6 +12,7 @@
           @if (logsData().results.length < logsData().count) { Showing the latest {{ logsData().results.length }} of {{ logsData().count }}: narrow the filters to see others. }
         } @else { Loading… }
       </p>
+      <app-daemon-status name="Proxy" [d]="status()?.proxy" />
     </div>
     <div class="actions">
       <label class="check"><input type="checkbox" name="live" [(ngModel)]="live" (ngModelChange)="toggleLive()"> Refresh automatically</label>
@@ -60,18 +61,21 @@
         </span>
         <span class="rvalue" [title]="row.url">
           {{ row.url || row.host }}
+          @if (row.outcome === 'blocked' && blockLayer(row.reason); as layer) { <small class="note-t pl-layer">Blocked by {{ layer }}</small> }
           @if (row.reason) { <small class="note-t">{{ row.reason }}</small> }
         </span>
         <span class="pl-meta"><span class="pl-client">{{ row.client }}</span><span>{{ row.ms }} ms</span><time [attr.datetime]="row.time">{{ whenLog(row.time) }}</time></span>
         <button class="mini" type="button" (click)="allowHost(row)" [disabled]="isHostAllowed(row.host)"
-                [attr.aria-label]="isHostAllowed(row.host) ? row.host + ' is already allowed' : 'Allow ' + row.host + ' through the proxy'">
+                [attr.aria-label]="isHostAllowed(row.host) ? row.host + ' is already allowed' : 'Allow ' + row.host + ' where it is blocked'">
           {{ isHostAllowed(row.host) ? 'Allowed' : 'Allow' }}
         </button>
       </li>
     } @empty {
       <li class="empty">
         @if (!logsLoaded()) { Loading requests… }
-        @else { No proxy requests match these filters. Check that <code>manage.py runproxy</code> is running and that devices use the proxy (automatic setup or the Apple profile). }
+        @else if (status()?.proxy?.enabled === false && !logQ && !logOutcome && !logClient && !logMethod) { No proxy requests: the proxy is off. Turn on “Run the ad-blocking proxy” in <a routerLink="/proxy/settings">Proxy settings</a>. }
+        @else if (status()?.proxy?.enabled && !status()?.proxy?.running) { No proxy requests: <code>manage.py runproxy</code> is not running. Start it, then devices that use the proxy show here. }
+        @else { No proxy requests match these filters. Check that devices use the proxy (automatic setup or the Apple profile). }
       </li>
     }
   </ul>
@@ -80,6 +84,7 @@
     <div>
       <h2>Ad-blocking proxy</h2>
       <p class="soft">A filtering proxy (<code>manage.py runproxy</code>) for the devices on your network: it blocks the Blocklist domains, ad banners and popups. Devices find it by themselves (automatic setup) or through the Apple profile.</p>
+      <app-daemon-status name="Proxy" [d]="status()?.proxy" />
     </div>
     <div class="actions">
       <button class="ghost" type="button" (click)="load()">Refresh</button>
@@ -148,20 +153,34 @@
         <div>
           <h4>iPhone, iPad, Mac</h4>
           <ol class="help">
-            <li>Open this page on the device and download the Apple profile.</li>
+            <li>Download the Apple profile on the device: scan the QR code below with the camera, or open this page there.</li>
             <li>Install it in Settings (iPhone: General, VPN &amp; Device Management).</li>
             <li>iPhone: turn on full trust in General, About, Certificate Trust Settings.</li>
           </ol>
-          @if (i.pem) { <a class="mini" href="/proxy.mobileconfig" download="zones-proxy.mobileconfig">Download Apple profile</a> }
+          @if (i.pem) {
+            <a class="mini" href="/proxy.mobileconfig" download="zones-proxy.mobileconfig">Download Apple profile</a>
+            <figure class="px-qr">
+              <img [src]="setup()[0].qr" width="148" height="148" alt="QR code of the Apple profile address">
+              <figcaption>Or scan it with the camera, or open: <code>{{ setup()[0].url }}</code>
+                <button class="mini" type="button" (click)="copy(setup()[0].url)" [attr.aria-label]="(copied() === setup()[0].url ? 'Copied' : 'Copy address') + ' of the Apple profile'">{{ copied() === setup()[0].url ? 'Copied' : 'Copy address' }}</button></figcaption>
+            </figure>
+          }
         </div>
         <div>
           <h4>Android</h4>
           <ol class="help">
-            <li>Download the Root CA on the phone.</li>
+            <li>Download the Root CA on the phone: scan the QR code below, or open this page there.</li>
             <li>Settings, Security, Encryption &amp; credentials, Install a certificate, CA certificate.</li>
             <li>Wi-Fi network details, Proxy: Automatic, with the setup address {{ i.wpad_url || 'http://server-ip:' + (cfg().PROXY_PORT || 8080) + '/wpad.dat' }}.</li>
           </ol>
-          @if (i.pem) { <button class="mini" type="button" (click)="downloadCa()">Download Root CA</button> }
+          @if (i.pem) {
+            <button class="mini" type="button" (click)="downloadCa()">Download Root CA</button>
+            <figure class="px-qr">
+              <img [src]="setup()[1].qr" width="148" height="148" alt="QR code of the Root CA address">
+              <figcaption>Or scan it with the camera, or open: <code>{{ setup()[1].url }}</code>
+                <button class="mini" type="button" (click)="copy(setup()[1].url)" [attr.aria-label]="(copied() === setup()[1].url ? 'Copied' : 'Copy address') + ' of the Root CA'">{{ copied() === setup()[1].url ? 'Copied' : 'Copy address' }}</button></figcaption>
+            </figure>
+          }
         </div>
         <div>
           <h4>Windows, Linux</h4>

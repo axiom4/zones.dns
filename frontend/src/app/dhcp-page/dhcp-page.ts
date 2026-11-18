@@ -2,8 +2,9 @@ import { Component, ElementRef, computed, inject, input, signal, viewChild } fro
 import { FormsModule } from '@angular/forms';
 import { RouterLink, RouterLinkActive } from '@angular/router';
 import { Api } from '../api/api';
-import { dhcpLeasesDestroy, dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservations6Create, dhcpReservations6Destroy, dhcpReservationsList, dhcpReservations6List, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve } from '../api/functions';
-import { DhcpLease, DhcpSettings } from '../api/models';
+import { dhcpLeasesDestroy, dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservations6Create, dhcpReservations6Destroy, dhcpReservationsList, dhcpReservations6List, dhcpLeasesList, dhcpSettingsPartialUpdate, dhcpSettingsRetrieve, statusRetrieve } from '../api/functions';
+import { DhcpLease, DhcpSettings, Status } from '../api/models';
+import { DaemonStatusLine } from '../daemon-status/daemon-status';
 import { byIp } from '../lib/ip';
 import { fieldErrors } from '../lib/error-text';
 import { DhcpReservations } from '../dhcp-reservations/dhcp-reservations';
@@ -75,7 +76,7 @@ const SECTIONS: Section[] = [
 
 @Component({
   selector: 'app-dhcp-page',
-  imports: [FormsModule, RouterLink, RouterLinkActive, DhcpReservations, DhcpReservations6, DhcpNeighbors, PingLive, SettingsFields],
+  imports: [FormsModule, RouterLink, RouterLinkActive, DhcpReservations, DhcpReservations6, DhcpNeighbors, PingLive, SettingsFields, DaemonStatusLine],
   templateUrl: './dhcp-page.html',
 })
 export class DhcpPage {
@@ -89,6 +90,7 @@ export class DhcpPage {
   readonly sections = SECTIONS;
   leases = signal<DhcpLease[]>([]);
   loaded = signal(false);
+  status = signal<Status | null>(null); // is rundhcp running (its heartbeat)
   cfg = signal<DhcpSettings>({});
   private savedCfg: DhcpSettings = {};
   errs = signal<Record<string, string>>({});
@@ -112,6 +114,7 @@ export class DhcpPage {
         this.api.invoke(dhcpReservationsList),
         this.api.invoke(dhcpReservations6List),
       ]);
+      this.status.set(await this.api.invoke(statusRetrieve).catch(() => null)); // unreadable: the line says “checking”, the leases still show
       this.leases.set([...leases].sort((a, b) => byIp(a.address, b.address)));
       this.reserved.set(new Set([...res.flatMap(r => [r.mac, r.ip]), ...res6.flatMap(r => [r.duid, r.ip])]));
       this.loaded.set(true);

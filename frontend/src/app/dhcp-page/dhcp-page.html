@@ -24,6 +24,7 @@
       @if (loaded()) { {{ shown().length }} {{ all ? 'leases' : 'active leases' }}{{ q() ? ' match' : '' }}. }
       {{ tab() === 'leases6' ? 'Addresses and delegated prefixes handed out by the DHCPv6 server.' : 'Addresses handed out by the DHCPv4 server.' }}
     </p>
+    <app-daemon-status name="DHCP server" [d]="status()?.dhcp" />
   </div>
   <div class="actions">
     <label class="check"><input type="checkbox" name="all" [(ngModel)]="all" (ngModelChange)="load()"> Show ended leases</label>
@@ -52,7 +53,9 @@
     <li class="empty">
       @if (!loaded()) { Loading leases… }
       @else if (q()) { No device matches “{{ q() }}”. }
+      @else if (status()?.dhcp?.enabled && !status()?.dhcp?.running) { No leases: <code>manage.py rundhcp</code> is not running. Start it, then devices get their addresses from it. }
       @else if (tab() === 'leases6') { No IPv6 leases. Turn on “Hand out IPv6 addresses” with an address pool in DHCP settings; devices that build their own address (SLAAC) show under IPv6 neighbours. }
+      @else if (status()?.dhcp?.running) { No leases yet: devices get one when they join the network or renew theirs. }
       @else { No leases yet. Turn on “Hand out IPv4 addresses” in DHCP settings, then start <code>manage.py rundhcp</code>. }
     </li>
   }

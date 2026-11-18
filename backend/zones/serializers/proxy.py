@@ -21,6 +21,7 @@ class ProxyInfoSerializer(serializers.Serializer):
     pem = serializers.CharField()
     wpad_url = serializers.CharField(allow_blank=True)
     pac = serializers.CharField()
+    gui_url = serializers.CharField(allow_blank=True, help_text='GUI_URL without the final /: where /proxy.mobileconfig and /proxy-ca.crt are served over https')
 
 
 class ProxyTestRequestSerializer(serializers.Serializer):
@@ -74,3 +75,37 @@ class ProxyRuleListSerializer(serializers.Serializer):
     cosmetic = serializers.IntegerField(help_text='Selectors that hide page elements')
     updated = serializers.DateTimeField(allow_null=True, help_text='Last good download, null before the first')
     error = serializers.CharField(allow_blank=True, help_text='Why the last download failed (the old rules stay in use)')
+
+
+class ProxyAllowRequestSerializer(serializers.Serializer):
+    host = serializers.CharField(max_length=253)
+    url = serializers.CharField(required=False, allow_blank=True, max_length=2000, help_text='The address that was blocked (the proxy log row), for the address rules')
+
+
+class ProxyAllowPrevSerializer(serializers.Serializer):
+    allow = serializers.BooleanField()
+    enabled = serializers.BooleanField()
+    regex = serializers.BooleanField()
+    expires = serializers.DateTimeField(allow_null=True)
+
+
+class ProxyAllowSerializer(serializers.Serializer):
+    """What Allow did; sent back as is to undo it."""
+    host = serializers.CharField(max_length=253)
+    dns_block = serializers.CharField(allow_blank=True, help_text='The DNS blacklist entry that blocked the host, e.g. "ads.example.com (easylist)"; empty: none')
+    dns_id = serializers.IntegerField(allow_null=True, help_text='The personal allow entry made or changed; null: none')
+    dns_prev = ProxyAllowPrevSerializer(allow_null=True, help_text='That entry before it was changed; null: it was made new')
+    dns_list = serializers.CharField(allow_blank=True, help_text='The public list whose entry of the same name gave way to the allow entry')
+    proxy_block = serializers.CharField(allow_blank=True, help_text='The proxy rule that blocked the request, e.g. "ad-url: /pagead/"; empty: none')
+    proxy_rule = serializers.CharField(allow_blank=True, help_text='The exception added to the proxy rules (@@host); empty: none')
+    note = serializers.CharField(allow_blank=True, help_text='Why the exception may not apply yet')
+
+
+class ProxyAllowUndoSerializer(ProxyAllowSerializer):
+    dns_block = serializers.CharField(required=False, allow_blank=True)
+    dns_id = serializers.IntegerField(required=False, allow_null=True)
+    dns_prev = ProxyAllowPrevSerializer(required=False, allow_null=True)
+    dns_list = serializers.CharField(required=False, allow_blank=True, max_length=40)
+    proxy_block = serializers.CharField(required=False, allow_blank=True)
+    proxy_rule = serializers.CharField(required=False, allow_blank=True, max_length=260)
+    note = serializers.CharField(required=False, allow_blank=True)

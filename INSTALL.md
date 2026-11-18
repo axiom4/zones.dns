@@ -256,6 +256,8 @@ sudo supervisorctl reread && sudo supervisorctl update
 sudo supervisorctl status
 ```
 
+**Is it running?** `rundns`, `rundhcp` and `runproxy` each write a heartbeat to the database every 30 s (`Setting` row `heartbeat:dns`, `heartbeat:dhcp`, `heartbeat:proxy`: time, process id, version; no Redis needed). `GET /api/status/` says for each one whether it is turned on in the settings and whether it was heard from in the last 90 s. In the GUI the LED of the top bar is off and says so when `rundns` is not running; the *DHCP* and *Proxy* pages have a status line (LED and words: running, not running with the command to start, or off in the settings). A daemon that cannot write its heartbeat (database away) keeps serving and says so on stderr.
+
 **Port 53 without root.** `rundns` should not run as root. Give a Python binary of its own the permission to bind low ports. Not the system interpreter the venv links to (`/usr/bin/python3.x`): a capability set there belongs to every user of the machine. Replace the venv symlink with a copy that only `dns` can run, and set the capability on the copy (again after a Python upgrade):
 
 ```sh
@@ -333,6 +335,10 @@ stderr_logfile=/var/log/supervisor/dns-proxy.err.log
 sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl start dns-proxy
 ```
 
+**Allow a site** from *Logs > Proxy requests*: *Allow* adds the exception where the site is blocked now. Blocked by the DNS blacklist (a personal block, a public list or a pattern): a personal allow entry, which lets it through DNS and the proxy. Blocked by a proxy rule (ad or popup address, your own rules, an ad-block list): an `@@site` line in *Your own rules*, which also keeps the site out of HTTPS inspection. Each blocked row says which layer blocked it; *Undo* takes back exactly what was added.
+
+**Set up a phone with the camera.** *Proxy > Settings > Set up a device* shows a QR code of the Apple profile (`/proxy.mobileconfig`) and of the Root CA (`/proxy-ca.crt`), with the address as text and *Copy*. Both are served without signing in, over https only (plain http is redirected to `GUI_URL`): the code holds the page's own address when it is open over https, else `GUI_URL`.
+
 ## 9. Firewall
 
 Open `80/tcp`, `443/tcp`, `443/udp` (HTTP/3) and `53/udp` + `53/tcp` (only for your clients). Keep `8000`, the database and Redis closed to the outside. The daemon also refuses the clients outside `DNS_ALLOW_QUERY` (private networks by default): if your clients use public addresses (IPv6 global addresses, a VPS), list their networks there.
@@ -391,7 +397,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 - **ASN index:** cron as user `dns`, nightly: `30 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_asn` (about 10 s; the old index is kept if the download fails). Run it once by hand after installing.
 - **Ping (GUI):** the web process sends ICMP echoes itself. On Linux that works without privileges for the groups in `net.ipv4.ping_group_range` (`sysctl net.ipv4.ping_group_range`; to allow the group of user `dns`: `sysctl -w net.ipv4.ping_group_range="<gid> <gid>"`, persisted in `/etc/sysctl.d/`, ipv6 follows the same setting); if it is closed, gunicorn falls back to the `ping` program (`iputils-ping`).
 - **MAC vendors:** cron as user `dns`, nightly: `15 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py update_oui` (a few seconds; the table in the database is replaced in one transaction and the old one is kept if the download fails). The table is downloaded from the Internet, not shipped with the code: run it once by hand after `migrate` (until then every vendor is shown as unknown); the source file is updated weekly.
-- **Blocklists:** cron as user `dns`, nightly: `0 4 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist`.
+- **Blocklists:** cron as user `dns`, nightly: `0 4 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist`. The lists are managed in the GUI (*Blocklist > Public lists*: add or remove a list by URL, *Sync now*, last sync and error per list); `BLOCKLISTS` in `.env` is only the default until the list is first saved there. *Sync now* starts the same command in the background as the user of the web process, so that user needs write access to the database (it already has).
 - **Lost second factor:** `manage.py mfa_reset <user>`.
 
 ## 15. Hardening checklist

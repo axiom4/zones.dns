@@ -16,6 +16,7 @@ from zones.models import DataVersion, ProxyLog
 from zones.proxy import ca, filter as pfilter, rules
 from zones.proxy.server import ProxyLogWriter, ProxyServer, cached_proxy_settings
 from zones.logfmt import stamp_output
+from zones import heartbeat
 
 BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
 
@@ -64,6 +65,7 @@ class Command(BaseCommand):
         self.snap = {k: getattr(s, k) for k in BIND_KEYS}
         self.seen = await asyncio.to_thread(DataVersion.version)
         await asyncio.to_thread(connections.close_all)
+        heartbeat.start('proxy', run=pfilter.run_on_db_pool)  # the GUI's status line; on the pool: no database connection of its own
         self.stdout.write(
             f'Proxy listening on {bind_addr}:{bind_port} '
             f'(ads={"on" if s.PROXY_BLOCK_ADS else "off"}, '

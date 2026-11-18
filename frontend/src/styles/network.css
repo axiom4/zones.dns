@@ -53,6 +53,15 @@ app-settings-fields { display: block; }
 .px-device details { margin: .5rem 0; }
 .px-device summary { cursor: pointer; font-weight: 700; }
 .px-device .actions { display: flex; justify-content: flex-end; margin-top: .75rem; }
+.px-qr { display: flex; flex-wrap: wrap; align-items: flex-start; gap: .75rem; margin: .75rem 0 0; }
+.px-qr img { flex: none; image-rendering: pixelated; border-radius: var(--radius-s); border: 1px solid var(--line-soft); }  /* the image has its own white quiet zone, also in dark mode */
+.px-qr figcaption { flex: 1 1 10rem; min-width: 0; display: grid; gap: .4rem; justify-items: start; color: var(--muted); font-size: 13px; }
+.px-qr code { overflow-wrap: anywhere; }
+.records.proxy-log .pl-layer { color: var(--ink); }
+
+/* daemon status line (DHCP and proxy pages): LED + words; no beat, it is read when the page loads */
+app-daemon-status .daemon-st { display: flex; align-items: center; gap: .5rem; margin: .35rem 0 0; color: var(--muted); font-size: 14px; }
+app-daemon-status .led { animation: none; }
 
 /* blacklist: add form, list picker, show more */
 .bl-add { align-items: flex-end; }
@@ -61,6 +70,14 @@ app-settings-fields { display: block; }
 .bl-allow select { width: auto; }
 .bl-lists { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
 .records li.more { justify-content: center; gap: 1rem; }
+
+/* public lists: the list manager (LED + text for the state of each list; no beat, it is not live) */
+app-blocked-lists-page .bl-src .records { margin-bottom: 1rem; }
+app-blocked-lists-page .bl-src .led { animation: none; }
+app-blocked-lists-page .bl-src .led[data-s=bad] { --l: var(--led-bad); }
+app-blocked-lists-page .bl-src .rvalue > span { overflow-wrap: anywhere; }
+app-blocked-lists-page .bl-n { color: var(--muted); font-size: 13px; white-space: nowrap; }
+app-blocked-lists-page .bl-src .composer { margin: 0; }
 
 @media (max-width: 1100px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
   .composer .cf, .composer .cf.grow { flex: 1 1 100%; }

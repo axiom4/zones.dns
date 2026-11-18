@@ -29,7 +29,7 @@ app-activity { flex: 1; min-width: 0; display: flex; justify-content: flex-end; 
 .activity .num b { font-size: 1.05rem; font-weight: 700; }
 .activity .num span { font-size: 12px; color: var(--muted); }
 .led { --l: var(--line); width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--l); box-shadow: 0 0 0 3px color-mix(in srgb, var(--l) 22%, transparent); }
-.led[data-s=ok] { --l: var(--led-ok); } .led[data-s=idle] { --l: var(--led-warn); }
+.led[data-s=ok] { --l: var(--led-ok); } .led[data-s=idle] { --l: var(--led-warn); } .led[data-s=bad] { --l: var(--led-bad); }
 @media (prefers-reduced-motion: no-preference) {
   .led[data-s=ok] { animation: led-beat 2.6s ease-in-out infinite; }
   @keyframes led-beat { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--l) 8%, transparent); } }

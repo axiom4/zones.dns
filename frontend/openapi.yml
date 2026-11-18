@@ -310,6 +310,91 @@ paths:
               schema:
                 $ref: '#/components/schemas/PersonalSwitch'
           description: ''
+  /api/blocked/sources/:
+    get:
+      operationId: blocked_sources_retrieve
+      description: |-
+        The public lists to import (name, URL) with what the last import did with each, and whether one is running. PUT/PATCH replaces the
+        whole list (`text`, `name=https://…` one per line); the next import (nightly cron, or sync) applies it. Without a saved list:
+        BLOCKLISTS of .env.
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlocklistSources'
+          description: ''
+    put:
+      operationId: blocked_sources_update
+      description: |-
+        The public lists to import (name, URL) with what the last import did with each, and whether one is running. PUT/PATCH replaces the
+        whole list (`text`, `name=https://…` one per line); the next import (nightly cron, or sync) applies it. Without a saved list:
+        BLOCKLISTS of .env.
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlocklistSourcesRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlocklistSources'
+          description: ''
+    patch:
+      operationId: blocked_sources_partial_update
+      description: |-
+        The public lists to import (name, URL) with what the last import did with each, and whether one is running. PUT/PATCH replaces the
+        whole list (`text`, `name=https://…` one per line); the next import (nightly cron, or sync) applies it. Without a saved list:
+        BLOCKLISTS of .env.
+      tags:
+      - blocked
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PatchedBlocklistSourcesRequest'
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlocklistSources'
+          description: ''
+  /api/blocked/sources/sync/:
+    post:
+      operationId: blocked_sources_sync_create
+      description: Starts `import_blocklist` in the background (202); GET sources
+        shows `running` until it ends. 409 when one is running already.
+      tags:
+      - blocked
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '202':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlocklistSources'
+          description: ''
+        '409':
+          description: An import is running already
   /api/blocked/suggestions/:
     get:
       operationId: blocked_suggestions_list
@@ -1787,6 +1872,49 @@ paths:
               schema:
                 $ref: '#/components/schemas/TotpSetup'
           description: ''
+  /api/proxy/allow/:
+    post:
+      operationId: proxy_allow_create
+      description: |-
+        Allow a site blocked in the proxy log: works out which layer blocks it now (DNS blacklist and/or the proxy's own rules) and adds the right
+        exception to each, a personal allow entry and/or an @@host rule. Returns what was done; POST it to /api/proxy/allow/undo/ to take it back.
+      tags:
+      - proxy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyAllowRequestRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ProxyAllow'
+          description: ''
+  /api/proxy/allow/undo/:
+    post:
+      operationId: proxy_allow_undo_create
+      description: 'Undo an Allow: send back what /api/proxy/allow/ returned. Only
+        that host''s entry and @@ rule are touched.'
+      tags:
+      - proxy
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProxyAllowUndoRequest'
+        required: true
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '204':
+          description: No response body
   /api/proxy/info/:
     get:
       operationId: proxy_info_retrieve
@@ -2224,6 +2352,24 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Stats'
+          description: ''
+  /api/status/:
+    get:
+      operationId: status_retrieve
+      description: |-
+        Whether the daemons run: each one (rundns, rundhcp, runproxy) writes a heartbeat every 30 s; running = heard from in the last 90 s.
+        enabled: turned on in the settings (DNS always; DHCP: DHCP, which DHCPv6 and RA also need to run; proxy: PROXY).
+      tags:
+      - status
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Status'
           description: ''
   /api/token/:
     post:
@@ -2716,6 +2862,141 @@ components:
           nullable: true
       required:
       - name
+    BlocklistSource:
+      type: object
+      description: One public list of Blacklist > Public lists and what the last import
+        did with it.
+      properties:
+        name:
+          type: string
+        url:
+          type: string
+        domains:
+          type: integer
+          description: Domains it blocks now (imported entries labelled with this
+            list)
+        synced:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last download that worked; null = never
+        tried:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last attempt
+        error:
+          type: string
+          description: Why the last attempt failed (its old entries were kept); empty
+            = it worked
+        in_use:
+          type: boolean
+          description: 'Its domains are blocked now: it has entries and the Public
+            lists switch is on'
+      required:
+      - domains
+      - error
+      - in_use
+      - name
+      - synced
+      - tried
+      - url
+    BlocklistSourceRequest:
+      type: object
+      description: One public list of Blacklist > Public lists and what the last import
+        did with it.
+      properties:
+        name:
+          type: string
+          minLength: 1
+        url:
+          type: string
+          minLength: 1
+        domains:
+          type: integer
+          description: Domains it blocks now (imported entries labelled with this
+            list)
+        synced:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last download that worked; null = never
+        tried:
+          type: string
+          format: date-time
+          nullable: true
+          description: Last attempt
+        error:
+          type: string
+          description: Why the last attempt failed (its old entries were kept); empty
+            = it worked
+        in_use:
+          type: boolean
+          description: 'Its domains are blocked now: it has entries and the Public
+            lists switch is on'
+      required:
+      - domains
+      - error
+      - in_use
+      - name
+      - synced
+      - tried
+      - url
+    BlocklistSources:
+      type: object
+      properties:
+        text:
+          type: string
+          description: The lists, `name=https://…` one per line. Saving it replaces
+            them; the next import (nightly, or Sync now) applies it.
+          maxLength: 200000
+        saved:
+          type: boolean
+          readOnly: true
+          description: 'false = nothing saved in the GUI yet: these are the BLOCKLISTS
+            of .env'
+        lists:
+          type: array
+          items:
+            $ref: '#/components/schemas/BlocklistSource'
+          readOnly: true
+        running:
+          type: boolean
+          readOnly: true
+          description: An import is running now
+        started:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        finished:
+          type: string
+          format: date-time
+          readOnly: true
+          nullable: true
+        error:
+          type: string
+          readOnly: true
+          description: 'The last run stopped with this error (not a single list: see
+            lists[].error)'
+      required:
+      - error
+      - finished
+      - lists
+      - running
+      - saved
+      - started
+      - text
+    BlocklistSourcesRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          description: The lists, `name=https://…` one per line. Saving it replaces
+            them; the next import (nightly, or Sync now) applies it.
+          maxLength: 200000
+      required:
+      - text
     Bucket:
       type: object
       properties:
@@ -2787,6 +3068,35 @@ components:
       required:
       - count
       - name
+    DaemonStatus:
+      type: object
+      properties:
+        command:
+          type: string
+          description: The manage.py command that runs it
+        enabled:
+          type: boolean
+          description: 'Turned on in the settings (DNS: always)'
+        running:
+          type: boolean
+          description: It wrote its heartbeat in the last 90 seconds
+        last_seen:
+          type: string
+          format: date-time
+          nullable: true
+          description: 'Its last heartbeat; null: never'
+        pid:
+          type: integer
+          nullable: true
+        version:
+          type: string
+      required:
+      - command
+      - enabled
+      - last_seen
+      - pid
+      - running
+      - version
     DestinationCountry:
       type: object
       properties:
@@ -3936,6 +4246,14 @@ components:
           type: string
           format: date-time
           nullable: true
+    PatchedBlocklistSourcesRequest:
+      type: object
+      properties:
+        text:
+          type: string
+          description: The lists, `name=https://…` one per line. Saving it replaces
+            them; the next import (nightly, or Sync now) applies it.
+          maxLength: 200000
     PatchedDhcp6ReservationRequest:
       type: object
       properties:
@@ -4181,6 +4499,128 @@ components:
           type: boolean
       required:
       - enabled
+    ProxyAllow:
+      type: object
+      description: What Allow did; sent back as is to undo it.
+      properties:
+        host:
+          type: string
+          maxLength: 253
+        dns_block:
+          type: string
+          description: 'The DNS blacklist entry that blocked the host, e.g. "ads.example.com
+            (easylist)"; empty: none'
+        dns_id:
+          type: integer
+          nullable: true
+          description: 'The personal allow entry made or changed; null: none'
+        dns_prev:
+          allOf:
+          - $ref: '#/components/schemas/ProxyAllowPrev'
+          nullable: true
+          description: 'That entry before it was changed; null: it was made new'
+        dns_list:
+          type: string
+          description: The public list whose entry of the same name gave way to the
+            allow entry
+        proxy_block:
+          type: string
+          description: 'The proxy rule that blocked the request, e.g. "ad-url: /pagead/";
+            empty: none'
+        proxy_rule:
+          type: string
+          description: 'The exception added to the proxy rules (@@host); empty: none'
+        note:
+          type: string
+          description: Why the exception may not apply yet
+      required:
+      - dns_block
+      - dns_id
+      - dns_list
+      - dns_prev
+      - host
+      - note
+      - proxy_block
+      - proxy_rule
+    ProxyAllowPrev:
+      type: object
+      properties:
+        allow:
+          type: boolean
+        enabled:
+          type: boolean
+        regex:
+          type: boolean
+        expires:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - allow
+      - enabled
+      - expires
+      - regex
+    ProxyAllowPrevRequest:
+      type: object
+      properties:
+        allow:
+          type: boolean
+        enabled:
+          type: boolean
+        regex:
+          type: boolean
+        expires:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+      - allow
+      - enabled
+      - expires
+      - regex
+    ProxyAllowRequestRequest:
+      type: object
+      properties:
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        url:
+          type: string
+          description: The address that was blocked (the proxy log row), for the address
+            rules
+          maxLength: 2000
+      required:
+      - host
+    ProxyAllowUndoRequest:
+      type: object
+      description: What Allow did; sent back as is to undo it.
+      properties:
+        host:
+          type: string
+          minLength: 1
+          maxLength: 253
+        dns_block:
+          type: string
+        dns_id:
+          type: integer
+          nullable: true
+        dns_prev:
+          allOf:
+          - $ref: '#/components/schemas/ProxyAllowPrevRequest'
+          nullable: true
+        dns_list:
+          type: string
+          maxLength: 40
+        proxy_block:
+          type: string
+        proxy_rule:
+          type: string
+          maxLength: 260
+        note:
+          type: string
+      required:
+      - host
     ProxyInfo:
       type: object
       properties:
@@ -4197,9 +4637,14 @@ components:
           type: string
         pac:
           type: string
+        gui_url:
+          type: string
+          description: 'GUI_URL without the final /: where /proxy.mobileconfig and
+            /proxy-ca.crt are served over https'
       required:
       - expires
       - fingerprint
+      - gui_url
       - pac
       - pem
       - subject
@@ -4902,6 +5347,19 @@ components:
       - top_clients
       - top_domains
       - total
+    Status:
+      type: object
+      properties:
+        dns:
+          $ref: '#/components/schemas/DaemonStatus'
+        dhcp:
+          $ref: '#/components/schemas/DaemonStatus'
+        proxy:
+          $ref: '#/components/schemas/DaemonStatus'
+      required:
+      - dhcp
+      - dns
+      - proxy
     StepUpCodeRequest:
       type: object
       properties:

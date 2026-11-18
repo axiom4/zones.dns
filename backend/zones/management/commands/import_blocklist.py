@@ -1,69 +1,82 @@
-import re
 import urllib.request
 
 from django.conf import settings
 from django.core.cache import cache
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from zones.stats.audit import NAME_RE
+from zones import blocklists
+from zones.blocklists import parse, split_source  # noqa: F401  (split_source: imported from here by older code and tests)
 from zones.models import COUNTS_KEY, BlockedDomain, DataVersion
 from zones.proxy import rules
 
-LOCAL = {'localhost', 'localhost.localdomain', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback', '0.0.0.0'}
 
-
-def split_source(entry):
-    """('name', 'url or path') from `name=url`; a plain URL or path is named after its file."""
-    m = re.match(r'^([a-z0-9._-]{1,40})=(.+)$', entry)
-    if m and not m[1].startswith(('http', 'file')):
-        return m[1], m[2]
-    return re.sub(r'[^a-z0-9._-]', '-', entry.rstrip('/').rsplit('/', 1)[-1].lower())[:40] or 'list', entry
-
-
-def parse(text):
-    """Domains from a hosts file ('0.0.0.0 bad.com') or a plain list (one domain per line); comments ignored."""
-    out = set()
-    for line in text.splitlines():
-        parts = line.split('#', 1)[0].split()
-        if parts and re.match(r'^(\d+\.){3}\d+$|^::1?$', parts[0]):
-            parts = parts[1:]
-        for d in parts[:1]:
-            d = d.lower().strip('.')
-            if d not in LOCAL and NAME_RE.match(d):
-                out.add(d)
-    return out
+def download(source):
+    if source.startswith(('http://', 'https://')):
+        req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            raw = r.read(50_000_001)
+        if len(raw) > 50_000_000:
+            raise OSError('response exceeds 50 MB limit')
+        return raw.decode('utf-8', 'replace')
+    with open(source, encoding='utf-8', errors='replace') as f:
+        return f.read()
 
 
 class Command(BaseCommand):
-    help = 'Replace the imported blacklist (source=list) with the union of public blocklists (default: BLOCKLISTS). Manual entries are untouched. Without arguments it also downloads the proxy ad-block rule lists (PROXY_RULE_LISTS, Proxy page).'
+    help = ('Replace the imported blacklist (source=list) with the union of public blocklists (default: the lists of Blacklist > Public lists, '
+            'else BLOCKLISTS). Manual entries are untouched; a list that fails keeps its old entries. Without arguments it also downloads the proxy '
+            'ad-block rule lists (PROXY_RULE_LISTS, Proxy page).')
 
     def add_arguments(self, p):
-        p.add_argument('sources', nargs='*', help='URLs or file paths (hosts format or one domain per line); default: BLOCKLISTS')
+        p.add_argument('sources', nargs='*', help='[name=]URL or file path (hosts format or one domain per line); default: the GUI lists, else BLOCKLISTS')
+        p.add_argument('--locked', action='store_true', help='the caller (the GUI\'s Sync now) already holds the lock')
 
-    def handle(self, *a, sources, **o):
+    def handle(self, *a, sources, locked=False, **o):
+        if not locked and not blocklists.acquire():
+            raise CommandError('another import_blocklist is running')
+        try:
+            failed = self.run(sources)
+        except Exception as e:
+            blocklists.save_status({**blocklists.status(), 'finished': blocklists.now_iso(), 'error': str(e)[:300]})
+            raise
+        finally:
+            blocklists.release()
+        if not sources:
+            try:
+                for r in rules.sync_all():
+                    self.stdout.write(f"proxy rules {r['name']}: {r['blocks']} domains, {r['allow']} exceptions, {r['cosmetic']} selectors" + (f" (failed, old rules kept: {r['error']})" if r['error'] else ''))
+            except ValueError as e:
+                self.stderr.write(f'proxy rules not updated: {e}')
+        if failed:
+            raise CommandError(f'{failed} of the public lists failed: their old entries were kept')
+
+    def run(self, sources):
+        """Downloads every list and writes what changed; the number of lists that failed."""
+        entries = [split_source(e) for e in sources] if sources else blocklists.configured(settings.BLOCKLISTS)
+        old = blocklists.status().get('lists', {})
+        st = {'started': blocklists.now_iso(), 'finished': None, 'error': '', 'lists': {}}
+        blocklists.save_status({**blocklists.status(), 'started': st['started'], 'finished': None, 'error': ''})
         names = {}  # domain -> the first list that has it
-        for entry in sources or settings.BLOCKLISTS:
-            label, source = split_source(entry)
-            if source.startswith(('http://', 'https://')):
-                req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
-                try:
-                    with urllib.request.urlopen(req, timeout=60) as r:
-                        raw = r.read(50_000_001)
-                    if len(raw) > 50_000_000:
-                        raise OSError('response exceeds 50 MB limit')
-                    text = raw.decode('utf-8', 'replace')
-                except OSError as e:  # shortcut: one list down = no update at all (the old entries stay); the next run retries
-                    raise SystemExit(f'{source}: {e}: blacklist left unchanged')
-            else:
-                with open(source, encoding='utf-8', errors='replace') as f:
-                    text = f.read()
-            found = parse(text)
-            if not found:
-                raise SystemExit(f'{source}: no domains found: blacklist left unchanged')
-            self.stdout.write(f'{label}: {len(found)} domains')
+        failed = 0
+        for label, source in entries:
+            row = {'url': source, 'tried': blocklists.now_iso(), 'synced': old.get(label, {}).get('synced'), 'error': ''}
+            try:
+                found = parse(download(source))
+                if not found:
+                    raise ValueError('no domains found')
+                row.update(synced=row['tried'], domains=len(found))
+                self.stdout.write(f'{label}: {len(found)} domains')
+            except (OSError, ValueError) as e:
+                # the list keeps what it had: its old entries are taken as if downloaded again
+                found = set(BlockedDomain.objects.filter(source='list', list_name=label).values_list('name', flat=True).iterator(chunk_size=50000))
+                row.update(error=str(e)[:300], domains=len(found))
+                failed += 1
+                self.stderr.write(f'{label}: {source}: {e}: its {len(found)} old entries kept')
+            st['lists'][label] = row
             for d in found:
                 names.setdefault(d, label)
+            blocklists.renew()
         manual = set(BlockedDomain.objects.filter(source='manual').values_list('name', flat=True))
         todo = {n: label for n, label in names.items() if n not in manual}
         # Only what changed is written: the lists differ by a few percent from one night to the next, and a DELETE + INSERT of a million rows
@@ -78,10 +91,7 @@ class Command(BaseCommand):
             if drop or add:
                 transaction.on_commit(DataVersion.bump)  # after the commit, so the daemon never reloads half-way
         cache.delete(COUNTS_KEY)
-        self.stdout.write(f'{len(todo)} domains imported ({len(add)} added, {sum(1 for n in drop if n not in todo)} removed)')
-        if not sources:
-            try:
-                for r in rules.sync_all():
-                    self.stdout.write(f"proxy rules {r['name']}: {r['blocks']} domains, {r['allow']} exceptions, {r['cosmetic']} selectors" + (f" (failed, old rules kept: {r['error']})" if r['error'] else ''))
-            except ValueError as e:
-                self.stderr.write(f'proxy rules not updated: {e}')
+        removed = sum(1 for n in drop if n not in todo)
+        blocklists.save_status({**st, 'finished': blocklists.now_iso(), 'imported': len(todo), 'added': len(add), 'removed': removed, 'failed': failed})
+        self.stdout.write(f'{len(todo)} domains imported ({len(add)} added, {removed} removed)')
+        return failed

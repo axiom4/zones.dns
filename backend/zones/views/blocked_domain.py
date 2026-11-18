@@ -1,19 +1,23 @@
 import re
+import subprocess
+import sys
 from datetime import timedelta
 
+from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Count, Sum
 from django.utils import timezone
-from drf_spectacular.utils import OpenApiParameter, extend_schema
-from rest_framework import viewsets
+from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
+from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
+from .. import blocklists
 from ..dnsd.domains import main_domain
 from ..models import COUNTS_KEY, PERSONAL_BLOCKS, PUBLIC_LISTS, BlockedDomain, Setting, StatCount, Zone
 from ..dnsd.resolver import _live, blocked_match
 from ..stats.rollup import floor_hour
-from ..serializers import BlockedDomainSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer
+from ..serializers import BlockedDomainSerializer, BlocklistSourcesSerializer, ImportedBlockedSerializer, PersonalSwitchSerializer, PublicListSerializer
 from ..serializers.stats import CountSerializer
 
 # a label that names what the host is for: ads, tracking, telemetry
@@ -111,6 +115,44 @@ class BlockedDomainViewSet(viewsets.ModelViewSet):
     def public_lists(self, request):
         """The master switch of the Public lists: off = the imported domains are kept but ignored."""
         return self._switch(request, PUBLIC_LISTS)
+
+    @extend_schema(request=BlocklistSourcesSerializer, responses=BlocklistSourcesSerializer)
+    @action(detail=False, methods=['get', 'put', 'patch'])
+    def sources(self, request):
+        """The public lists to import (name, URL) with what the last import did with each, and whether one is running. PUT/PATCH replaces the
+        whole list (`text`, `name=https://…` one per line); the next import (nightly cron, or sync) applies it. Without a saved list:
+        BLOCKLISTS of .env."""
+        if request.method in ('PUT', 'PATCH'):
+            ser = BlocklistSourcesSerializer(data=request.data)
+            ser.is_valid(raise_exception=True)
+            blocklists.save(ser.validated_data['entries'])
+        return Response(self._sources())
+
+    @extend_schema(request=None, responses={202: BlocklistSourcesSerializer, 409: OpenApiResponse(description='An import is running already')})
+    @action(detail=False, methods=['post'], url_path='sources/sync')
+    def sources_sync(self, request):
+        """Starts `import_blocklist` in the background (202); GET sources shows `running` until it ends. 409 when one is running already."""
+        if not blocklists.acquire():
+            return Response({'detail': 'The lists are being synced already: wait until it ends.'}, status=status.HTTP_409_CONFLICT)
+        try:
+            # its own session: it outlives this request and a restart of the web server; the lock is handed over (--locked) and released by it
+            subprocess.Popen([sys.executable, str(settings.BASE_DIR / 'manage.py'), 'import_blocklist', '--locked'], cwd=settings.BASE_DIR,
+                             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
+        except OSError:
+            blocklists.release()
+            raise
+        return Response(self._sources(), status=status.HTTP_202_ACCEPTED)
+
+    def _sources(self):
+        st, counts, on = blocklists.status(), list_counts(), Setting.flag(PUBLIC_LISTS)
+        entries = blocklists.configured()
+        rows = []
+        for name, url in entries:
+            r = st.get('lists', {}).get(name, {})
+            n = counts.get(name, 0)
+            rows.append({'name': name, 'url': url, 'domains': n, 'synced': r.get('synced'), 'tried': r.get('tried'), 'error': r.get('error', ''), 'in_use': on and n > 0})
+        return {'text': ''.join(f'{n}={u}\n' for n, u in entries), 'saved': Setting.objects.filter(key=blocklists.KEY).exists(), 'lists': rows,
+                'running': blocklists.running(), 'started': st.get('started'), 'finished': st.get('finished'), 'error': st.get('error', '')}
 
     def _switch(self, request, key):
         if request.method == 'PATCH':

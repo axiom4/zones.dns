@@ -8,6 +8,7 @@ import { countryName, flag } from './geo-util.ts';
 import { LoginError, seal } from './login-crypto.ts';
 import { SPEC, TYPE_SPECS, compose, parse, tokenize, validate } from './record-types.ts';
 import { cidrToZone, ptrToIp } from './reverse.ts';
+import { blockLayer } from './proxy-reason.ts';
 
 const b64 = (u: Uint8Array) => Buffer.from(u).toString('base64');
 
@@ -103,4 +104,15 @@ test('validate: a missing value names its field, acronyms intact', () => {
   assert.equal(validate({ key: 'ip', label: 'IPv4 address', help: '' }, ''), 'Enter the IPv4 address.');
   assert.equal(validate({ key: 't', label: 'Text', help: '' }, ' '), 'Enter the text.');
   assert.equal(validate({ key: 'f', label: 'Flag', help: '', optional: true }, ''), '');
+});
+
+test('blockLayer: the layer of a proxy block, from the log reason', () => {
+  assert.equal(blockLayer('blacklist: tracker.example (easylist)'), 'DNS blocklist: easylist');
+  assert.equal(blockLayer('blacklist: ads.example (personal)'), 'DNS blocklist: Personal blocks');
+  assert.equal(blockLayer('blacklist: x.ads.example (pattern ^(x|y)\\.)'), 'DNS blocklist: pattern ^(x|y)\\.');
+  assert.equal(blockLayer('rule-list: ads.example (easyprivacy)'), 'Ad-block list: easyprivacy');
+  assert.equal(blockLayer('ad-url: /pagead/'), 'Ad rule');
+  assert.equal(blockLayer('popup-url: /popunder.js'), 'Popup rule');
+  assert.equal(blockLayer('custom-rule: /banner-x/'), 'Your rule');
+  for (const none of ['', 'Internal error: boom', 'DNS lookup failed']) assert.equal(blockLayer(none), '', none);
 });

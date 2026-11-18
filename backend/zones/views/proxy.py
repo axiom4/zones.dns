@@ -3,6 +3,8 @@ import ipaddress
 from urllib.parse import urlsplit
 
 from django.conf import settings
+from django.core.cache import cache
+from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseRedirect
 from django.utils import timezone
@@ -14,7 +16,8 @@ from rest_framework.views import APIView
 
 from ..dhcp import v4 as dhcp
 from ..dnsd import ratelimit
-from ..models import DataVersion, ProxyLog, Setting
+from ..models import COUNTS_KEY, PERSONAL_BLOCKS, BlockedDomain, DataVersion, ProxyLog, Setting
+from ..dnsd import resolver
 from .token import client_ip
 from .zone import GRANT, need_grant
 from ..proxy import ca, filter as pfilter, pac, rules
@@ -28,6 +31,8 @@ from ..serializers import (
     ProxyTestRequestSerializer,
     ProxyTestResultSerializer,
 )
+from ..serializers.proxy import ProxyAllowRequestSerializer, ProxyAllowSerializer, ProxyAllowUndoSerializer
+from ..serializers.static_host import HOST_RE
 # The proxy settings are stored with the DHCP ones (Setting rows `dhcp:<NAME>`): one snapshot, one restart signal for rundhcp and runproxy.
 
 # Settings that send the clients' traffic somewhere else or open it to inspection: changing them needs a second-factor grant (scope proxy-change)
@@ -104,6 +109,7 @@ class ProxyInfoView(APIView):
             **info,
             'wpad_url': pac.wpad_url_for(s),
             'pac': pac.build_pac(s, request_host=req_host),
+            'gui_url': str(settings.GUI_URL).rstrip('/'),
         }
 
     @extend_schema(responses=ProxyInfoSerializer)
@@ -137,6 +143,108 @@ class ProxyTestView(APIView):
             'reason': hit[0] if hit else '',
             'detail': hit[1] if hit else '',
         }).data)
+
+
+RULES_KEY, RULES_MAX = 'dhcp:PROXY_CUSTOM_RULES', 8000  # the max_length of ProxySettingsSerializer
+
+
+def _set_rules(text):
+    Setting.objects.update_or_create(key=RULES_KEY, defaults={'value': text})  # the signal raises DataVersion: runproxy applies it
+
+
+def _forget_counts():
+    try:
+        cache.delete(COUNTS_KEY)
+    except Exception:
+        pass
+
+
+def allow_host(host, url=''):
+    """Lets `host` (and its subdomains) through whichever layer blocks it now, and returns what was done (ProxyAllowSerializer), which undo_allow() reverses.
+    DNS blacklist (personal block, public list, pattern): a personal allow entry, which fixes DNS and the proxy at once. A proxy rule (ad or popup address,
+    your own rules, an ad-block list): an @@host exception in the proxy's own rules, which also keeps the site out of HTTPS inspection. Neither: the
+    @@host exception too, as the proxy log's Allow always did (no page filtering, no inspection for the site)."""
+    s = dhcp.dhcp_settings()
+    out = {'host': host, 'dns_block': '', 'dns_id': None, 'dns_prev': None, 'dns_list': '', 'proxy_block': '', 'proxy_rule': '', 'note': ''}
+    if hit := resolver.blocked_entry(host):
+        out['dns_block'] = f'{hit[0]} ({hit[1]})'
+        row = BlockedDomain.objects.select_for_update().filter(name=host).first()
+        if row and row.source == 'manual':
+            out['dns_prev'] = {'allow': row.allow, 'enabled': row.enabled, 'regex': row.regex, 'expires': row.expires}
+            row.allow, row.enabled, row.regex, row.expires = True, True, False, None
+            row.save()
+        else:
+            if row:  # the same name in a public list gives way to the personal entry, as when it is added by hand (name is unique)
+                out['dns_list'] = row.list_name
+                row.delete()
+                _forget_counts()
+            row = BlockedDomain.objects.create(name=host, allow=True)
+        out['dns_id'] = row.pk
+        if not Setting.flag(PERSONAL_BLOCKS):
+            out['note'] = 'Personal blocks are switched off: the DNS exception applies when they are on again.'
+    allow_domains, _, _, _ = pfilter.parse_custom_rules(str(s.PROXY_CUSTOM_RULES or ''))
+    if (hit := pfilter.check_request(host, url or f'https://{host}/', s=s, dns=False)) or not (out['dns_id'] or pfilter.is_domain_allowed(host, allow_domains)):
+        out['proxy_block'] = f'{hit[0]}: {hit[1]}' if hit else ''
+        rule, raw = f'@@{host}', str(s.PROXY_CUSTOM_RULES or '').rstrip()
+        text = f'{raw}\n{rule}' if raw else rule
+        if len(text) > RULES_MAX:
+            raise serializers.ValidationError({'detail': f'Your own proxy rules are full ({RULES_MAX} characters): remove some in Proxy settings, then allow {host} again.'})
+        _set_rules(text)
+        out['proxy_rule'] = rule
+    return out
+
+
+def undo_allow(d):
+    """Removes exactly what allow_host() added: the allow entry (or puts the entry it changed back), the public list entry that gave way, the @@ rule."""
+    host = d['host']
+    if d.get('dns_id') and (row := BlockedDomain.objects.select_for_update().filter(pk=d['dns_id'], name=host, source='manual').first()):
+        if prev := d.get('dns_prev'):
+            row.allow, row.enabled, row.regex, row.expires = prev['allow'], prev['enabled'], prev['regex'], prev['expires']
+            row.save()
+        else:
+            row.delete()
+    if d.get('dns_list') and not BlockedDomain.objects.filter(name=host).exists():
+        BlockedDomain.objects.create(name=host, source='list', list_name=d['dns_list'])
+        _forget_counts()
+    if rule := d.get('proxy_rule'):
+        if rule != f'@@{host}':
+            raise serializers.ValidationError({'proxy_rule': f'Not the exception for {host}.'})
+        lines = str(dhcp.dhcp_settings().PROXY_CUSTOM_RULES or '').split('\n')
+        at = max((i for i, ln in enumerate(lines) if ln.strip() == rule), default=None)
+        if at is not None:
+            del lines[at]
+            _set_rules('\n'.join(lines).rstrip())
+
+
+def _host(raw):
+    h = raw.strip().lower().rstrip('.')
+    if not HOST_RE.match(h):
+        raise serializers.ValidationError({'host': 'Not a site name (letters, digits, - and _ in labels separated by dots).'})
+    return h
+
+
+class ProxyAllowView(APIView):
+    @extend_schema(request=ProxyAllowRequestSerializer, responses=ProxyAllowSerializer)
+    def post(self, request):
+        """Allow a site blocked in the proxy log: works out which layer blocks it now (DNS blacklist and/or the proxy's own rules) and adds the right
+        exception to each, a personal allow entry and/or an @@host rule. Returns what was done; POST it to /api/proxy/allow/undo/ to take it back."""
+        ser = ProxyAllowRequestSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        with transaction.atomic():
+            out = allow_host(_host(ser.validated_data['host']), ser.validated_data.get('url', '').strip())
+        return Response(ProxyAllowSerializer(out).data)
+
+
+class ProxyAllowUndoView(APIView):
+    @extend_schema(request=ProxyAllowUndoSerializer, responses={204: None})
+    def post(self, request):
+        """Undo an Allow: send back what /api/proxy/allow/ returned. Only that host's entry and @@ rule are touched."""
+        ser = ProxyAllowUndoSerializer(data=request.data)
+        ser.is_valid(raise_exception=True)
+        d = {**ser.validated_data, 'host': _host(ser.validated_data['host'])}
+        with transaction.atomic():
+            undo_allow(d)
+        return Response(status=204)
 
 
 class ProxyLogsView(APIView):

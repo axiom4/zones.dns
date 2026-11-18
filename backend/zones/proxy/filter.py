@@ -199,8 +199,8 @@ def is_domain_allowed(host, allow_domains):
     return any('.'.join(labels[i:]) in allow_domains for i in range(len(labels)))
 
 
-def check_request(host, url='', s=None):
-    """Return (reason_kind, detail) if the request to `host` / `url` should be blocked, else None."""
+def check_request(host, url='', s=None, dns=True):
+    """Return (reason_kind, detail) if the request to `host` / `url` should be blocked, else None. dns=False: the proxy's own rules only, not the DNS blacklist."""
     h = (host or '').strip().lower().rstrip('.')
     if h.startswith('[') and ']' in h:
         h = h[1:h.index(']')]
@@ -214,8 +214,7 @@ def check_request(host, url='', s=None):
     if is_domain_allowed(h, allow_domains) or is_domain_allowed(h, ext.allow):
         return None
     if block_ads and h:
-        hit = _check_domain_blocked(h)
-        if hit:
+        if dns and (hit := _check_domain_blocked(h)):
             return ('blacklist', f'{hit[0]} ({hit[1]})')
         if hit := rules.blocked_by(h, ext):
             return ('rule-list', f'{hit[0]} ({hit[1]})')

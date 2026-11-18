@@ -9,7 +9,7 @@
       <button class="switch" type="button" role="switch" [attr.aria-checked]="active()" (click)="switchAll()" aria-label="Use the public lists"><i></i></button>
       <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
     </div>
-    <p class="soft">@if (loaded()) { {{ count() }} domains {{ q || list() ? 'found' : 'blocked' }}{{ list() ? ' in ' + list() : lists().length ? ' from ' + lists().length + (lists().length === 1 ? ' list' : ' lists') : '' }}. } Read-only here: the server command <code>import_blocklist</code> adds and updates lists; to remove one, use Advanced admin.</p>
+    <p class="soft">@if (loaded()) { {{ count() }} domains {{ q || list() ? 'found' : 'blocked' }}{{ list() ? ' in ' + list() : lists().length ? ' from ' + lists().length + (lists().length === 1 ? ' list' : ' lists') : '' }}. } The lists are downloaded every night (<code>import_blocklist</code>) and with <b>Sync now</b>.</p>
     @if (lists().length) {
       <div class="bl-lists" role="group" aria-label="Show one list">
         @for (l of lists(); track l.name) {
@@ -20,6 +20,46 @@
     }
   </div>
 </header>
+<section class="panel bl-src" aria-labelledby="bl-src-t" [attr.aria-busy]="!src()">
+  <h3 id="bl-src-t">Lists</h3>
+  @if (src(); as s) {
+    <p class="soft" aria-live="polite">{{ s.running ? 'Syncing the lists… this takes a few minutes.' : s.finished ? 'Last sync ' + ago(s.finished) + '.' : 'Not synced from here yet.' }}@if (!s.saved) { These come from <code>BLOCKLISTS</code> in the server's .env until you change them here.}</p>
+    <ul class="records">
+      @for (l of s.lists; track l.name) {
+        <li>
+          <span class="led" [attr.data-s]="l.error ? 'bad' : l.synced ? 'ok' : 'idle'" aria-hidden="true"></span>
+          <span class="rname">{{ l.name }}</span>
+          <span class="rvalue"><span [title]="l.url">{{ shortUrl(l.url) }}</span>
+            <small class="note-t" [title]="l.synced ? full(l.synced) : ''">{{ l.synced ? 'Synced ' + ago(l.synced) : 'Not downloaded yet' }}</small>
+            @if (l.error) { <small class="note-t bad">Last sync failed: {{ l.error }}. Its old domains are kept.</small> }
+          </span>
+          <span class="bl-n">{{ l.domains }} domains</span>
+          <button class="mini ghost del" type="button" (click)="remove(l)" [attr.aria-label]="'Remove list ' + l.name">Remove</button>
+        </li>
+      } @empty {
+        <li class="empty">No public list. Add one below, then choose Sync now.</li>
+      }
+    </ul>
+    <form class="composer bl-add" (ngSubmit)="addList()" aria-label="Add a public list">
+      <div class="cf">
+        <label for="bl-src-name">Name</label>
+        <input id="bl-src-name" name="sn" [(ngModel)]="newName" placeholder="e.g. oisd" autocomplete="off" required maxlength="40"
+               [attr.aria-invalid]="errs()['name'] ? true : null" [attr.aria-describedby]="errs()['name'] ? 'bl-src-name-e' : null">
+        @if (errs()['name']; as e) { <small id="bl-src-name-e" class="bad">{{ e }}</small> }
+      </div>
+      <div class="cf grow">
+        <label for="bl-src-url">URL</label>
+        <input id="bl-src-url" name="su" type="url" [(ngModel)]="newUrl" placeholder="https://… (hosts file or one domain per line)" autocomplete="off" required
+               [attr.aria-invalid]="errs()['url'] ? true : null" [attr.aria-describedby]="errs()['url'] || errs()['text'] ? 'bl-src-url-e' : null">
+        @if (errs()['url'] || errs()['text']; as e) { <small id="bl-src-url-e" class="bad">{{ e }}</small> }
+      </div>
+      <button class="primary">Add list</button>
+      <button class="ghost" type="button" (click)="sync()" [disabled]="s.running">{{ s.running ? 'Syncing…' : 'Sync now' }}</button>
+    </form>
+  } @else {
+    <p class="soft">Loading…</p>
+  }
+</section>
 <form class="composer single" (ngSubmit)="search()" role="search">
   <input class="grow" type="search" name="q" [(ngModel)]="q" placeholder="Is a domain on the lists? e.g. doubleclick.net" autocomplete="off" aria-label="Search the public lists">
   <button class="primary">Search</button>
@@ -28,7 +68,7 @@
   @for (n of names(); track n) {
     <li [class.off]="!active()"><span class="rvalue">{{ n }}</span></li>
   } @empty {
-    <li class="empty">{{ !loaded() ? 'Loading…' : q ? '“' + q + '” is not on the lists.' : 'No list imported yet. Run manage.py import_blocklist on the server.' }}</li>
+    <li class="empty">{{ !loaded() ? 'Loading…' : q ? '“' + q + '” is not on the lists.' : 'No list imported yet. Add a list above and choose Sync now.' }}</li>
   }
   @if (names().length < count()) {
     <li class="more"><button class="ghost" type="button" (click)="more()">Show {{ count() - names().length > 100 ? '100' : count() - names().length }} more</button><span class="soft">{{ names().length }} of {{ count() }} shown</span></li>
