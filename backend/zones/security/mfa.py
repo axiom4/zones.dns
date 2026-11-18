@@ -54,7 +54,7 @@ def make_ticket(user, kind):
 def read_ticket(ticket, kind, consume=False):
     from django.contrib.auth import get_user_model
     try:
-        d = signing.loads(ticket or '', salt='mfa-ticket', max_age=TICKET_AGE)
+        d = signing.loads(ticket if isinstance(ticket, str) else '', salt='mfa-ticket', max_age=TICKET_AGE)
         if d.get('k') != kind:
             raise signing.BadSignature
         user = get_user_model().objects.get(pk=d['u'], is_staff=True, is_active=True)
@@ -121,8 +121,8 @@ def make_grant(user, scope):
 def use_grant(user, scope, grant):
     """Accepts a grant once: for this user and this scope, young enough, never used before."""
     try:
-        d = signing.loads(grant or '', salt='mfa-grant', max_age=GRANT_AGE)
-    except signing.BadSignature:
+        d = signing.loads(grant, salt='mfa-grant', max_age=GRANT_AGE)
+    except (signing.BadSignature, TypeError):  # TypeError: not a string (None, or a JSON number from the request body)
         raise MfaError('grant')
     if d.get('u') != user.pk or d.get('s') != scope or not cache.add('mfa-grant-used:' + hashlib.sha256(grant.encode()).hexdigest(), 1, GRANT_AGE + 60):
         raise MfaError('grant')
@@ -144,7 +144,7 @@ def check_totp(device, code):
     now = int(time.time() // 30)
     code = (code or '').replace(' ', '')
     for step in (now - 1, now, now + 1):
-        if step > device.last_step and hmac.compare_digest(totp_code(device.secret, step), code):
+        if step > device.last_step and hmac.compare_digest(totp_code(device.secret, step).encode(), code.encode()):  # bytes: compare_digest raises on a non-ASCII str
             if device.pk:
                 if not TotpDevice.objects.filter(pk=device.pk, last_step__lt=step).update(last_step=step):
                     return False
@@ -217,7 +217,7 @@ def register_passkey(user, credential, name):
     if len(_b64(v.credential_id)) > 255:
         raise MfaError('bad_passkey')
     return Passkey.objects.create(user=user, credential_id=_b64(v.credential_id), public_key=_b64(v.credential_public_key),
-                                  sign_count=v.sign_count, name=(name or 'Passkey').strip()[:80])
+                                  sign_count=v.sign_count, name=(name if isinstance(name, str) else '').strip()[:80] or 'Passkey')
 
 
 def authentication_options(user):

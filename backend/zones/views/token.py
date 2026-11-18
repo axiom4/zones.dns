@@ -40,6 +40,8 @@ class TokenView(APIView):
     def post(self, request):
         if settings.LOGIN_ENCRYPTION == 'required':
             return Response({'detail': 'Plain sign-in is disabled: use the encrypted sign-in.'}, status=403)
+        if not isinstance(request.data, dict):
+            return Response({'detail': 'Wrong credentials.'}, status=400)
         uname = str(request.data.get('username', ''))
         ip = client_ip(request)
         try:

@@ -40,11 +40,14 @@ def _confirm_change(d, auth, user):
         mfa.use_grant(user, 'mfa-change', d.get('grant'))
 
 
-def _enrol_token(d, auth, user):
+def _enrol_token(d, auth, user, save):
+    """Stores the new factor (save()) and answers the token. A setup ticket is used up before the factor exists: once it does, read_ticket refuses it."""
     if auth and auth.is_authenticated:
+        save()
         tok = Token.objects.filter(user=user).first()
         return tok.key if tok else mfa.token_for(user)
     _enrol_user(d, auth, consume=True)
+    save()
     return mfa.token_for(user)
 
 
@@ -132,10 +135,12 @@ def totp_confirm(d, auth):
     if not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
     _confirm_change(d, auth, user)
-    TotpDevice.objects.filter(user=user).delete()
-    dev.save()
-    cache.delete(f'totp-new:{user.pk}')
-    return {'token': _enrol_token(d, auth, user)}
+
+    def save():
+        TotpDevice.objects.filter(user=user).delete()
+        dev.save()
+        cache.delete(f'totp-new:{user.pk}')
+    return {'token': _enrol_token(d, auth, user, save)}
 
 
 def passkey_register_options(d, auth):
@@ -145,8 +150,7 @@ def passkey_register_options(d, auth):
 def passkey_register(d, auth):
     user = _enrol_user(d, auth)
     _confirm_change(d, auth, user)
-    mfa.register_passkey(user, d.get('credential'), d.get('name'))
-    return {'token': _enrol_token(d, auth, user)}
+    return {'token': _enrol_token(d, auth, user, lambda: mfa.register_passkey(user, d.get('credential'), d.get('name')))}
 
 
 ACTIONS = {'totp': totp_verify, 'passkey-options': passkey_options, 'passkey-verify': passkey_verify, 'totp-setup': totp_setup,
@@ -164,6 +168,8 @@ class _Plain(APIView):
     def post(self, request):
         if settings.LOGIN_ENCRYPTION == 'required':
             return Response({'detail': 'Plain requests are disabled: use the encrypted channel.'}, status=403)
+        if not isinstance(request.data, dict):
+            return Response({'detail': 'Invalid request.'}, status=400)
         try:
             return Response(ACTIONS[self.action](request.data, request.user))
         except mfa.MfaError as e:

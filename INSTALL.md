@@ -11,7 +11,7 @@ Complete guide for a server install: PostgreSQL or MySQL/MariaDB, Redis, nginx, 
 | Python 3.12 or newer, `venv`, `pip` | Django 6.1 needs a recent Python (check the [Django docs](https://docs.djangoproject.com/en/6.1/faq/install/)). |
 | nginx ≥ 1.25 with `http_v3` | Only for HTTP/3; older nginx works if you remove the `quic`/`http3` lines from the virtual host. Check: `nginx -V 2>&1 \| grep http_v3`. |
 | PostgreSQL **or** MariaDB/MySQL | Local or on another host. SQLite works but is for development only. |
-| Redis | Upstream DNS cache, sign-in replay and lockout counters. Optional, but recommended. |
+| Redis | Upstream DNS cache, sign-in replay and lockout counters. Optional, but recommended: without it each process keeps its own cache in memory (up to 100,000 entries, the DNS daemon's can take a few hundred MB) and the lockout counters are per gunicorn worker. |
 | supervisor | Keeps the API and the DNS daemon running. |
 | Node.js + npm | Only to build the GUI; can be another machine. Use a Node version supported by Angular 22. |
 
@@ -168,7 +168,7 @@ sudo systemctl restart redis-server
 ```
 REDIS_URL=redis://:change-me@127.0.0.1:6379/0
 ```
-Redis holds the upstream DNS cache and the sign-in replay and lockout counters. Never expose it to the network. Under memory pressure `allkeys-lru` can evict a lockout counter, so give it enough memory. If Redis is down, the daemon asks the upstream directly.
+Redis holds the upstream DNS cache and the sign-in replay and lockout counters. Never expose it to the network. Under memory pressure `allkeys-lru` can evict a lockout counter, so give it enough memory. If Redis is down, the daemon asks the upstream directly. Without `REDIS_URL` every process uses its own memory cache of at most 100,000 entries.
 
 ## 6. Configuration
 

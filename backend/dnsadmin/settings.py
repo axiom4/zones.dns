@@ -220,7 +220,9 @@ CACHES = {'default': {'BACKEND': 'django.core.cache.backends.redis.RedisCache', 
     'socket_connect_timeout': 1,
     'socket_keepalive': True,    # TCP keep-alive: idle connections are not dropped by firewalls
     'health_check_interval': 30,  # an idle connection is pinged before reuse after 30 s, and replaced if it died
-}} if REDIS_URL else {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+}} if REDIS_URL else {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+                       # default 300: the geo and stats pages fill that and push out wrong-password counters and used-ticket marks
+                       'OPTIONS': {'MAX_ENTRIES': 100000}}}
 DNS_CACHE = os.environ.get('DNS_CACHE', 'true').lower() in ('1', 'true', 'yes', 'on')
 DNS_CACHE_MAX_TTL = int(os.environ.get('DNS_CACHE_MAX_TTL', '300'))  # seconds, upper bound for positive answers
 DNS_CACHE_NEG_TTL = int(os.environ.get('DNS_CACHE_NEG_TTL', '60'))  # NXDOMAIN / empty answers

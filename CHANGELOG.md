@@ -57,6 +57,7 @@
   - Proxy, ad-block lists: a hiding selector with `{`, `}` or `/*` is skipped (it could add its own CSS to every inspected page and read what is typed); lists already stored are filtered when loaded.
   - DHCP names: a DHCPv6 client could take any name (the Client FQDN was not checked): the name of another host, answered next to its `A` with a matching `PTR`, or `wpad`. A name is refused, in DHCPv4 and DHCPv6, when it is reserved or held by another device's lease (either family) or by an enabled reservation of another MAC. DHCPv6 temporary addresses (IA_TA) respect the reservations too.
   - DNSSEC: a negative answer is never authenticated (AD) from a signed SOA alone (NSEC/NSEC3 denial is not checked); an RRset is secure when one of its signatures verifies (a rollover or an Ed448 signature next to a good one gave SERVFAIL); only unsupported algorithms or digests make it insecure, not bogus.
+  - MFA: a code with non-ASCII characters gave error 500 instead of counting as a wrong attempt. Without Redis the memory cache keeps 100,000 entries (was 300: the geo and stats pages pushed out wrong-password counters and used-ticket marks).
   - DHCP reservations export: a note starting with `=`, `+`, `-`, `@` is written with a leading `'` (spreadsheet formula injection); the import removes it again.
 - **Changed** (proxy)
   - `runproxy` is asynchronous (asyncio, one event loop): a connection no longer holds a thread, so the 512-connection ceiling is gone (256 per client address, 8192 in all). Settings, filters, the CA and HTML filtering run on 16 worker threads, name lookups on 32. HTTP/1.1 towards the client is parsed by h11 (framing, chunked bodies, `100 Continue`; requests with an unknown `Transfer-Encoding` get 501). **Upgrading:** `pip install -r requirements.txt` (new: `h11`, `h2`, `httpcore`, `anyio`), then restart `runproxy`.
@@ -78,6 +79,7 @@
 - **Fixed** (DNS, DHCP, sign-in, logs, GUI)
   - DNS: the TCP retry to the upstream looped forever at full CPU when the upstream closed in the middle of an answer, and had no overall deadline. Big answers over UDP were cut at 8 KB; an answer dnslib cannot read no longer marks the upstream down; a truncated (TC) answer keeps its question, so clients retry over TCP; clients without DO get no RRSIG/NSEC; negative answers are cached for the SOA TTL / minimum (RFC 2308), at most `DNS_CACHE_NEG_TTL`.
   - DNS UPDATE: deleting a name or an RRset at the apex leaves the zone's NS records, and the last NS is kept; a value-dependent prerequisite needs the exact RRset (RFC 2136 §3.2.3). A bad `DNS_DDR` makes `rundns` refuse to start instead of leaving every query unanswered.
+  - Sign-in with `MFA_REQUIRED=true`: a new user who set up the first factor got "Sign-in session expired" and could not finish. A JSON array as body, a ticket or passkey name that is not text: 400 instead of 500. A regex blacklist entry with the name of a public-list domain gave 500.
   - DHCP: a client whose DUID holds no MAC started one `ip -6 neigh` per IA (up to 16 per packet), now one per message; the network and broadcast addresses can no longer be reserved.
 
 ## 1.1.0 — 2026-11-14

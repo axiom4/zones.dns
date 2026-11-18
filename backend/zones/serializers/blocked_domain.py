@@ -111,10 +111,9 @@ class BlockedDomainSerializer(serializers.ModelSerializer):
         return v
 
     def save(self, **kw):
-        # the same name in a public list gives way to the personal entry (the next import skips it)
+        # the same name in a public list gives way to the personal entry, a pattern too (name is unique; the next import skips it)
         name = self.validated_data.get('name')
-        regex = self.validated_data.get('regex', getattr(self.instance, 'regex', False))
-        if name and not regex and BlockedDomain.objects.filter(name=name, source='list').delete()[0]:
+        if name and BlockedDomain.objects.filter(name=name, source='list').delete()[0]:
             try:
                 cache.delete(COUNTS_KEY)
             except Exception:
