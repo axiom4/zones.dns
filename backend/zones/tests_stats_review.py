@@ -29,11 +29,12 @@ class AuditHardeningTests(SimpleTestCase):
             def sendall(self, data):
                 pass
 
+            def settimeout(self, t):
+                pass
+
             def recv(self, n):
                 return self.parts.pop(0) if self.parts else b''
         with mock.patch('socket.create_connection', return_value=Sock()):
-            with self.assertRaises(OSError):
-                audit._tcp_send(b'q', '192.0.2.1', 53)
             self.assertIsNone(audit.dns_query('example.com', 'AXFR', server='192.0.2.1', tcp=True))
 
     def test_bad_location_ends_the_chain_instead_of_failing(self):

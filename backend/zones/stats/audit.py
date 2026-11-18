@@ -83,28 +83,14 @@ def dns_query(name, qtype, server=None, tcp=False):
         else:  # the upstream may carry a port (127.0.0.1:5335, [::1]:5335): sent as the host name, every lookup of the audit and of the map failed
             from ..dnsd.resolver import Resolver
             host, port, v6 = Resolver._upstream_addr(settings.UPSTREAMS[0])
+        from ..dnsd.resolver import _tcp_exchange  # not dnslib's send(tcp=True): it loops forever when the server closes early
         q = DNSRecord.question(name, qtype)
-        reply = DNSRecord.parse(_tcp_send(q.pack(), host, port) if tcp else q.send(host, port, timeout=TIMEOUT, ipv6=v6))
+        reply = DNSRecord.parse(_tcp_exchange(q.pack(), host, port, 3 * TIMEOUT) if tcp else q.send(host, port, timeout=TIMEOUT, ipv6=v6))
         if reply.header.tc and not tcp:
             return dns_query(name, qtype, server, tcp=True)
         return reply
     except Exception:
         return None
-
-
-def _tcp_send(data, host, port):
-    """One DNS message over TCP. Not dnslib's send: it loops forever when the server closes before the length it announced, and has no
-    deadline (a server sending a byte now and then held the audit for hours)."""
-    deadline = time.monotonic() + 3 * TIMEOUT
-    with socket.create_connection((host, port), timeout=TIMEOUT) as s:
-        s.sendall(len(data).to_bytes(2, 'big') + data)
-        buf = b''
-        while len(buf) < 2 or len(buf) < 2 + int.from_bytes(buf[:2], 'big'):
-            chunk = s.recv(65537)
-            if not chunk or time.monotonic() > deadline:
-                raise OSError('incomplete DNS answer over TCP')
-            buf += chunk
-    return buf[2:2 + int.from_bytes(buf[:2], 'big')]
 
 
 def dns_rdata(name, qtype, server=None):
