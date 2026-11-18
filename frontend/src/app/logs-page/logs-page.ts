@@ -10,6 +10,7 @@ import { Autocomplete } from '../lib/autocomplete';
 import { countryName, flag } from '../lib/geo-util';
 import { byIp } from '../lib/ip';
 import { StepUp } from '../services/step-up';
+import { Period } from '../services/period';
 import { Ui } from '../services/ui';
 
 const PAGE = 50;
@@ -33,6 +34,7 @@ export class LogsPage implements OnDestroy {
   ui = inject(Ui);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private periodStore = inject(Period);
   private pg = viewChild.required<ElementRef<HTMLDialogElement>>('pg');
   PAGE = PAGE;
   types = ['A', 'AAAA', 'CNAME', 'MX', 'NS', 'PTR', 'SOA', 'SRV', 'TXT', 'HTTPS'];
@@ -96,7 +98,7 @@ export class LogsPage implements OnDestroy {
     this.outcome = ['local', 'forwarded', 'blocked', 'error'].includes(s('outcome')) ? s('outcome') : '';
     this.rcode = ['NOERROR', 'NXDOMAIN', 'SERVFAIL', 'REFUSED'].includes(s('rcode')) ? s('rcode') : '';
     this.country = s('country').toUpperCase(); this.asn = s('asn').toUpperCase();
-    this.hours = p.has('hours') && [0, 1, 24, 168, 720].includes(Number(s('hours'))) ? Number(s('hours')) : 24;
+    this.hours = p.has('hours') && [0, 1, 24, 168, 720].includes(Number(s('hours'))) ? Number(s('hours')) : this.periodStore.pick([0, 1, 24, 168, 720]);
     this.grouped = s('group') === '1'; this.ordering = s('order') === 'count' ? 'count' : 'last';
     const key = JSON.stringify(this.params());
     if (key === this.shown) return;
@@ -105,6 +107,7 @@ export class LogsPage implements OnDestroy {
 
   /** A filter was changed on the page: write it to the URL (replacing the entry, so Back leaves the log) and reload. */
   changed() {
+    this.periodStore.remember(this.hours);
     clearTimeout(this.timer);
     this.shown = JSON.stringify(this.params());
     this.router.navigate([], { queryParams: this.params(), replaceUrl: true });

@@ -5,6 +5,7 @@ import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, statsRetrieve } from '../api/functions';
 import { Stats } from '../api/models';
+import { Period } from '../services/period';
 import { Ui } from '../services/ui';
 
 const hm = (d: Date) => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -65,6 +66,7 @@ export class StatsPage {
   });
 
   private router = inject(Router);
+  private periodStore = inject(Period);
   private destroyRef = inject(DestroyRef);
   /** Totals of the window just before the shown one, null while unknown or when it cannot be told (30 days: the API reaches back 720 hours only). */
   prev = signal<{ total: number; blocked: number; error: number; avg: number } | null>(null);
@@ -83,12 +85,13 @@ export class StatsPage {
     this.destroyRef.onDestroy(() => clearInterval(this.timer));
     this.arm();
     const p = inject(ActivatedRoute).snapshot.queryParamMap; // ?hours=168&source=dns: a reload or a shared link keeps the view
-    if ([1, 24, 168, 720].includes(Number(p.get('hours')))) this.hours = Number(p.get('hours'));
+    this.hours = [1, 24, 168, 720].includes(Number(p.get('hours'))) ? Number(p.get('hours')) : this.periodStore.pick([1, 24, 168, 720]); // else the period last chosen anywhere
     if (p.get('source') === 'dns' || p.get('source') === 'proxy') this.source = p.get('source') as 'dns' | 'proxy';
     this.load();
   }
   /** The period or the source was changed: keep it in the URL, then load. */
   changed() {
+    this.periodStore.remember(this.hours);
     this.router.navigate([], { queryParams: { hours: this.hours !== 24 ? this.hours : null, source: this.source !== 'all' ? this.source : null }, replaceUrl: true });
     this.load();
   }
@@ -167,7 +170,8 @@ export class StatsPage {
   /** Share of all queries that were blocked, one decimal. */
   rate = computed(() => { const st = this.stats(); return st?.total ? Math.round((this.outcome('blocked') / st.total) * 1000) / 10 : 0; });
   /** The log window for the chosen period (the log takes the same hours). */
-  logQ(extra: { [k: string]: string } = {}) { return { ...(this.hours !== 24 ? { hours: this.hours } : {}), ...extra }; }
+  /** Always carries the period: a page opened without one takes the period remembered, which may be another. */
+  logQ(extra: { [k: string]: string } = {}) { return { hours: this.hours, ...extra }; }
   /** Where a figure is listed: the DNS log, or the proxy log for proxy-only counts (it has no URL filters yet). */
   logPath() { return this.source === 'proxy' ? '/logs/proxy' : '/logs/dns'; }
   isDnsType(t: string) { return /^[A-Z0-9]+$/.test(t) && !['GET', 'POST', 'PUT', 'HEAD', 'DELETE', 'PATCH', 'OPTIONS', 'CONNECT'].includes(t); }

@@ -7,6 +7,7 @@ import { geoDestinationsRetrieve } from '../api/functions';
 import { Destinations } from '../api/models';
 import { GeoMap } from '../geo-map/geo-map';
 import { countryName, flag } from '../lib/geo-util';
+import { Period } from '../services/period';
 import { Ui } from '../services/ui';
 
 @Component({
@@ -32,12 +33,14 @@ export class GeoPage implements OnDestroy {
   private retries = 0;
 
   private router = inject(Router);
+  private periodStore = inject(Period);
   constructor() {
     const h = Number(inject(ActivatedRoute).snapshot.queryParamMap.get('hours')); // ?hours=168: a reload or a shared link keeps the period
-    if ([1, 24, 168, 720].includes(h)) this.hours = h;
+    this.hours = [1, 24, 168, 720].includes(h) ? h : this.periodStore.pick([1, 24, 168, 720]); // else the period last chosen anywhere
     this.load();
   }
   changed() {
+    this.periodStore.remember(this.hours);
     this.router.navigate([], { queryParams: { hours: this.hours !== 24 ? this.hours : null }, replaceUrl: true });
     this.load();
   }

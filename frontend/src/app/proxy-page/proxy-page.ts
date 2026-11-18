@@ -27,6 +27,7 @@ import { blockLayer } from '../lib/proxy-reason';
 import { fieldErrors } from '../lib/error-text';
 import { SettingField, SettingsFields, changed } from '../dhcp-page/settings-fields';
 import { StepUp } from '../services/step-up';
+import { Period } from '../services/period';
 import { Ui, saveFile } from '../services/ui';
 
 const SERVER: SettingField[] = [
@@ -125,20 +126,21 @@ export class ProxyPage implements OnDestroy {
 
   private route = inject(ActivatedRoute);
   private router = inject(Router);
+  private periodStore = inject(Period);
 
   constructor() {
     this.load();
     this.loadClients();
     // the log filters live in the address (?outcome=&q=&client=&hours=): links from Statistics land filtered, Back and reload keep them
     this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(p => {
-      const o = p.get('outcome') ?? '', h = Number(p.get('hours') ?? 24);
+      const o = p.get('outcome') ?? '', hp = p.get('hours'), h = hp === '0' ? 720 : Number(hp); // 0 (all) is the longest window here
       this.logOutcome = (['allowed', 'filtered', 'blocked', 'error', 'timeout'].includes(o) ? o : '') as typeof this.logOutcome;
       this.logQ = p.get('q') ?? '';
       this.logDetail = p.get('detail') ?? '';
       this.logMethod = p.get('method') ?? '';
       this.logStatus = /^([1-5]\d\d|[1-5]xx)$/.test(p.get('status') ?? '') ? p.get('status')! : '';
       this.logClient = p.get('client') ?? '';
-      this.logHours = [1, 24, 168, 0].includes(h) ? h : 24;
+      this.logHours = hp !== null && [1, 24, 168, 720].includes(h) ? h : this.periodStore.pick([1, 24, 168, 720]);
       if (this.mode() === 'logs') this.loadLogs();
     });
     effect(() => {
@@ -202,6 +204,7 @@ export class ProxyPage implements OnDestroy {
   }
   /** Puts the filters in the address (only those not at their default); the query-parameter subscription then loads the log. */
   filtersChanged() {
+    this.periodStore.remember(this.logHours);
     const queryParams = {
       outcome: this.logOutcome || null, q: this.logQ.trim() || null, detail: this.logDetail.trim() || null, method: this.logMethod || null, status: this.logStatus || null,
       client: this.logClient.trim() || null, hours: this.logHours === 24 ? null : this.logHours,

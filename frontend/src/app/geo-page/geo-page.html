@@ -69,7 +69,7 @@
             }
             <p class="soft">Most requested domains</p>
             <div class="chips">@for (n of c.top_domains; track n) { <a class="chip-a link" routerLink="/audit" [queryParams]="{ domain: n }" title="Analyse the domain">{{ n }}</a> }</div>
-            <a class="ghost" routerLink="/logs/dns" [queryParams]="hours === 24 ? { country: c.country } : { country: c.country, hours }">Show these queries in the log</a>
+            <a class="ghost" routerLink="/logs/dns" [queryParams]="{ country: c.country, hours }">Show these queries in the log</a>
             @if (c.asns.length) {
               <p class="soft">Networks</p>
               <div class="chips">@for (a of c.asns; track a) { <span class="chip-a">{{ a }}</span> }</div>
@@ -90,7 +90,7 @@
         <thead><tr><th>Network</th><th>Name</th><th>Country</th><th>Queries</th><th class="ips">Addresses</th><th><span class="sr-only">Log</span></th></tr></thead>
         <tbody>
           @for (n of d.networks; track n.asn) {
-            <tr><td class="mono">{{ n.asn }}</td><td>{{ n.as_name }}</td><td><span aria-hidden="true">{{ flag(n.country) }}</span> {{ name(n.country) }}</td><td>{{ n.queries | number }} <span class="soft">({{ share(n.queries) }}%)</span></td><td class="ips">{{ n.ips | number }}</td><td><a class="mini" routerLink="/logs/dns" [queryParams]="hours === 24 ? { asn: n.asn } : { asn: n.asn, hours }" [attr.aria-label]="'Show the queries to ' + n.asn + ' in the log'">Log</a></td></tr>
+            <tr><td class="mono">{{ n.asn }}</td><td>{{ n.as_name }}</td><td><span aria-hidden="true">{{ flag(n.country) }}</span> {{ name(n.country) }}</td><td>{{ n.queries | number }} <span class="soft">({{ share(n.queries) }}%)</span></td><td class="ips">{{ n.ips | number }}</td><td><a class="mini" routerLink="/logs/dns" [queryParams]="{ asn: n.asn, hours }" [attr.aria-label]="'Show the queries to ' + n.asn + ' in the log'">Log</a></td></tr>
           }
         </tbody>
       </table>

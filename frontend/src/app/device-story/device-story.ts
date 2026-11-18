@@ -17,6 +17,7 @@ import { blockedCreate, dhcpLeasesList, geoIpsRetrieve, logsClientsList, logsGro
 import { DhcpLease, DhcpPingResult, QueryLog, QueryLogGroup } from '../api/models';
 import { countryName, flag } from '../lib/geo-util';
 import { Ping } from '../services/ping';
+import { Period } from '../services/period';
 import { Ui } from '../services/ui';
 
 type Range = 24 | 168;
@@ -47,7 +48,8 @@ export class DeviceStoryPage implements OnDestroy {
   param = signal('');
   ip = signal('');
   host = signal('');
-  range = signal<Range>(24);
+  private periodStore = inject(Period);
+  range = signal<Range>(this.periodStore.pick([24, 168]) as Range);
   lease = signal<DhcpLease | null>(null);
   vendor = computed(() => this.lease()?.vendor || '');
   pingRes = signal<DhcpPingResult | null>(null);
@@ -92,7 +94,7 @@ export class DeviceStoryPage implements OnDestroy {
   }
   ngOnDestroy() { this.gen++; }
 
-  setRange(r: Range) { if (r !== this.range()) { this.range.set(r); this.sel.set(-1); this.loadRange(this.gen); } }
+  setRange(r: Range) { if (r !== this.range()) { this.periodStore.remember(r); this.range.set(r); this.sel.set(-1); this.loadRange(this.gen); } }
 
   async load() {
     const g = ++this.gen;
