@@ -9,7 +9,7 @@ User=dns
 Group=dns
 WorkingDirectory=/opt/dns/app/backend
 ExecStart=/opt/dns/.venv/bin/gunicorn dnsadmin.wsgi -b 127.0.0.1:8000 --workers 1 --threads 16 --access-logfile - --control-socket /run/dns-web/gunicorn.ctl
-Restart=on-failure
+Restart=always
 RestartSec=3
 LimitNOFILE=65536
 # gunicorn's control socket lives in /run/dns-web.
