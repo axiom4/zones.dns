@@ -137,3 +137,37 @@ class ApiTests(TestCase):
         c.force_authenticate(get_user_model().objects.create_user('u', password='x'))
         self.assertEqual(c.get('/api/blocked/sources/').status_code, 403)
         self.assertEqual(c.post('/api/blocked/sources/sync/').status_code, 403)
+
+
+class SafeFetchTests(TestCase):
+    def _fetch(self, url, answers):
+        from zones import safefetch
+        with mock.patch('socket.getaddrinfo', side_effect=lambda h, *a, **k: [(2, 1, 6, '', (answers[h], 443))]), \
+                mock.patch.object(safefetch, '_Conn') as conn:
+            conn.return_value.getresponse.return_value.status = 302
+            conn.return_value.getresponse.return_value.getheader.return_value = 'http://evil.example/x'
+            return safefetch.fetch(url)
+
+    def test_plain_http_url_is_refused(self):
+        with self.assertRaisesMessage(OSError, 'only https'):
+            self._fetch('http://a.example/l', {})
+
+    def test_redirect_to_http_is_refused(self):
+        with self.assertRaisesMessage(OSError, 'only https'):
+            self._fetch('https://a.example/l', {'a.example': '93.184.216.34'})
+
+    def test_private_and_loopback_addresses_are_refused(self):
+        for ip in ('127.0.0.1', '10.0.0.5', '169.254.169.254'):
+            with self.assertRaisesMessage(OSError, 'address not allowed'):
+                self._fetch('https://a.example/l', {'a.example': ip})
+        with self.assertRaisesMessage(OSError, 'address not allowed'):
+            self._fetch('https://127.0.0.1/l', {'127.0.0.1': '127.0.0.1'})
+
+    def test_redirect_to_loopback_is_refused(self):
+        from zones import safefetch
+        with mock.patch('socket.getaddrinfo', side_effect=lambda h, *a, **k: [(2, 1, 6, '', ('93.184.216.34' if h == 'a.example' else '127.0.0.1', 443))]), \
+                mock.patch.object(safefetch, '_Conn') as conn:
+            conn.return_value.getresponse.return_value.status = 302
+            conn.return_value.getresponse.return_value.getheader.return_value = 'https://internal.example/x'
+            with self.assertRaisesMessage(OSError, 'address not allowed'):
+                safefetch.fetch('https://a.example/l')

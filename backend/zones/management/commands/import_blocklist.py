@@ -1,11 +1,11 @@
-import urllib.request
+import http.client
 
 from django.conf import settings
 from django.core.cache import cache
 from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 
-from zones import blocklists
+from zones import blocklists, safefetch
 from zones.blocklists import parse, split_source  # noqa: F401  (split_source: imported from here by older code and tests)
 from zones.models import COUNTS_KEY, BlockedDomain, DataVersion
 from zones.proxy import rules
@@ -13,12 +13,7 @@ from zones.proxy import rules
 
 def download(source):
     if source.startswith(('http://', 'https://')):
-        req = urllib.request.Request(source, headers={'User-Agent': 'zones-dns/1.0'})
-        with urllib.request.urlopen(req, timeout=60) as r:
-            raw = r.read(50_000_001)
-        if len(raw) > 50_000_000:
-            raise OSError('response exceeds 50 MB limit')
-        return raw.decode('utf-8', 'replace')
+        return safefetch.fetch(source)
     with open(source, encoding='utf-8', errors='replace') as f:
         return f.read()
 
@@ -67,7 +62,7 @@ class Command(BaseCommand):
                     raise ValueError('no domains found')
                 row.update(synced=row['tried'], domains=len(found))
                 self.stdout.write(f'{label}: {len(found)} domains')
-            except (OSError, ValueError) as e:
+            except (OSError, ValueError, http.client.HTTPException) as e:
                 # the list keeps what it had: its old entries are taken as if downloaded again
                 found = set(BlockedDomain.objects.filter(source='list', list_name=label).values_list('name', flat=True).iterator(chunk_size=50000))
                 row.update(error=str(e)[:300], domains=len(found))

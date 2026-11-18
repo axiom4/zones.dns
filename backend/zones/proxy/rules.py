@@ -4,16 +4,17 @@ Kept: `||domain^` (the domain and its subdomains are blocked), `@@||domain^` (ne
 Dropped: URL fragments, regular expressions and rules with options that need a browser (`$domain=`, `~third-party`...): they would be one regex per
 request for tens of thousands of rules. shortcut: domain and cosmetic rules only, add path rules when a real list needs them.
 """
+import http.client
 import json
 import re
 import threading
 import time
-import urllib.request
 from dataclasses import dataclass, field
 
 from django.db import DatabaseError
 from django.utils import timezone
 
+from .. import safefetch
 from ..models import DataVersion, Setting
 
 RULES = 'prl:'   # prl:<name> = the reduced rules, prm:<name> = what the last sync did (JSON)
@@ -91,14 +92,7 @@ def reduce(text):
 
 
 def fetch(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'zones-dns/1.0'})
-    with urllib.request.urlopen(req, timeout=60) as r:
-        if not r.geturl().startswith('https://'):
-            raise OSError('the list was redirected to plain http')  # urllib follows an https -> http redirect
-        raw = r.read(MAX_BYTES + 1)
-    if len(raw) > MAX_BYTES:
-        raise OSError('response exceeds 50 MB limit')
-    return raw.decode('utf-8', 'replace')
+    return safefetch.fetch(url, MAX_BYTES)
 
 
 def sync_all(lists_text=None, fetcher=None):
@@ -111,7 +105,7 @@ def sync_all(lists_text=None, fetcher=None):
             text, counts = reduce((fetcher or fetch)(url))
             Setting.objects.update_or_create(key=RULES + name, defaults={'value': text})
             meta = {'name': name, 'url': url, **counts, 'updated': timezone.now().isoformat(), 'error': ''}
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, http.client.HTTPException) as e:
             old = _meta(name)
             meta = {**old, 'name': name, 'url': url, 'error': str(e)[:300]}
             meta.setdefault('blocks', 0), meta.setdefault('allow', 0), meta.setdefault('cosmetic', 0), meta.setdefault('updated', None)
@@ -186,6 +180,8 @@ def loaded():
         return _cache['data']
     from .filter import run_on_db_pool  # filter imports this module
     with _lock:
+        if _cache['ver'] is not None and time.monotonic() - _cache['checked'] < 2.0:
+            return _cache['data']  # another thread refreshed it while this one waited
         try:
             ver, rows = run_on_db_pool(_read, _cache['ver'])
         except DatabaseError:
