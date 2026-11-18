@@ -9,13 +9,14 @@ from ..models import QueryLog
 class QueryLogAdmin(admin.ModelAdmin):
     """Read-only: the daemon writes the log. Deleting (e.g. old rows) is allowed."""
     list_display = ['time', 'name', 'type', 'outcome', 'rcode', 'via', 'client', 'ms']
-    list_filter = ['outcome', 'type', 'rcode']
+    list_filter = ['outcome', 'type']
     search_fields = ['name', 'domain', 'client', 'via']
-    date_hierarchy = 'time'
     list_per_page = 100
     show_full_result_count = False
     fields = ['time', 'name', 'domain', 'type', 'outcome', 'rcode', 'via', 'client', 'ms', 'answers_pretty']
     readonly_fields = fields
+
+    actions = None  # the bulk delete would also leave the counters (rollup) behind: purge from the GUI / API
 
     def has_add_permission(self, request):
         return False

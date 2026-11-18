@@ -61,7 +61,10 @@ MAX_HOURS = 24 * 3660  # ten years: more made timedelta overflow (error 500)
 def hours_of(p):
     """The hours filter as a number; 0 = not given, 0 or not a number: the whole log."""
     h = p.get('hours', '')
-    return min(int(h), MAX_HOURS) if h.isascii() and h.isdigit() else 0
+    v = min(int(h), MAX_HOURS) if h.isascii() and h.isdigit() else 0
+    if p.get('q') or p.get('answer'):  # substring scans (no index): never over the whole log
+        v = min(v or 720, 720)
+    return v
 
 
 def after_row(qs, before):
@@ -258,7 +261,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         elif (denied := need_grant(request, scope='log-purge')) is not None:  # the history is the evidence of what happened: not erased with a stolen token alone
             return denied
         else:
-            count, _ = qs.delete()
+            count = rollup.delete_chunked(qs)
             rollup.purge(timezone.now() - timedelta(hours=hours) if hours else None)
         return Response({'count': count, 'dry_run': dry})
 

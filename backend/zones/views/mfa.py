@@ -57,6 +57,7 @@ def totp_verify(d, auth):
     dev = TotpDevice.objects.filter(user=user, confirmed=True).first()
     if not dev or not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
+    mfa.ok(user)
     _login_user(d, auth, consume=True)
     return {'token': mfa.token_for(user)}
 
@@ -73,6 +74,7 @@ def passkey_verify(d, auth):
     mfa.guard(user)
     if not mfa.check_passkey(user, d.get('credential')):
         mfa.fail(user)
+    mfa.ok(user)
     _login_user(d, auth, consume=True)
     return {'token': mfa.token_for(user)}
 
@@ -93,6 +95,7 @@ def stepup_totp(d, auth):
     dev = TotpDevice.objects.filter(user=user, confirmed=True).first()
     if not dev or not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
+    mfa.ok(user)
     return {'grant': mfa.make_grant(user, scope)}
 
 
@@ -111,6 +114,7 @@ def stepup_passkey_verify(d, auth):
     cache.delete(f'webauthn-stepup-scope:{user.pk}')
     if expected_scope != scope or not mfa.check_passkey(user, d.get('credential')):
         mfa.fail(user)
+    mfa.ok(user)
     return {'grant': mfa.make_grant(user, scope)}
 
 
@@ -134,6 +138,7 @@ def totp_confirm(d, auth):
     dev = TotpDevice(user=user, secret=secret, confirmed=True)
     if not mfa.check_totp(dev, str(d.get('code', ''))):
         mfa.fail(user)
+    mfa.ok(user)
     _confirm_change(d, auth, user)
 
     def save():

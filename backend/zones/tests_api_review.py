@@ -103,3 +103,30 @@ class TokenCookieTests(TestCase):
         self.c.cookies['dns_token'] = 'stale'
         self.assertEqual(self.c.get('/api/zones/').status_code, 401)
         self._login()
+
+
+class ReviewFixesTests(TestCase):
+    def test_client_ip_trusts_header_only_from_trusted_proxy(self):
+        from django.test import RequestFactory
+        from .views.token import client_ip
+        with override_settings(BEHIND_PROXY=True):
+            self.assertEqual(client_ip(RequestFactory().get('/', REMOTE_ADDR='198.51.100.9', HTTP_X_REAL_IP='1.2.3.4')), '198.51.100.9')
+            self.assertEqual(client_ip(RequestFactory().get('/', REMOTE_ADDR='127.0.0.1', HTTP_X_REAL_IP='1.2.3.4')), '1.2.3.4')
+
+    def test_delete_chunked(self):
+        from .models import QueryLog
+        from .stats import rollup
+        QueryLog.objects.bulk_create([QueryLog(name='a', type='A', outcome='local', client='c', ms=1) for _ in range(5)])
+        self.assertEqual(rollup.delete_chunked(QueryLog.objects.all(), size=2), 5)
+        self.assertFalse(QueryLog.objects.exists())
+
+    def test_zone_rename_needs_grant_and_is_case_unique(self):
+        from django.contrib.auth import get_user_model
+        from rest_framework.test import APIClient
+        from .models import Zone
+        Zone.objects.create(name='a.lan')
+        z = Zone.objects.create(name='b.lan')
+        c = APIClient()
+        c.force_authenticate(get_user_model().objects.create_user('u', password='x', is_staff=True))
+        self.assertEqual(c.patch(f'/api/zones/{z.pk}/', {'name': 'A.LAN'}, format='json').status_code, 400)
+        self.assertEqual(c.patch(f'/api/zones/{z.pk}/', {'name': 'c.lan'}, format='json').status_code, 200)

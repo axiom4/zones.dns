@@ -101,6 +101,9 @@ DNS_WORKERS = int(os.environ.get('DNS_WORKERS', '16'))  # threads answering quer
 DATABASES = {
     'default': dj_database_url.config(default=f'sqlite:///{BASE_DIR / "db.sqlite3"}', conn_max_age=DB_CONN_MAX_AGE, conn_health_checks=True),
 }
+if DATABASES['default']['ENGINE'].endswith('sqlite3'):
+    # writers (API, daemons, proxy) share the file: wait for the lock, take it at BEGIN, WAL lets readers go on meanwhile
+    DATABASES['default']['OPTIONS'] = {'timeout': 20, 'transaction_mode': 'IMMEDIATE', 'init_command': 'PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;'}
 
 
 # Password validation
@@ -144,6 +147,8 @@ STATIC_ROOT = BASE_DIR / 'staticfiles'  # python manage.py collectstatic: served
 
 # Behind nginx with https (deploy/nginx). Only turn on when every request really comes through the proxy: the forwarded header is trusted.
 BEHIND_PROXY = os.environ.get('BEHIND_PROXY', 'false').lower() in ('1', 'true', 'yes', 'on')
+# Peers (REMOTE_ADDR) whose X-Real-IP / X-Forwarded-For are believed when BEHIND_PROXY is on: comma separated, default this machine.
+TRUSTED_PROXIES = [a.strip() for a in os.environ.get('TRUSTED_PROXIES', '127.0.0.1,::1').split(',') if a.strip()]
 if BEHIND_PROXY:
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = CSRF_COOKIE_SECURE = True
@@ -172,6 +177,7 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': ['zones.security.authentication.ExpiringTokenAuthentication', 'zones.security.authentication.CookieTokenAuthentication'],
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAdminUser'],
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
+    'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 

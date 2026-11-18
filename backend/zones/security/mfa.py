@@ -70,17 +70,34 @@ def read_ticket(ticket, kind, consume=False):
     return user
 
 
-def guard(user):
-    if cache.get(f'mfa-fail:{user.pk}', 0) >= MAX_FAILS:
+def _bump(key, limit):
+    """Count an attempt before it is verified (atomic, so parallel guesses cannot all pass the check); locked when over the limit."""
+    cache.add(key, 0, 300)
+    try:
+        n = cache.incr(key)
+    except ValueError:
+        return  # the counter expired between add() and incr(): the attempt just is not counted
+    if n > limit:
         raise MfaError('locked')
 
 
-def fail(user):
-    cache.add(f'mfa-fail:{user.pk}', 0, 300)
+def _undo(key):
     try:
-        cache.incr(f'mfa-fail:{user.pk}')
+        cache.decr(key)
     except ValueError:
-        pass  # the counter expired between add() and incr(): the attempt just is not counted
+        pass
+
+
+def guard(user):
+    """Counts this attempt as a failure; call ok(user) when the code was right."""
+    _bump(f'mfa-fail:{user.pk}', MAX_FAILS)
+
+
+def ok(user):
+    _undo(f'mfa-fail:{user.pk}')
+
+
+def fail(user):
     raise MfaError('wrong_code')
 
 
@@ -95,18 +112,25 @@ def _login_keys(uname, ip):
 
 
 def login_guard(uname, ip):
+    """Counts this sign-in as a failure; call login_ok when the password was right."""
+    done = []
     for key, limit in _login_keys(uname, ip):
-        if cache.get(f'login-fail:{key}', 0) >= limit:
-            raise MfaError('locked')
+        try:
+            _bump(f'login-fail:{key}', limit)
+        except MfaError:
+            for k in done:
+                _undo(k)
+            raise
+        done.append(f'login-fail:{key}')
+
+
+def login_ok(uname, ip):
+    for key, _ in _login_keys(uname, ip)[1:]:  # never the per-address counter: one's own valid sign-in must not pay back guesses at other users (password spraying)
+        _undo(f'login-fail:{key}')
 
 
 def login_fail(uname, ip):
-    for key, _ in _login_keys(uname, ip):
-        cache.add(f'login-fail:{key}', 0, 300)
-        try:
-            cache.incr(f'login-fail:{key}')
-        except ValueError:
-            pass
+    pass  # already counted by login_guard
 
 
 # ---- step-up: a logged-in user proves a factor again for one dangerous action (e.g. deleting a zone)

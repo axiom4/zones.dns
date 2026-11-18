@@ -1,5 +1,6 @@
 import ipaddress
 
+from django.db import transaction
 from django.http import Http404
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema
@@ -131,13 +132,14 @@ class DhcpSettingsView(APIView):
                 ra.RaConfig.from_settings(cand, [], False)
         except ValueError as e:
             raise serializers.ValidationError({'detail': str(e)})
-        for name, val in ser.validated_data.items():
-            Setting.objects.update_or_create(
-                key=f'dhcp:{name}',
-                defaults={'value': ('true' if val else 'false') if isinstance(val, bool) else str(val)},
-            )
-        if ser.validated_data:
-            DataVersion.bump()
+        with transaction.atomic():
+            for name, val in ser.validated_data.items():
+                Setting.objects.update_or_create(
+                    key=f'dhcp:{name}',
+                    defaults={'value': ('true' if val else 'false') if isinstance(val, bool) else str(val)},
+                )
+            if ser.validated_data:
+                DataVersion.bump()
         return Response(DhcpSettingsSerializer(self._serialize(cand)).data)
 
 

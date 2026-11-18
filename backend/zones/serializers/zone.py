@@ -23,6 +23,8 @@ class ZoneSerializer(serializers.ModelSerializer):
         v = v.strip().strip('.').lower()
         if not HOST_RE.match(v):
             raise serializers.ValidationError('Invalid zone name.')
+        if Zone.objects.filter(name=v).exclude(pk=getattr(self.instance, 'pk', None)).exists():  # checked on the lowercased name: the field's own check saw the raw one
+            raise serializers.ValidationError('A zone with this name already exists.')
         return v
 
 

@@ -85,6 +85,14 @@ def add(entries):
     _upsert(DomainStat, ['hour', 'domain'], ['n', 'local', 'forwarded', 'blocked', 'error', 'ms'], [(*k, *v) for k, v in doms.items()])
 
 
+def delete_chunked(qs, size=10000):
+    """Delete the rows of qs (unsliced) `size` ids per commit, so one huge DELETE does not hold the table's lock or fill the transaction log."""
+    total = 0
+    while ids := list(qs.values_list('pk', flat=True)[:size]):
+        total += qs.model.objects.filter(pk__in=ids).delete()[0]
+    return total
+
+
 def purge(cutoff=None):
     """Forget the counters older than cutoff (a datetime), or all of them."""
     if not cutoff:

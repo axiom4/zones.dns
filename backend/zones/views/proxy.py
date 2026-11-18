@@ -4,6 +4,7 @@ from urllib.parse import urlsplit
 
 from django.conf import settings
 from django.core.cache import cache
+from django.core.exceptions import DisallowedHost
 from django.db import transaction
 from django.db.models import Q
 from django.http import HttpResponse, HttpResponseForbidden, HttpResponseRedirect
@@ -33,6 +34,7 @@ from ..serializers import (
 )
 from ..serializers.proxy import ProxyAllowRequestSerializer, ProxyAllowSerializer, ProxyAllowUndoSerializer
 from ..serializers.static_host import HOST_RE
+from ..stats import rollup
 # The proxy settings are stored with the DHCP ones (Setting rows `dhcp:<NAME>`): one snapshot, one restart signal for rundhcp and runproxy.
 
 # Settings that send the clients' traffic somewhere else or open it to inspection: changing them needs a second-factor grant (scope proxy-change)
@@ -75,15 +77,16 @@ class ProxySettingsView(APIView):
                 raise ValueError('proxy settings: PROXY_PORT must be 1-65535')
         except ValueError as e:
             raise serializers.ValidationError({'detail': str(e)})
-        for name, val in ser.validated_data.items():
-            Setting.objects.update_or_create(
-                key=f'dhcp:{name}',
-                defaults={'value': ('true' if val else 'false') if isinstance(val, bool) else str(val)},
-            )
+        with transaction.atomic():
+            for name, val in ser.validated_data.items():
+                Setting.objects.update_or_create(
+                    key=f'dhcp:{name}',
+                    defaults={'value': ('true' if val else 'false') if isinstance(val, bool) else str(val)},
+                )
+            if ser.validated_data:
+                DataVersion.bump()
         if cand.PROXY_HTTPS_MITM:
             ca.ensure_ca()
-        if ser.validated_data:
-            DataVersion.bump()
         return Response(ProxySettingsSerializer(self._serialize(cand)).data)
 
 
@@ -254,7 +257,7 @@ class ProxyLogsView(APIView):
             OpenApiParameter('outcome', str, enum=['allowed', 'filtered', 'blocked', 'error'], description='Filter by outcome'),
             OpenApiParameter('client', str, description='Filter by client IP'),
             OpenApiParameter('method', str, description='Filter by HTTP/proxy method (GET, POST, CONNECT, MITM...)'),
-            OpenApiParameter('hours', int, description='Only the last N hours (0 = all)'),
+            OpenApiParameter('hours', int, description='Only the last N hours (default 24, max 720)'),
             OpenApiParameter('limit', int, description='Maximum rows returned (default 150, max 500)'),
         ],
         responses=ProxyLogsResponseSerializer,
@@ -265,8 +268,9 @@ class ProxyLogsView(APIView):
         qs = ProxyLog.objects.order_by('-time', '-id')
         hours_str = p.get('hours', '24').strip()
         hours = int(hours_str) if hours_str.isdigit() else 24
+        hours = min(hours, 720) or 720  # 0 (= all) made every filter scan the whole table: it means the longest window
         if hours > 0:
-            qs = qs.filter(time__gte=timezone.now() - timedelta(hours=min(hours, 24 * 365)))
+            qs = qs.filter(time__gte=timezone.now() - timedelta(hours=min(hours, 720)))
         clients = list(qs.order_by('client').values_list('client', flat=True).distinct()[:200])
         if q := p.get('q', '').strip().lower():
             qs = qs.filter(Q(host__icontains=q) | Q(url__icontains=q) | Q(reason__icontains=q))
@@ -305,8 +309,16 @@ class ProxyLogsPurgeView(APIView):
         elif (denied := need_grant(request, scope='log-purge')) is not None:
             return denied
         else:
-            deleted, _ = qs.delete()
+            deleted = rollup.delete_chunked(qs)
         return Response(ProxyLogPurgeResultSerializer({'deleted': deleted, 'dry_run': dry}).data)
+
+
+def _known_host(request):
+    """The Host header only when ALLOWED_HOSTS accepts it: the PAC / profile must not point clients at a host the sender chose."""
+    try:
+        return request.get_host()
+    except DisallowedHost:
+        return ''
 
 
 class WpadView(View):
@@ -316,7 +328,7 @@ class WpadView(View):
         if not ratelimit.allowed(client_ip(request)):  # behind nginx REMOTE_ADDR is always 127.0.0.1
             return HttpResponseForbidden('Forbidden')
         s = dhcp.dhcp_settings()
-        body = pac.build_pac(s, request_host=request.META.get('HTTP_HOST', ''))
+        body = pac.build_pac(s, request_host=_known_host(request))
         resp = HttpResponse(body, content_type='application/x-ns-proxy-autoconfig; charset=utf-8')
         resp['Cache-Control'] = 'no-cache'
         return resp
@@ -353,7 +365,7 @@ class ProxyMobileConfigView(View):
             return HttpResponseForbidden('Forbidden')
         s = dhcp.dhcp_settings()
         cert_pem, _, _, _ = ca.ensure_ca(refresh=True)
-        body = pac.build_mobileconfig(s, ca_cert_pem=cert_pem, request_host=request.META.get('HTTP_HOST', ''))
+        body = pac.build_mobileconfig(s, ca_cert_pem=cert_pem, request_host=_known_host(request))
         resp = HttpResponse(body, content_type='application/x-apple-aspen-config')
         resp['Content-Disposition'] = 'attachment; filename="zones-proxy.mobileconfig"'
         return resp

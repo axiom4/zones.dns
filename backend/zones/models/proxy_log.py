@@ -13,7 +13,7 @@ class ProxyLog(models.Model):
     time = models.DateTimeField(default=timezone.now, editable=False, db_index=True)
     client = models.CharField(max_length=45)
     method = models.CharField(max_length=12)
-    host = models.CharField(max_length=253, db_index=True)
+    host = models.CharField(max_length=253)
     url = models.CharField(max_length=500, blank=True, default='')
     outcome = models.CharField(max_length=12, choices=OUTCOMES)
     status = models.PositiveSmallIntegerField(default=200)

@@ -14,6 +14,7 @@ class StatCount(models.Model):
 
     class Meta:
         constraints = [models.UniqueConstraint(fields=['dim', 'hour', 'key'], name='unique_stat_count')]
+        indexes = [models.Index(fields=['hour'])]  # the purge and the hour ranges do not start with dim
 
 
 class GeoStat(models.Model):

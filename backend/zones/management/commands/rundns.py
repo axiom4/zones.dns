@@ -8,7 +8,7 @@ from django.db import close_old_connections
 from django.utils import timezone
 
 from zones.stats import partitions, rollup
-from zones.models import QueryLog
+from zones.models import ProxyLog, QueryLog
 from zones.dnsd import ddr
 from zones.dnsd.resolver import Resolver
 from dnslib.server import DNSServer
@@ -37,8 +37,9 @@ class Command(BaseCommand):
             self.stderr.write(f'Log partitions: {e}')
         try:
             cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
-            QueryLog.objects.filter(time__lt=cutoff).delete()
+            rollup.delete_chunked(QueryLog.objects.filter(time__lt=cutoff))
             rollup.purge(cutoff)
+            rollup.delete_chunked(ProxyLog.objects.filter(time__lt=cutoff))
         except Exception as e:
             self.stderr.write(f'Log purge: {e} (retried in an hour)')
 

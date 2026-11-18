@@ -485,7 +485,7 @@ class QueryLogCountTests(TestCase):
         api = APIClient()
         api.force_authenticate(get_user_model().objects.create_user('u', password='x', is_staff=True))
         cases = [('', 5), ('hours=1', 1), ('hours=2', 2), ('hours=24', 3), ('hours=720', 4), ('type=A', 4), ('client=10.0.0.2', 2), ('outcome=forwarded&hours=24', 1),
-                 ('type=aaaa', 1), ('q=a.example', 5)]  # the last one needs the log itself
+                 ('type=aaaa', 1), ('q=a.example', 4)]  # the last one needs the log itself, and is bounded to 720 h
         for query, expected in cases:
             with self.subTest(query):
                 self.assertEqual(api.get('/api/logs/?limit=1&' + query).json()['count'], expected)

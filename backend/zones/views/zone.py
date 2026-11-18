@@ -39,11 +39,12 @@ class ZoneViewSet(viewsets.ModelViewSet):
 
     @extend_schema(parameters=[GRANT])
     def update(self, request, *args, **kwargs):
-        """Switching a zone off stops serving it, like deleting it: the same proof of a second factor (scope zone-delete:<id>)."""
+        """Switching a zone off, or renaming it, stops serving it under its name, like deleting it: the same proof of a second factor (scope zone-delete:<id>)."""
         zone = self.get_object()
         peek = self.get_serializer(zone, data=request.data, partial=True)
         peek.is_valid(raise_exception=True)
-        if zone.enabled and peek.validated_data.get('enabled') is False and (denied := need_grant(request, zone.pk)) is not None:
+        vd = peek.validated_data
+        if (zone.enabled and vd.get('enabled') is False or vd.get('name', zone.name) != zone.name) and (denied := need_grant(request, zone.pk)) is not None:
             return denied
         return super().update(request, *args, **kwargs)
 

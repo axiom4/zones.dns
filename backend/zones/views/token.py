@@ -19,8 +19,8 @@ NOT_STAFF = 'User not enabled for the GUI: in the Django admin turn on "Staff st
 
 
 def client_ip(request):
-    """Real client IP for login rate limiting: trusts X-Real-IP / X-Forwarded-For only when BEHIND_PROXY=true."""
-    if settings.BEHIND_PROXY:
+    """Real client IP for login rate limiting: trusts X-Real-IP / X-Forwarded-For only when BEHIND_PROXY=true and the connection comes from TRUSTED_PROXIES."""
+    if settings.BEHIND_PROXY and request.META.get('REMOTE_ADDR', '') in settings.TRUSTED_PROXIES:
         real = request.META.get('HTTP_X_REAL_IP', '').strip()
         if real:
             return real[:64]
@@ -53,6 +53,7 @@ class TokenView(APIView):
         if user is None:
             mfa.login_fail(uname, ip)
             return Response({'detail': 'Wrong credentials.'}, status=400)
+        mfa.login_ok(uname, ip)
         if not user.is_staff:  # only someone who knows the password sees this
             return Response({'detail': NOT_STAFF}, status=400)
         body = mfa.login_result(user)
@@ -119,6 +120,7 @@ class EncryptedTokenView(EncryptedView):
         if user is None:
             mfa.login_fail(uname, ip)
             return {'error': 'Wrong credentials.'}, 401
+        mfa.login_ok(uname, ip)
         if not user.is_staff:
             return {'error': NOT_STAFF}, 403
         return mfa.login_result(user), 200

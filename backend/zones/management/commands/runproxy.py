@@ -17,6 +17,7 @@ from zones.proxy import ca, filter as pfilter, rules
 from zones.proxy.server import ProxyLogWriter, ProxyServer, cached_proxy_settings
 from zones.logfmt import stamp_output
 from zones import heartbeat
+from zones.stats import rollup
 
 BIND_KEYS = ('PROXY', 'PROXY_PORT', 'PROXY_ADDRESS')
 
@@ -97,9 +98,9 @@ class Command(BaseCommand):
                 threading.Thread(target=self.sync_rules, daemon=True).start()  # a download takes seconds: not on the event loop
                 try:
                     cutoff = timezone.now() - timedelta(days=settings.QUERY_LOG_DAYS)
-                    await asyncio.to_thread(pfilter.run_on_db_pool, lambda: ProxyLog.objects.filter(time__lt=cutoff).delete())
-                except Exception:
-                    pass
+                    await asyncio.to_thread(pfilter.run_on_db_pool, lambda: rollup.delete_chunked(ProxyLog.objects.filter(time__lt=cutoff)))
+                except Exception as e:
+                    print(f'Proxy: log purge failed: {e!r} (retried in an hour)', file=sys.stderr)
 
     @staticmethod
     def sync_rules():
