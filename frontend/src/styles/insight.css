@@ -65,8 +65,8 @@ app-logs-page .livepill .soft { background: var(--surface); border: 1px solid va
 
 /* ---- geolocation map: legend, hint and states ---- */
 app-geo-map .mapwrap { position: relative; }
-app-geo-map .maphint, app-geo-map .mapfail { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: .6rem; margin: 0; text-align: center; }
-app-geo-map .maphint { background: color-mix(in srgb, var(--ink) 55%, transparent); color: var(--surface); font-weight: 700; border-radius: var(--radius); pointer-events: none; }
+app-geo-map .mapfail { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: .6rem; margin: 0; text-align: center; }
+app-geo-map .maphint { position: absolute; right: .5rem; bottom: .5rem; margin: 0; padding: .25rem .6rem; background: color-mix(in srgb, var(--ink) 70%, transparent); color: var(--surface); font-size: 12px; font-weight: 600; border-radius: 999px; pointer-events: none; } /* a small note in the corner: it no longer covers the map while you scroll */
 app-geo-map .shades { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin-top: .6rem; font-size: 13px; color: var(--muted); }
 app-geo-map .ramp { display: inline-block; width: 8rem; height: .7rem; border-radius: 2px; border: 1px solid var(--line-soft);
   background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 35%, var(--brand-soft)), var(--brand)); }
