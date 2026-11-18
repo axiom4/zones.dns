@@ -188,8 +188,8 @@ class H2Connection:
     async def _serve(self, ex):
         try:
             await self.handle(ex)
-        except StreamGone:
-            pass
+        except (StreamGone, OSError, TimeoutError):
+            pass  # this stream's client went away or stopped reading: reset below (the task must not end with an exception nobody reads)
         finally:
             self.exchanges.pop(ex.stream_id, None)
             # body the handler never read (a blocked request, an early answer): its bytes go back to the connection window,

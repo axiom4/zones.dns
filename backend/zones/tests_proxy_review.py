@@ -153,3 +153,26 @@ class H2Tests(TestCase):
             await pipe.inbox.put(b'')
             await asyncio.wait_for(runner, 5)
         asyncio.run(main())
+
+
+class DbPoolTimeoutTests(TestCase):
+    """A database that does not answer: a DatabaseError (not TimeoutError, which drops the client's request unanswered), the blacklist lets through."""
+    def test_timeout_is_a_database_error_and_the_blacklist_fails_open(self):
+        from concurrent.futures import Future
+        from unittest import mock
+        from django.db import DatabaseError
+        from .dnsd import resolver
+        pending = []
+
+        def submit(*a, **k):
+            pending.append(Future())
+            return pending[-1]
+        with mock.patch.object(pfilter._db_pool, 'submit', side_effect=submit), \
+                mock.patch.object(type(pfilter.connection), 'in_atomic_block', False, create=True), \
+                mock.patch.object(resolver, '_data', None):
+            with self.assertRaises(DatabaseError):
+                pfilter.run_on_db_pool(len, 'x', timeout=0.01)
+            self.assertTrue(pending[-1].cancelled())  # not left in the queue
+            with mock.patch('zones.proxy.filter.run_on_db_pool', side_effect=DatabaseError('slow')):
+                self.assertIsNone(pfilter._check_domain_blocked('ads.example'))
+                self.assertEqual(rules.loaded(), rules._cache['data'])

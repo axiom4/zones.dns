@@ -1,5 +1,5 @@
 """Content, URL, and domain filtering for the HTTP/HTTPS proxy: ad blocking, cosmetic CSS, and popup/popunder blocking."""
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from functools import lru_cache
 import html
 import re
@@ -7,7 +7,7 @@ import threading
 import time
 from urllib.parse import urlparse
 
-from django.db import connection
+from django.db import DatabaseError, connection
 
 from ..dnsd import resolver
 from . import rules
@@ -15,7 +15,7 @@ from . import rules
 _db_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix='proxy-db')
 
 
-def run_on_db_pool(fn, *args, **kwargs):
+def run_on_db_pool(fn, *args, timeout=10, **kwargs):
     """Execute a DB-touching function on the dedicated 2-worker pool so persistent DB connections are reused and tunnel threads never touch PostgreSQL.
     The proxy's other threads then hold no database connection: the proxy uses 2 (plus 1 for its log writer), however busy it is."""
     if connection.in_atomic_block or threading.current_thread().name.startswith('proxy-db'):
@@ -25,7 +25,13 @@ def run_on_db_pool(fn, *args, **kwargs):
         resolver._db_check()
         return fn(*args, **kwargs)
 
-    return _db_pool.submit(_task).result(timeout=10)
+    fut = _db_pool.submit(_task)
+    try:
+        return fut.result(timeout=timeout)
+    except FutureTimeout:
+        # a DatabaseError, not a TimeoutError: that one means the client's connection, and the request was dropped without an answer
+        fut.cancel()  # still queued: it would only lengthen the queue
+        raise DatabaseError(f'the database did not answer within {timeout} s') from None
 
 
 def _check_domain_blocked(h):
@@ -35,7 +41,11 @@ def _check_domain_blocked(h):
             if h in resolver._blocked:
                 resolver._blocked.move_to_end(h)
                 return resolver._blocked[h]
-    return run_on_db_pool(resolver.blocked_entry, h)
+    try:
+        return run_on_db_pool(resolver.blocked_entry, h, timeout=3)
+    except DatabaseError:
+        resolver._db_away('the proxy lets through names it has not seen yet')
+        return None  # like the DNS daemon: unfiltered rather than no answer (and a work thread held 10 s per request)
 
 # Common ad-serving URL paths and query patterns
 AD_URL_RX = re.compile(

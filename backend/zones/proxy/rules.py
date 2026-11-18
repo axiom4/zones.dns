@@ -11,6 +11,7 @@ import time
 import urllib.request
 from dataclasses import dataclass, field
 
+from django.db import DatabaseError
 from django.utils import timezone
 
 from ..models import DataVersion, Setting
@@ -185,7 +186,11 @@ def loaded():
         return _cache['data']
     from .filter import run_on_db_pool  # filter imports this module
     with _lock:
-        ver, rows = run_on_db_pool(_read, _cache['ver'])
+        try:
+            ver, rows = run_on_db_pool(_read, _cache['ver'])
+        except DatabaseError:
+            _cache['checked'] = now  # database away: the rules loaded last keep working, looked at again in 2 s
+            return _cache['data']
         _cache['checked'] = now
         if rows is None:
             return _cache['data']
