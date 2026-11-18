@@ -172,7 +172,7 @@ In `/etc/redis/redis.conf`:
 bind 127.0.0.1 ::1
 requirepass change-me
 maxmemory 256mb
-maxmemory-policy allkeys-lru
+maxmemory-policy volatile-lru
 ```
 ```sh
 sudo systemctl restart redis-server
@@ -180,7 +180,7 @@ sudo systemctl restart redis-server
 ```
 REDIS_URL=redis://:change-me@127.0.0.1:6379/0
 ```
-Redis holds the upstream DNS cache and the sign-in replay and lockout counters. Never expose it to the network. Under memory pressure `allkeys-lru` can evict a lockout counter, so give it enough memory. If Redis is down, the daemon asks the upstream directly. Without `REDIS_URL` every process uses its own memory cache of at most 100,000 entries.
+Redis holds the upstream DNS cache and the sign-in replay and lockout counters. Never expose it to the network. `volatile-lru` evicts only keys that expire (cache entries, lockout counters and tickets all do, so under real memory pressure a counter can still go: give it enough memory); the change counter `data:ver` has no expiry and is never evicted. If Redis is down, the daemon asks the upstream directly. Without `REDIS_URL` every process uses its own memory cache of at most 100,000 entries.
 
 ## 6. Configuration
 
@@ -318,6 +318,8 @@ systemd: `sudo systemctl enable --now dns-dhcp`. Supervisor: add to the supervis
 [program:dns-dhcp]
 directory=/opt/dns/app/backend
 command=/opt/dns/.venv/bin/python manage.py rundhcp
+For the tuning of section "Tuning": in `[supervisord]` of `/etc/supervisor/supervisord.conf` add `minfds=65536` (soft limit of open files for the children, the default 1024 is too low for the daemon), and in the `dns-daemon` program `startsecs=5` and `stopwaitsecs=20`. The DHCP server and the proxy are programs of the same file, see their sections below.
+
 user=dns
 autostart=false
 autorestart=true
@@ -470,3 +472,68 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 - The nginx limits for DoH/DoT are estimates, not measured.
 
 **Behaviour changes worth knowing.** Blocklist and rule-list sources must be `https://` on public addresses (no `http://`, no LAN hosts; the list keeps its old copy and the status shows the error). Custom `/regex/` rules and DNS regex entries with nested quantifiers such as `(a+)+` or `(\w+\.)*x` are skipped for safety. The proxy log window "Last 30 days" is the longest one.
+## Tuning
+
+Numbers below were applied to a Raspberry Pi host (4 cores, 8 GB, database on an SD card) that runs the daemons, nginx, PostgreSQL and Redis together. Scale them to your RAM; none of them is required to run. The settings are ready to copy in `deploy/tuning/` (`99-dns.sysctl.conf`, `postgresql-dns-tuning.conf`, `redis-dns.conf`, `nginx-tuning.conf`); the blocks below explain them. Change one group, restart what it names, and check the result (see the end of this section). Keep a copy of every file you edit (`sudo cp -a file /var/backups/...`).
+
+**Kernel** (`/etc/sysctl.d/99-dns.conf`, then `sudo sysctl --system`): a burst of queries must not overflow the UDP socket of the daemon.
+```
+net.core.rmem_max = 8388608
+net.core.wmem_max = 8388608
+net.core.netdev_max_backlog = 4096
+net.ipv4.tcp_max_syn_backlog = 4096
+net.core.somaxconn = 4096
+net.ipv4.ip_local_port_range = 10240 65535
+net.ipv4.tcp_fin_timeout = 30
+vm.swappiness = 20
+```
+
+**Open files.** The daemon keeps a socket per client (`TCP_MAX_CONNS` is 1000) and a pool of database connections: the default soft limit of 1024 is too low. systemd units set `LimitNOFILE=65536`. With supervisor add `minfds=65536` under `[supervisord]` in `/etc/supervisor/supervisord.conf` (the children inherit it; check `grep "open files" /proc/<pid>/limits`).
+
+**PostgreSQL** (`/etc/postgresql/<version>/main/conf.d/dns-tuning.conf`, needs `sudo systemctl restart postgresql`). The hot data is small; the points are fewer writes and fewer checkpoints.
+```
+shared_buffers = 1GB                  # about 12% of 8 GB; up to 25% on a host that does nothing else
+effective_cache_size = 4GB            # what the system cache will hold: about half of the RAM
+work_mem = 8MB
+maintenance_work_mem = 256MB
+wal_buffers = 16MB
+wal_compression = on                  # fewer bytes written (SD card, small disks)
+max_wal_size = 4GB
+min_wal_size = 512MB
+checkpoint_timeout = 15min
+checkpoint_completion_target = 0.9
+random_page_cost = 2.0                # 1.1 on an SSD
+log_min_duration_statement = 1000     # statements slower than 1 s go to the log
+```
+`max_connections` (default 100) must cover `DNS_WORKERS` x 2 (UDP and TCP threads of `rundns`), the gunicorn threads, `rundhcp`, `runproxy` and a few for management commands: with `DNS_WORKERS=16` and 16 threads that is about 60.
+
+**Redis** (`/etc/redis/redis.conf`): `maxmemory-policy volatile-lru` (see section 5), `lazyfree-lazy-eviction yes`, `tcp-keepalive 60`. `REDIS_POOL_SIZE` follows `DNS_WORKERS` by default (`DNS_WORKERS * 2 + 8`, at least 20): if you set it by hand, keep it above the number of threads, or they wait for a connection and the cache counts as down.
+
+**nginx** (`/etc/nginx/nginx.conf`):
+```
+worker_rlimit_nofile 65535;
+events { worker_connections 4096; }
+http {
+    keepalive_timeout 65;
+    keepalive_requests 1000;
+    open_file_cache max=2000 inactive=60s;   # the GUI files are few and hashed
+    open_file_cache_valid 60s;
+    open_file_cache_errors on;
+    gzip_comp_level 4;
+    gzip_vary on;
+}
+```
+The sample site file (`deploy/nginx/dns.example.lan`) limits `/dns-query` to 50 requests per second per address and the login paths to 10 per minute, and `dns-dot.conf` limits DNS over TLS to 20 connections per address: raise them if many clients sit behind one NAT address.
+
+**gunicorn**: keep `--workers 1` (the login key lives in the memory of the process) and size `--threads` for the slow requests: a domain audit holds a thread for up to 40 s. 16 threads cost 16 database connections at most.
+
+**Check it worked**
+```sh
+sudo -u postgres psql -Atc "show shared_buffers"        # 1GB
+redis-cli config get maxmemory-policy                    # volatile-lru
+redis-cli info stats | grep keyspace                     # hits against misses: the cache at work
+sudo supervisorctl status                                # or systemctl status dns-*
+dig +short example.com @<server>; dig +tcp +short example.com @<server>
+```
+Watch `SELECT count(*) FROM pg_stat_activity` against `max_connections`, and the daemon error log for `database not reachable` after a PostgreSQL restart (it recovers by itself).
+
