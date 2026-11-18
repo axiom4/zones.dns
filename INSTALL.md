@@ -301,7 +301,9 @@ sudo supervisorctl reread && sudo supervisorctl update && sudo supervisorctl sta
 
 Test with one client (`sudo dhclient -v`, or reconnecting a phone) before moving the whole network. Open the **DHCP** page in the GUI to check that the lease appears with its IP/prefix, MAC or DUID, client host name and expiry time (tick **include ended** to see expired leases, or click **✕** to end a lease). With `DHCP_NAMES=true` and `DHCP_DOMAIN=lan`, check forward and reverse resolution with `dig @192.0.2.10 <hostname>.lan` and `dig @192.0.2.10 -x <leased-ip>`. Router Advertisements: this host announces itself as *not* a default router (`DHCP_RA_ROUTER_LIFETIME=0`), so your real router keeps that role.
 
-Settings that send the clients' traffic elsewhere ask for the second factor when changed (step-up scope `dhcp-change`): gateway, DNS servers (IPv4 and IPv6), NTP, search domains, routes, PXE boot server and file, relayed subnets (`DHCP_SUBNETS`) and the RA router lifetime.
+Settings that send the clients' traffic elsewhere ask for the second factor when changed (step-up scope `dhcp-change`): gateway, DNS servers (IPv4 and IPv6), NTP, search domains, routes, PXE boot server and file, relayed subnets (`DHCP_SUBNETS`), the RA router lifetime and *Leasequery from*.
+
+**Relay agents and Leasequery.** A relay agent (router or switch that forwards DHCP from another network, `DHCP_SUBNETS`) may ask this server who holds an address (Leasequery, RFC 4388 / RFC 5007). It is answered only to the addresses or networks in *DHCP settings > Leasequery from* (`DHCP_LEASEQUERY`, IPv4 and IPv6, separated by spaces or commas, e.g. `192.168.10.1 2001:db8:10::1`). Empty, the default, means nobody: on a home network with no relay leave it empty. Handing out addresses does not depend on it. DHCPv6 Leasequery must be sent straight to the server, not inside a Relay-forward.
 
 ### Optional: HTTP/HTTPS Ad-blocking & Popup-blocking Proxy (`runproxy`)
 
@@ -362,6 +364,8 @@ sudo -u dns ../../.venv/bin/python manage.py collectstatic --noinput
 sudo supervisorctl restart dns:*
 ```
 
+**Updating to the version with the Leasequery list:** if relay agents use Leasequery, list them in *Leasequery from* (see *DHCP*): until then their Leasequery is not answered.
+
 Restarting `dns-api` makes a new sign-in key: the GUI downloads it again by itself, so users are not disconnected, but a sign-in in progress is retried.
 
 Recurring jobs (cron, as user `dns`): `manage.py import_blocklist` nightly to refresh the public lists.
@@ -406,6 +410,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 | `DisallowedHost: Invalid HTTP_HOST header: '192.168.1.23'` | The browser used an address that is not in `ALLOWED_HOSTS`. Use the configured host name, or add the address: `ALLOWED_HOSTS=dns.example.com,192.168.1.23` (and `CSRF_TRUSTED_ORIGINS=https://dns.example.com,https://192.168.1.23`, and the IP in the certificate SAN). Passkeys never work on an IP address: sign in through the host name. |
 | `502 Bad Gateway` from nginx | gunicorn is down or not on `127.0.0.1:8000`: `supervisorctl status`, `tail /var/log/supervisor/dns-api.err.log`. |
 | `403` "CSRF verification failed" | `CSRF_TRUSTED_ORIGINS` is missing the exact `https://host` used in the browser, or `BEHIND_PROXY` is not `true`. |
+| A relay agent's Leasequery gets no answer | Its address is not in *DHCP settings > Leasequery from* (`DHCP_LEASEQUERY`), empty by default. |
 | Sign-in answers `403` | `LOGIN_ENCRYPTION=required` refuses plain requests: use the GUI (it encrypts), not `curl` on `/api/token/`. |
 | "Invalid passkey or domain not allowed" | `WEBAUTHN_RP_ID` must be the host name without port, `WEBAUTHN_ORIGINS` the full `https://…` address; the certificate must be trusted. |
 | The Django admin sends you back to the GUI | Expected: it opens only from **Django admin ↗** for superusers, and the GUI and `/admin` must share the same address. |

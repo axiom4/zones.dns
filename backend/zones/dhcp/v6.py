@@ -171,6 +171,7 @@ class Config6:
     pd_routes: bool = False
     preference: int = 0
     interface: str = ''
+    leasequery: tuple = ()  # networks of the hosts that may ask a Leasequery; empty = none
 
     @classmethod
     def from_settings(cls, s, search):
@@ -181,6 +182,7 @@ class Config6:
             first, last = (ipaddress.IPv6Address(first.strip()), ipaddress.IPv6Address(last.strip())) if s.DHCP6_POOL else (None, None)
             pd = ipaddress.IPv6Network(s.DHCP6_PD_POOL) if s.DHCP6_PD_POOL else None
             pref = int(getattr(s, 'DHCP6_PREFERENCE', 0) or 0)
+            leasequery = tuple(n for n in dhcp.leasequery_nets(s) if n.version == 6)
         except ValueError as e:
             raise ValueError(f'DHCPv6 settings: {e}')
         if first and not (first <= last and prefix and first in prefix and last in prefix):
@@ -194,7 +196,7 @@ class Config6:
         dnr = ddr.dnr_v6(ddr.parse(s.DNS_DDR)) if s.DHCP_DNR and s.DNS_DDR else []
         return cls(
             dns, search, dnr, s.DHCP6_LEASE, prefix, first, last, pd, s.DHCP6_PD_LEN, s.DHCP6_RAPID,
-            f'dhcp6.{s.DHCP_SERVER}', 86400, bool(getattr(s, 'DHCP6_PD_ROUTES', False)), pref, getattr(s, 'DHCP_INTERFACE', ''),
+            f'dhcp6.{s.DHCP_SERVER}', 86400, bool(getattr(s, 'DHCP6_PD_ROUTES', False)), pref, getattr(s, 'DHCP_INTERFACE', ''), leasequery,
         )
 
     @property
@@ -226,7 +228,9 @@ class Server6:
             if {IA_NA, IA_TA, IA_PD} & o.keys():
                 return None  # invalid: an Information-request carries no IA options
             return self._msg(REPLY, txid, cid, oro, b'')
-        if kind == LEASEQUERY:
+        if kind == LEASEQUERY:  # only straight from a host of DHCP_LEASEQUERY: the peer inside a Relay-forward is whatever the sender wrote
+            if relayed or not peer_ip or not any(ipaddress.ip_address(peer_ip.split('%')[0]) in n for n in self.cfg.leasequery):
+                return None
             return self._leasequery(txid, cid, o, now)
         if not self.cfg.stateful or cid is None or not (3 <= len(cid) <= 130) or kind in (ADVERTISE, REPLY, RECONFIGURE, LEASEQUERY_REPLY):
             return None

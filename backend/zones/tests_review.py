@@ -307,9 +307,11 @@ class MoreStepUpTests(TestCase):
     def test_dhcp_changes_that_move_traffic_need_their_grant(self):
         patch = lambda body, **kw: self.api.patch('/api/dhcp/settings/', body, format='json', **kw).status_code
         self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}), 403)
+        self.assertEqual(patch({'DHCP_LEASEQUERY': '10.0.0.0/8'}), 403)  # who may read the leases
         self.assertEqual(patch({'DHCP_LEASE': 7200}), 200)  # other options need no proof
         self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}, **self._grant('dhcp-change')), 200)
         self.assertEqual(patch({'DHCP_DNS': '10.9.9.9'}), 200)  # unchanged value: nothing to prove
+        self.assertEqual(patch({'DHCP_LEASEQUERY': 'not-an-ip'}, **self._grant('dhcp-change')), 400)
 
     def test_bulk_disable_of_most_of_a_zone_needs_the_zone_grant(self):
         ids = [Record.objects.create(zone=self.zone, name=f'h{i}', type='A', value=f'10.0.0.{i}').pk for i in range(1, 21)]

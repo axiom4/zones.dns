@@ -21,6 +21,7 @@ export interface PatchedDhcpSettingsRequest {
   DHCP_FAILOVER_SECS?: number;
   DHCP_INTERFACE?: string;
   DHCP_LEASE?: number;
+  DHCP_LEASEQUERY?: string;
   DHCP_MTU?: number;
   DHCP_NAMES?: boolean;
   DHCP_NETMASK?: string;

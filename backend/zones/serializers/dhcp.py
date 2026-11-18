@@ -47,6 +47,7 @@ class DhcpSettingsSerializer(serializers.Serializer):
     DHCP_DNR = serializers.BooleanField(required=False)
     DHCP_FAILOVER_SECS = serializers.IntegerField(required=False, min_value=0, max_value=3600)
     DHCP_SUBNETS = serializers.CharField(required=False, allow_blank=True, max_length=8000)
+    DHCP_LEASEQUERY = serializers.CharField(required=False, allow_blank=True, max_length=1000)
     DHCP6 = serializers.BooleanField(required=False)
     DHCP6_PREFIX = serializers.CharField(required=False, allow_blank=True, max_length=64)
     DHCP6_POOL = serializers.CharField(required=False, allow_blank=True, max_length=128)

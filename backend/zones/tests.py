@@ -1557,7 +1557,7 @@ class SecurityAndProtocolHardeningTests(TestCase):
         # 1. DHCPv4 Leasequery (RFC 4388), Failover secs, and authenticated FORCERENEW (RFC 3203 / RFC 3118)
         with override_settings(
             DHCP=True, DHCP_SERVER='192.168.1.2', DHCP_NETMASK='255.255.255.0',
-            DHCP_RANGE='192.168.1.100-192.168.1.110', DHCP_ROUTER='192.168.1.1', DHCP_FAILOVER_SECS=4,
+            DHCP_RANGE='192.168.1.100-192.168.1.110', DHCP_ROUTER='192.168.1.1', DHCP_FAILOVER_SECS=4, DHCP_LEASEQUERY='192.168.1.1',
         ):
             srv4 = dhcp.Server(dhcp.scopes(settings), probe=lambda ip: False)
             now = timezone.now()
@@ -1582,6 +1582,7 @@ class SecurityAndProtocolHardeningTests(TestCase):
             self.assertEqual(parsed_active['opts'][53][0], dhcp.DHCPLEASEACTIVE)
             self.assertEqual(parsed_active['opts'][12], b'laptop')
 
+            self.assertIsNone(srv4.handle(lq_pkt(ciaddr='192.168.1.100', giaddr='192.168.1.50')))  # not in DHCP_LEASEQUERY
             rep_unassigned = srv4.handle(lq_pkt(ciaddr='192.168.1.105'))
             self.assertEqual(dhcp.parse(b'\x01' + rep_unassigned.data[1:])['opts'][53][0], dhcp.DHCPLEASEUNASSIGNED)
 
@@ -1598,7 +1599,7 @@ class SecurityAndProtocolHardeningTests(TestCase):
         with override_settings(
             DHCP6=True, DHCP6_PREFIX='2001:db8:1::/64', DHCP6_POOL='2001:db8:1::10-2001:db8:1::20',
             DHCP6_PD_POOL='2001:db8:ff00::/48', DHCP6_PD_LEN=56, DHCP6_PD_ROUTES=True, DHCP6_PREFERENCE=255,
-            DHCP6_DNS='2001:db8:1::2', DHCP_SERVER='192.168.1.2', DHCP_INTERFACE='eth0',
+            DHCP6_DNS='2001:db8:1::2', DHCP_SERVER='192.168.1.2', DHCP_INTERFACE='eth0', DHCP_LEASEQUERY='2001:db8:1::99',
         ):
             srv6 = dhcp6.Server6(dhcp6.Config6.from_settings(settings, ['corp.lan']))
             c_duid = b'\x00\x03\x00\x01\xaa\xbb\xcc\xdd\xee\x01'
@@ -1636,7 +1637,8 @@ class SecurityAndProtocolHardeningTests(TestCase):
             # Leasequery by ClientID (RFC 5007)
             lq_opt = bytes([dhcp6.QUERY_BY_CLIENTID]) + b'\x00' * 16 + dhcp6.option(dhcp6.CLIENTID, c_duid)
             lq_msg = bytes([dhcp6.LEASEQUERY, 4, 5, 6]) + dhcp6.option(dhcp6.CLIENTID, b'\x00\x01\x00\x01relay') + dhcp6.option(dhcp6.LQ_QUERY, lq_opt)
-            lq_rep = srv6.handle(lq_msg)
+            self.assertIsNone(srv6.handle(lq_msg, peer_ip='2001:db8:1::98'))  # not in DHCP_LEASEQUERY
+            lq_rep = srv6.handle(lq_msg, peer_ip='2001:db8:1::99')
             kind6, _, lq_ropts = dhcp6.parse(lq_rep)
             self.assertEqual(kind6, dhcp6.LEASEQUERY_REPLY)
             self.assertIn(dhcp6.CLIENT_DATA, lq_ropts)

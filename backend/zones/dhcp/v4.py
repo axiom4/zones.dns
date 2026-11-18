@@ -53,6 +53,7 @@ DHCP_SETTING_SPEC = (
     ('DHCP_DNR', bool),
     ('DHCP_FAILOVER_SECS', int),
     ('DHCP_SUBNETS', str),
+    ('DHCP_LEASEQUERY', str),
     ('DHCP6', bool),
     ('DHCP6_PREFIX', str),
     ('DHCP6_POOL', str),
@@ -117,6 +118,11 @@ def _ip_list(text):
     return [ipaddress.IPv4Address(x) for x in re.split(r'[\s,;]+', text.strip()) if x]  # spaces, commas or semicolons
 
 
+def leasequery_nets(s):
+    """The networks of DHCP_LEASEQUERY: who may send a Leasequery (RFC 4388 §6.1, RFC 5007 §4.2.1: answer only known requestors)."""
+    return tuple(ipaddress.ip_network(x, strict=False) for x in re.split(r'[\s,;]+', str(getattr(s, 'DHCP_LEASEQUERY', '') or '').strip()) if x)
+
+
 def _names(text):
     return [x.strip('.').lower() for x in text.replace(',', ' ').split() if x.strip('.')]
 
@@ -142,6 +148,7 @@ class Config:
     probe: bool = False
     failover_secs: int = 0
     wpad_url: str = ''
+    leasequery: tuple = ()  # networks whose relay agents may ask a Leasequery; empty = none
 
     @classmethod
     def from_settings(cls, s, extra=None):
@@ -171,8 +178,9 @@ class Config:
             ntp = _ip_list(str(g('DHCP_NTP', 'ntp')))
             lease, mtu = int(g('DHCP_LEASE', 'lease')), int(g('DHCP_MTU', 'mtu'))
             failover_secs = max(0, int(getattr(s, 'DHCP_FAILOVER_SECS', 0) or 0))
+            leasequery = leasequery_nets(s)
         except (ValueError, TypeError) as e:
-            raise ValueError(f'DHCP settings: {e} (DHCP_SERVER, DHCP_NETMASK, DHCP_RANGE=first-last, DHCP_ROUTER, DHCP_DNS, DHCP_NTP, DHCP_ROUTES=net=gateway, DHCP_RESERVATIONS=mac=ip ...)')
+            raise ValueError(f'DHCP settings: {e} (DHCP_SERVER, DHCP_NETMASK, DHCP_RANGE=first-last, DHCP_ROUTER, DHCP_DNS, DHCP_NTP, DHCP_ROUTES=net=gateway, DHCP_RESERVATIONS=mac=ip, DHCP_LEASEQUERY ...)')
         if not (first <= last and first in network and last in network):
             raise ValueError(f'DHCP settings: the range {first}-{last} must be inside the network {network}')
         if any(ip not in network for ip in res.values()) or (router and router not in network) or any(gw not in network for _, gw in routes):
@@ -189,7 +197,8 @@ class Config:
             raise ValueError('DHCP settings: DHCP_WPAD_URL must be an http:// or https:// URL of at most 255 characters')
         dnr = ddr.dnr_v4(ddr.parse(s.DNS_DDR)) if s.DHCP_DNR and s.DNS_DDR else b''
         search = _names(str(g('DHCP_SEARCH', 'search'))) or ([domain.strip('.').lower()] if domain.strip('.') else [])
-        return cls(server, network, first, last, router, dns, domain, lease, res, dnr, ntp, search, routes, mtu, boot_server, boot_file, s.DHCP_PROBE, failover_secs, wpad_url)
+        return cls(server, network, first, last, router, dns, domain, lease, res, dnr, ntp, search, routes, mtu, boot_server, boot_file, s.DHCP_PROBE, failover_secs, wpad_url,
+                   tuple(n for n in leasequery if n.version == 4))
 
 
 def scopes(s):
@@ -468,9 +477,10 @@ class Server:
         return None
 
     def _leasequery(self, cfg, req, now):
-        """RFC 4388 DHCPv4 Leasequery handler (by IP, MAC, or Client-identifier). Answered only to relay agents (giaddr != 0)."""
-        if req['giaddr'] == ZERO:
-            return None
+        """RFC 4388 DHCPv4 Leasequery handler (by IP, MAC, or Client-identifier). Answered only to relay agents (giaddr != 0) of
+        DHCP_LEASEQUERY: the answer goes to giaddr, so a host that writes another's address there does not get it."""
+        if req['giaddr'] == ZERO or not any(req['giaddr'] in n for n in cfg.leasequery):
+            return None  # anyone on the LAN could read the host names and MACs
         opts = req['opts']
         base_opts = [(54, cfg.server.packed)] + ([(82, opts[82])] if 82 in opts else [])
         row = None

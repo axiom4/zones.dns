@@ -90,10 +90,10 @@ class DhcpLeaseView(APIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
-# Settings that send the clients' traffic or time somewhere else (gateway, DNS, routes, boot server, search domains, this host as IPv6 router):
-# changing them needs a second-factor grant (scope dhcp-change), like WPAD and the proxy (proxy-change)
+# Settings that send the clients' traffic or time somewhere else (gateway, DNS, routes, boot server, search domains, this host as IPv6 router)
+# and who may read the leases by Leasequery: changing them needs a second-factor grant (scope dhcp-change), like WPAD and the proxy (proxy-change)
 SENSITIVE = ('DHCP_ROUTER', 'DHCP_DNS', 'DHCP_NTP', 'DHCP_SEARCH', 'DHCP_ROUTES', 'DHCP_BOOT_SERVER', 'DHCP_BOOT_FILE', 'DHCP_SUBNETS',
-             'DHCP6_DNS', 'DHCP_RA_ROUTER_LIFETIME')
+             'DHCP6_DNS', 'DHCP_RA_ROUTER_LIFETIME', 'DHCP_LEASEQUERY')
 
 
 class DhcpSettingsView(APIView):
@@ -119,6 +119,10 @@ class DhcpSettingsView(APIView):
             return denied
         cand = dhcp.dhcp_settings(overrides=ser.validated_data)
         try:
+            try:
+                dhcp.leasequery_nets(cand)
+            except ValueError as e:
+                raise ValueError(f'DHCP settings: DHCP_LEASEQUERY: {e}')
             if cand.DHCP:
                 dhcp.scopes(cand)
             if cand.DHCP6:

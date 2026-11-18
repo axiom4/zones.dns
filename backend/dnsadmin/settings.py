@@ -319,6 +319,7 @@ DHCP_RA_ROUTER_LIFETIME = 0  # 0: this host is NOT a default router; >0 makes it
 DHCP_RA_SLAAC = True  # the prefix DHCP6_PREFIX is announced for stateless address autoconfiguration
 DHCP6_DNS = ''  # IPv6 addresses of the DNS servers given to clients
 DHCP_SUBNETS = ''  # more networks, reached through relay agents: a JSON list, see zones/dhcp/v4.py scopes()
+DHCP_LEASEQUERY = ''  # who may send a Leasequery (RFC 4388, RFC 5007): IPv4/IPv6 addresses or networks; empty = Leasequery refused
 DHCP_UNICAST = False  # Linux, root or CAP_NET_RAW, needs DHCP_INTERFACE: reply to a client that has no address yet straight to its hardware address instead of broadcasting
 DHCP_DNR = True  # announce the DNS_DDR resolvers (RFC 9463, option 162) to clients that ask
 DHCP_FAILOVER_SECS = 0  # standby failover delay: answer DISCOVER only when client secs >= this value (0 = primary)
