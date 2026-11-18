@@ -11,6 +11,7 @@ import { StepUp } from '../services/step-up';
 import { Ui } from '../services/ui';
 import { ZonesStore } from '../services/zones-store';
 import { Activity } from './activity';
+import { CommandPalette } from '../command-palette/command-palette';
 import { ICONS, IconName } from './icons';
 
 /** The sections; primary ones are on the phone's bottom bar, the others behind More. */
@@ -27,7 +28,7 @@ const SECTIONS: { path: string; label: string; icon: IconName; primary: boolean 
 
 @Component({
   selector: 'app-shell',
-  imports: [FormsModule, RouterLink, RouterLinkActive, RouterOutlet, Activity],
+  imports: [FormsModule, RouterLink, RouterLinkActive, RouterOutlet, Activity, CommandPalette],
   templateUrl: './shell.html',
 })
 export class Shell implements AfterViewInit {
