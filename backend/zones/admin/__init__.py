@@ -1,8 +1,10 @@
 from .dhcp_lease import DhcpLeaseAdmin
-from .dhcp_reservation import DhcpReservationAdmin
+from .dhcp_reservation import Dhcp6ReservationAdmin, DhcpReservationAdmin
 from .blocked_domain import PersonalBlockAdmin, PublicBlocklistAdmin
+from .internal import DataVersionAdmin, LogTotalAdmin, MacVendorAdmin
 from .ip_geo import IpGeoAdmin
 from .mfa import PasskeyAdmin, TotpDeviceAdmin
+from .proxy_log import ProxyLogAdmin
 from .query_log import QueryLogAdmin
 from .record import RecordAdmin
 from .setting import SettingAdmin
@@ -10,7 +12,7 @@ from .stat import DomainStatAdmin, GeoStatAdmin, StatCountAdmin
 from .static_host import StaticHostAdmin
 from .zone import ZoneAdmin
 
-__all__ = ['DhcpReservationAdmin', 'PasskeyAdmin', 'TotpDeviceAdmin', 'IpGeoAdmin', 'PersonalBlockAdmin', 'PublicBlocklistAdmin', 'QueryLogAdmin', 'RecordAdmin', 'SettingAdmin', 'StatCountAdmin', 'GeoStatAdmin', 'DomainStatAdmin', 'StaticHostAdmin', 'ZoneAdmin']
+__all__ = ['Dhcp6ReservationAdmin', 'DataVersionAdmin', 'LogTotalAdmin', 'MacVendorAdmin', 'ProxyLogAdmin', 'DhcpReservationAdmin', 'PasskeyAdmin', 'TotpDeviceAdmin', 'IpGeoAdmin', 'PersonalBlockAdmin', 'PublicBlocklistAdmin', 'QueryLogAdmin', 'RecordAdmin', 'SettingAdmin', 'StatCountAdmin', 'GeoStatAdmin', 'DomainStatAdmin', 'StaticHostAdmin', 'ZoneAdmin']
 
 
 from django.contrib import admin as _admin  # noqa: E402
