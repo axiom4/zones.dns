@@ -1,0 +1,121 @@
+<header>
+  <div>
+    <p class="soft crumb"><a routerLink="/logs/dns" [queryParams]="{ client: ip() }">Open in DNS log</a></p>
+    <h2>{{ head().error ? 'Device story' : name() }}</h2>
+    @if (!head().error) {
+      <p class="ident">
+        <span class="mono">{{ ip() }}</span>
+        @if (lease()?.mac) { <span class="mono">{{ lease()!.mac }}</span> }
+        @if (vendor()) { <span>{{ vendor() }}</span> }
+        @if (pingText()) { <span class="state" [class.up]="pingRes()?.up"><i aria-hidden="true"></i>{{ pingText() }}</span> }
+      </p>
+    }
+  </div>
+  <div class="actions">
+    <div class="seg" role="group" aria-label="Period">
+      <button type="button" [attr.aria-pressed]="range() === 24" (click)="setRange(24)">24 hours</button>
+      <button type="button" [attr.aria-pressed]="range() === 168" (click)="setRange(168)">7 days</button>
+    </div>
+    <button class="ghost" (click)="pingNow()" [disabled]="pinging() || !ip()">{{ pinging() ? 'Pinging…' : 'Ping' }}</button>
+  </div>
+</header>
+
+@if (head().error) {
+  <p class="error" role="alert">{{ head().error }}</p>
+} @else {
+  <section class="panel story" aria-labelledby="ds-sum">
+    <h3 id="ds-sum">The story</h3>
+    @if (summary(); as s) { <p class="lede">{{ s }}</p> }
+    @else { <div class="skel" aria-busy="true"><i></i><i></i><i class="short"></i></div> }
+  </section>
+
+  <section class="panel" aria-labelledby="ds-rib">
+    <h3 id="ds-rib">Activity <span class="legend"><i class="heat"></i>queries <i class="blk"></i>blocked share</span></h3>
+    @if (ribbon().error) { <p class="error" role="alert">{{ ribbon().error }}</p> }
+    @else if (ribbon().loading) { <div class="skel strip" aria-busy="true"></div> }
+    @else {
+      <div class="ribbon" [class.week]="range() === 168" role="group" tabindex="0" aria-label="Queries per hour. Use the arrow keys to move between hours."
+           (keydown)="key($event)" (mouseleave)="sel.set(-1)" (blur)="sel.set(-1)">
+        @for (c of ribbon().data.cells; track c.start; let i = $index) {
+          <button type="button" class="cell" tabindex="-1" [class.sel]="i === sel()" [class.zero]="!c.count" [attr.aria-label]="label(c)" [attr.title]="label(c)"
+                  [style.--a.%]="alpha(c)" [style.--b.%]="c.count ? c.blocked * 100 / c.count : 0" (mouseenter)="sel.set(i)" (focus)="sel.set(i)"></button>
+        }
+      </div>
+      <p class="readout" aria-live="polite">
+        @if (selCell(); as c) { <b>{{ label(c) }}</b> }
+        @else if (!ribbon().data.total) { No queries in this period. }
+        @else { <span>{{ ribbon().data.total | number }} queries{{ ribbon().data.shown < ribbon().data.total ? ' (the newest ' + (ribbon().data.shown | number) + ' are drawn)' : '' }}. Hover or focus an hour for details.</span> }
+      </p>
+    }
+  </section>
+
+  <section class="panel" aria-labelledby="ds-new">
+    <h3 id="ds-new">Today vs usual <span class="legend">domains not contacted in the 7 days before</span></h3>
+    @if (fresh().error) { <p class="error" role="alert">{{ fresh().error }}</p> }
+    @else if (fresh().loading) { <div class="skel" aria-busy="true"><i></i><i></i></div> }
+    @else if (!fresh().data.length) { <p class="empty">Nothing new: every domain it queried in the last 24 hours is one it already knew.</p> }
+    @else {
+      <ul class="plain">
+        @for (f of fresh().data; track f.g.name) {
+          <li>
+            <span class="new">NEW</span>
+            <span class="dn mono">{{ f.g.name }}</span>
+            <span class="soft">{{ f.g.count | number }}× · {{ f.g.last ? (f.g.last | date: 'short') : '' }}</span>
+            @if (done().has(f.g.name)) { <span class="soft">Done</span> }
+            @else {
+              <button class="mini danger-o" (click)="block(f.g.name)">Block</button>
+              <button class="mini" (click)="allow(f.g.name)">Allow</button>
+            }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
+  <div class="two">
+    <section class="panel" aria-labelledby="ds-top">
+      <h3 id="ds-top">Top domains</h3>
+      @if (tops().error) { <p class="error" role="alert">{{ tops().error }}</p> }
+      @else if (tops().loading) { <div class="skel" aria-busy="true"><i></i><i></i><i></i><i class="short"></i></div> }
+      @else if (!tops().data.length) { <p class="empty">No queries in this period.</p> }
+      @else {
+        @for (d of tops().data; track d.g.name) {
+          <div class="dom">
+            <div class="row">
+              <span class="bar" [style.width.%]="d.g.count * 100 / topMax()"></span>
+              <button type="button" class="linkish n" [attr.aria-expanded]="d.open" (click)="toggle(d)">
+                <span aria-hidden="true">{{ d.open ? '▾' : '▸' }}</span> {{ d.g.name }}
+              </button>
+              @if (pct(d.g)) { <span class="bshare" [title]="d.g.blocked + ' blocked'">{{ pct(d.g) }}% blocked</span> }
+              <span class="c">{{ d.g.count | number }}</span>
+            </div>
+            @if (d.open) {
+              <ul class="plain subs">
+                @if (d.busy) { <li class="soft">Loading…</li> }
+                @for (s of d.subs ?? []; track s.name) {
+                  <li><span class="mono dn">{{ s.name }}</span><span class="soft">{{ pct(s) ? pct(s) + '% blocked' : '' }}</span><b>{{ s.count | number }}</b></li>
+                }
+              </ul>
+            }
+          </div>
+        }
+      }
+    </section>
+
+    <section class="panel" aria-labelledby="ds-geo">
+      <h3 id="ds-geo">Destinations by country <span class="legend">from the top 15 domains</span></h3>
+      @if (geo().error) { <p class="error" role="alert">{{ geo().error }}</p> }
+      @else if (geo().loading) { <div class="skel" aria-busy="true"><i></i><i></i><i class="short"></i></div> }
+      @else if (!geo().data.length) { <p class="empty">No located addresses for this device.</p> }
+      @else {
+        @for (c of geo().data; track c.code) {
+          <div class="row">
+            <span class="bar" [style.width.%]="c.queries * 100 / geoMax()"></span>
+            <span class="n">{{ flag(c.code) }} {{ countryName(c.code) }}</span>
+            <span class="c">{{ c.queries | number }}</span>
+          </div>
+        }
+      }
+    </section>
+  </div>
+}

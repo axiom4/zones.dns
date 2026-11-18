@@ -43,6 +43,7 @@
       <span class="ttlv">{{ l.active ? 'Until' : 'Ended' }} {{ when(l.expires) }}</span>
       @if (l.kind === 'address') {
         <button class="mini" type="button" (click)="pingOne(l)" [attr.aria-label]="'Ping ' + l.address">Ping</button>
+        <a class="mini" [routerLink]="['/device', l.address]" [attr.aria-label]="'What ' + (l.hostname || l.address) + ' did'">Story</a>
         <button class="mini" type="button" (click)="watch(l)" [attr.aria-label]="'Ping ' + l.address + ' every second'">Live</button>
         <button class="mini" type="button" (click)="fix(l)" [disabled]="isReserved(l)"
                 [attr.aria-label]="isReserved(l) ? l.address + ' is already reserved' : 'Reserve ' + l.address + ' for ' + (l.hostname || l.client)">{{ isReserved(l) ? 'Reserved' : 'Reserve' }}</button>

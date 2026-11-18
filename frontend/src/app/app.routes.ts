@@ -31,6 +31,7 @@ export const routes: Routes = [
       { path: 'logs/dns', title: 'DNS log', loadComponent: () => import('./logs-page/logs-page').then(m => m.LogsPage) },
       { path: 'logs/proxy', title: 'Proxy log', data: { tab: 'logs' }, loadComponent: () => import('./proxy-page/proxy-page').then(m => m.ProxyPage) },
       { path: 'security', title: 'Security', loadComponent: () => import('./security-page/security-page').then(m => m.SecurityPage) },
+      { path: 'device/:client', title: 'Device story', loadComponent: () => import('./device-story/device-story').then(m => m.DeviceStoryPage) },
       { path: 'stats', title: 'Statistics', loadComponent: () => import('./stats-page/stats-page').then(m => m.StatsPage) },
     ],
   },
