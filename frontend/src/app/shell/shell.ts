@@ -1,5 +1,5 @@
 import { AfterViewInit, Component, ElementRef, effect, inject, signal, viewChild } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { NavigationEnd, Router, RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
 import { filter, map } from 'rxjs';
@@ -60,7 +60,7 @@ export class Shell implements AfterViewInit {
     this.store.load();
     this.api.invoke(meRetrieve).then(m => { this.superuser.set(m.is_superuser); this.store.defaultZone.set(m.default_zone); }).catch(() => {});
     // A stale error from one page shouldn't follow you to the next.
-    this.router.events.pipe(filter(e => e instanceof NavigationEnd)).subscribe(() => { this.ui.dismiss(); this.sheetDlg().nativeElement.close(); });
+    this.router.events.pipe(filter(e => e instanceof NavigationEnd), takeUntilDestroyed()).subscribe(() => { this.ui.dismiss(); this.sheetDlg().nativeElement.close(); });
     // an error a page set by hand (not through ui.run) is shown like the others
     effect(() => { const e = this.ui.error(); if (e && this.ui.notice()?.text !== e) this.ui.notice.set({ kind: 'error', text: e }); });
     // the notice is a popover: in the top layer, so it shows above an open dialog too (shown again to stay above one opened later)

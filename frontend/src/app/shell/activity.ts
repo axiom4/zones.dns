@@ -47,7 +47,8 @@ export class Activity {
       const s = await this.api.invoke(statsRetrieve, { hours: 1 });
       const [c, b] = byMinute(s.series, Date.now());
       this.counts.set(c); this.blocked.set(b); this.failed.set(false);
-    } catch {
+    } catch (e) {
+      console.warn('activity refresh failed', e);
       this.failed.set(true); // not a page error: the strip just says it has no data
     }
   }

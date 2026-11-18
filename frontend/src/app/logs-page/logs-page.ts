@@ -339,7 +339,7 @@ export class LogsPage implements OnDestroy {
         const r = await this.api.invoke(logsList, { ...this.filters(), limit: PAGE, offset: 0 });
         this.fresh.set(r.results.filter(x => x.id > top).length);
       }
-    }, { silent: true });
+    }, { silent: true }); // shortcut: errors are swallowed by silent; the 401 interceptor and the next refresh cover them
   }
   showFresh() { this.reset(); window.scrollTo({ top: 0 }); }
 

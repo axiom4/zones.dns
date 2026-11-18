@@ -179,7 +179,7 @@
     <summary>Website</summary>
     @if (r.web.redirects.length) {
       <h4 class="sub">Path from http://{{ r.domain }}/</h4>
-      @for (h of r.web.redirects; track $index) {
+      @for (h of r.web.redirects; track h.url) {
         <div class="dnsrow"><span class="rc" [attr.data-rc]="h.status && h.status < 400 ? 'NOERROR' : 'SERVFAIL'">{{ h.status ?? '—' }}</span>
           <div><p class="mono">{{ h.url }}</p>@if (h.location) { <p class="soft">→ {{ h.location }}</p> }</div></div>
       }

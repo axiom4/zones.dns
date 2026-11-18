@@ -35,7 +35,7 @@ export class Ui {
     if (u) await this.run(async () => { await u(); });
   }
 
-  /** Runs an API call; surfaces DRF errors; on 401 goes back to login. ok: the confirmation to show when it worked.
+  /** Runs an API call; surfaces DRF errors; on 401 the interceptor (auth.ts) goes back to login. ok: the confirmation to show when it worked.
    * silent: a background refresh (live log, polling): it neither clears nor shows errors the user has not read yet. */
   async run(f: () => Promise<unknown>, opts: { ok?: string; silent?: boolean } = {}) {
     try {
@@ -44,7 +44,7 @@ export class Ui {
       if (opts.ok) this.toast(opts.ok);
       else if (!opts.silent && this.notice()?.kind === 'error') this.dismiss();
     } catch (e: any) {
-      if (e.status === 401) { this.auth.logout(); this.router.navigateByUrl('/login'); }
+      if (e.status === 401) return; // the interceptor already ended the session and went to the login
       if (opts.silent) return;
       const text = errorText(e);
       this.error.set(text);

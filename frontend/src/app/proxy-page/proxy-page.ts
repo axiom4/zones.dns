@@ -1,4 +1,4 @@
-import { Component, ElementRef, OnDestroy, computed, effect, inject, input, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, OnDestroy, computed, effect, inject, untracked, input, signal, viewChild } from '@angular/core';
 import qrcode from 'qrcode-generator';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterLink, RouterLinkActive } from '@angular/router';
@@ -126,12 +126,10 @@ export class ProxyPage implements OnDestroy {
       if (this.mode() === 'logs') this.loadLogs();
     });
     effect(() => {
-      if (this.mode() === 'logs') {
-        this.loadLogs();
-        this.syncPoll();
-      } else {
-        this.stopPoll();
-      }
+      const logs = this.mode() === 'logs';
+      untracked(() => { // only the tab is tracked: loading logs flips signals that must not re-run this
+        if (logs) { this.loadLogs(); this.syncPoll(); } else this.stopPoll();
+      });
     });
   }
 
@@ -158,7 +156,9 @@ export class ProxyPage implements OnDestroy {
   }
 
   private logSeq = 0;
+  private logBusy = false; // a request is in flight: the poll skips its tick
   async loadLogs() {
+    this.logBusy = true;
     const seq = ++this.logSeq; // an older answer (a slow poll) must not replace the one for the filters just chosen
     if (!this.logsLoaded()) this.api.invoke(statusRetrieve).then(st => this.status.set(st), () => {}); // for the empty log: is runproxy running
     try {
@@ -171,8 +171,10 @@ export class ProxyPage implements OnDestroy {
         limit: 200,
       });
       if (seq === this.logSeq) { this.logsData.set(res); this.logsLoaded.set(true); }
-    } catch {
-      /* background poll ignore */
+    } catch (e) {
+      console.warn('proxy log refresh failed', e); // background poll: the list on screen stays
+    } finally {
+      this.logBusy = false;
     }
   }
 
@@ -185,8 +187,9 @@ export class ProxyPage implements OnDestroy {
     const queryParams = {
       outcome: this.logOutcome || null, q: this.logQ.trim() || null, client: this.logClient || null, hours: this.logHours === 24 ? null : this.logHours,
     };
-    this.router.navigate([], { relativeTo: this.route, queryParams, replaceUrl: true });
-    this.loadLogs(); // also when the address does not change (e.g. a method filter, which is not kept in it)
+    const cur = this.route.snapshot.queryParamMap;
+    if (Object.entries(queryParams).every(([k, v]) => cur.get(k) === (v == null ? null : String(v)))) this.loadLogs(); // address unchanged (e.g. a method filter): no subscription event
+    else this.router.navigate([], { relativeTo: this.route, queryParams, replaceUrl: true });
   }
 
   toggleLive() {
@@ -196,7 +199,7 @@ export class ProxyPage implements OnDestroy {
   private syncPoll() {
     this.stopPoll();
     if (this.live && this.mode() === 'logs') {
-      this.pollTimer = setInterval(() => { if (!document.hidden) this.loadLogs(); }, 3000);
+      this.pollTimer = setInterval(() => { if (!document.hidden && !this.logBusy) this.loadLogs(); }, 3000);
     }
   }
 

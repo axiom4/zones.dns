@@ -1,4 +1,6 @@
+import { HttpErrorResponse, HttpInterceptorFn } from '@angular/common/http';
 import { CanActivateFn, Router } from '@angular/router';
+import { tap } from 'rxjs';
 import { Injectable, inject, signal } from '@angular/core';
 import { Api } from '../api/api';
 import { logoutCreate, tokenCreate, tokenEncryptedCreate } from '../api/functions';
@@ -15,9 +17,13 @@ export class Auth {
    * there is a session, for the route guard. The server stays the judge: a 401 sends back to the login. */
   signedIn = signal(localStorage.getItem('signedIn') === '1');
 
-  constructor() { localStorage.removeItem('token'); } // left by older versions, which kept the token itself here
+  constructor() {
+    localStorage.removeItem('token'); // left by older versions, which kept the token itself here
+    addEventListener('storage', e => { if (e.key !== 'signedIn') return; this.signedIn.set(e.newValue === '1'); if (e.newValue !== '1') this.router.navigateByUrl('/login'); }); // another tab signed in or out
+  }
 
   private secure = inject(Secure);
+  private router = inject(Router);
 
   /** Password step. Returns null when logged in, or the second step to complete (see mfa-enrol.ts / login.ts). */
   async login(username: string, password: string): Promise<LoginStep | null> {
@@ -52,3 +58,14 @@ export class Auth {
 }
 
 export const authGuard: CanActivateFn = () => inject(Auth).signedIn() ? true : inject(Router).parseUrl('/login');
+
+/** A 401 anywhere (background polls included) ends the session once and goes to the login; the login calls themselves answer 401 for a wrong password. */
+export const unauthorizedInterceptor: HttpInterceptorFn = (req, next) => {
+  const auth = inject(Auth), router = inject(Router);
+  return next(req).pipe(tap({ error: e => {
+    if (e instanceof HttpErrorResponse && e.status === 401 && !req.url.includes('/api/token/') && auth.signedIn()) {
+      auth.logout();
+      router.navigateByUrl('/login');
+    }
+  } }));
+};

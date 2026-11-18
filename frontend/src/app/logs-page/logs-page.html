@@ -137,7 +137,7 @@
           <table class="anstable">
             <thead><tr><th>Name</th><th>Type</th><th>Value</th><th>TTL</th><th>Location</th><th></th></tr></thead>
             <tbody>
-              @for (a of list; track $index) {
+              @for (a of list; track a.name + a.type + a.value) {
                 <tr><td class="mono">{{ a.name }}</td><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ a.ttl }} s</td><td>{{ place(a.type, a.value) }}</td><td>@if (canWhois(a.type, a.value)) { <button class="mini" (click)="lookupWhois(a.value)" [attr.aria-label]="'WHOIS of ' + a.value">Whois</button> }</td></tr>
               }
             </tbody>
@@ -167,7 +167,7 @@
         @if (list.length) {
           <table class="anstable">
             <thead><tr><th>Type</th><th>Value</th><th>Location</th><th></th></tr></thead>
-            <tbody>@for (a of list; track $index) { <tr><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ place(a.type, a.value) }}</td><td>@if (canWhois(a.type, a.value)) { <button class="mini" (click)="lookupWhois(a.value)" [attr.aria-label]="'WHOIS of ' + a.value">Whois</button> }</td></tr> }</tbody>
+            <tbody>@for (a of list; track a.type + a.value) { <tr><td><span class="type" [attr.data-t]="a.type">{{ a.type }}</span></td><td class="mono">{{ a.value }}</td><td>{{ place(a.type, a.value) }}</td><td>@if (canWhois(a.type, a.value)) { <button class="mini" (click)="lookupWhois(a.value)" [attr.aria-label]="'WHOIS of ' + a.value">Whois</button> }</td></tr> }</tbody>
           </table>
         } @else { <p class="soft">No address recorded for this group.</p> }
       } @else { <p class="soft">Loading addresses…</p> }
