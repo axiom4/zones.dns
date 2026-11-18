@@ -1,0 +1,12 @@
+# Zones.dns: PostgreSQL maintenance. Install (no dot in the file name: cron ignores names with one):
+#   sudo install -m 644 deploy/cron/dns-postgres-maintenance /etc/cron.d/dns-postgres-maintenance
+# Adjust --dbname if your database is not called dns. flock: the two jobs never run together, nor twice.
+# Not VACUUM FULL: it locks the table and rewrites it; plain VACUUM only marks space for reuse, while queries go on.
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+# Sundays 05:15, after the nightly blocklist import (04:00): clean dead rows and refresh the statistics of every table.
+15 5 * * 0  postgres  flock -n /run/lock/dns-pg-maintenance.lock vacuumdb --dbname=dns --analyze --jobs=2 --quiet 2>&1 | logger -t dns-pg-vacuum
+
+# The 1st of the month, 06:00: rebuild the indexes of the blocklist table (millions of rows replaced every night) without blocking it.
+0 6 1 * *   postgres  flock -n /run/lock/dns-pg-maintenance.lock reindexdb --dbname=dns --concurrently --table=zones_blockeddomain --quiet 2>&1 | logger -t dns-pg-reindex

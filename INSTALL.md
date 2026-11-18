@@ -432,7 +432,20 @@ sudo systemctl restart dns-web dns-daemon   # and dns-dhcp / dns-proxy if used (
 
 Restarting `dns-api` makes a new sign-in key: the GUI downloads it again by itself, so users are not disconnected, but a sign-in in progress is retried.
 
-Recurring jobs (cron, as user `dns`): `manage.py import_blocklist` nightly to refresh the public lists.
+**Recurring jobs.** Everything the application needs on a schedule, in one place (details in section 14). As user `dns`, `sudo crontab -u dns -e`; paths are those of this guide:
+```
+15 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py update_oui
+30 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_asn
+0 4 * * *   cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist
+```
+| Job | When | What it does | Needed when |
+|---|---|---|---|
+| `update_oui` | nightly 03:15 | the MAC vendor table (maker of a network card) | always, a few seconds |
+| `import_asn` | nightly 03:30 | the ASN index for the Traffic map | `ASN_INDEX` is set |
+| `import_blocklist` | nightly 04:00 | the public blocklists and the ad-block lists of the proxy | public lists or `PROXY_RULE_LISTS` are used |
+| `/etc/cron.d/dns-postgres-maintenance` | Sunday 05:15, 1st of the month 06:00 | PostgreSQL `vacuumdb --analyze` and `reindexdb --concurrently` of the blocklist table | PostgreSQL (`deploy/cron/`, see section 14) |
+
+Not recurring: `rebuild_stats` (only if the statistics look wrong), `partition_querylog` (once), `scan_trackers` (by hand, README), `mfa_reset` (lost second factor). Keep the PostgreSQL job after the blocklist import (it is: 05:15 against 04:00).
 
 The `.gitignore` excludes `.env`, the GeoIP databases, `staticfiles/` and the build folders.
 
@@ -454,6 +467,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 - **Ping (GUI):** the web process sends ICMP echoes itself. On Linux that works without privileges for the groups in `net.ipv4.ping_group_range` (`sysctl net.ipv4.ping_group_range`; to allow the group of user `dns`: `sysctl -w net.ipv4.ping_group_range="<gid> <gid>"`, persisted in `/etc/sysctl.d/`, ipv6 follows the same setting); if it is closed, gunicorn falls back to the `ping` program (`iputils-ping`).
 - **MAC vendors:** cron as user `dns`, nightly: `15 3 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py update_oui` (a few seconds; the table in the database is replaced in one transaction and the old one is kept if the download fails). The table is downloaded from the Internet, not shipped with the code: run it once by hand after `migrate` (until then every vendor is shown as unknown); the source file is updated weekly.
 - **Blocklists:** cron as user `dns`, nightly: `0 4 * * *  cd /opt/dns/app/backend && ../../.venv/bin/python manage.py import_blocklist`. The lists are managed in the GUI (*Blocklist > Public lists*: add or remove a list by URL, *Sync now*, last sync and error per list); `BLOCKLISTS` in `.env` is only the default until the list is first saved there. *Sync now* starts the same command in the background as the user of the web process, so that user needs write access to the database (it already has).
+- **PostgreSQL maintenance (cron):** autovacuum does the daily work, but the blocklist table has millions of rows replaced every night, and the planner statistics and the indexes of such a table drift. `deploy/cron/dns-postgres-maintenance` (`sudo install -m 644 deploy/cron/dns-postgres-maintenance /etc/cron.d/dns-postgres-maintenance`) runs, as the `postgres` user over the local socket: a `vacuumdb --analyze` of the whole database every Sunday at 05:15 (after the 04:00 import), and on the 1st of the month at 06:00 a `reindexdb --concurrently` of `zones_blockeddomain` (it does not block the table). Not `VACUUM FULL`: it locks and rewrites the table. Output goes to the journal (`journalctl -t dns-pg-vacuum`). MariaDB: `mariadb-check --optimize dns` monthly does the same job.
 - **Lost second factor:** `manage.py mfa_reset <user>`.
 
 ## 15. Hardening checklist
@@ -489,15 +503,6 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 | Redis errors in the log | Wrong `REDIS_URL` or password. The DNS daemon keeps working (it asks the upstream directly). |
 | Sign-in fails right after an API restart | The key changed; the GUI fetches it again and retries once. A second failure: reload the page. |
 
-## Known limits / deferred hardening
-
-- The MITM Root CA (`PROXY_HTTPS_MITM`) has no NameConstraints: whoever gets its key can impersonate any site to every device that enrolled it. Its key lives in the database, encrypted with a password derived from `SECRET_KEY`; rotating `SECRET_KEY` needs the CA to be created again (and re-enrolled on the devices).
-- `Record` has no `UniqueConstraint`: duplicate records are possible under concurrent writes.
-- No DRF throttling in the API (nginx limits only sign-in and second factor).
-- No pagination: the frontend expects plain arrays.
-- The nginx limits for DoH/DoT are estimates, not measured.
-
-**Behaviour changes worth knowing.** Blocklist and rule-list sources must be `https://` on public addresses (no `http://`, no LAN hosts; the list keeps its old copy and the status shows the error). Custom `/regex/` rules and DNS regex entries with nested quantifiers such as `(a+)+` or `(\w+\.)*x` are skipped for safety. The proxy log window "Last 30 days" is the longest one.
 ## Tuning
 
 Numbers below were applied to a Raspberry Pi host (4 cores, 8 GB, database on an SD card) that runs the daemons, nginx, PostgreSQL and Redis together. Scale them to your RAM; none of them is required to run. The settings are ready to copy in `deploy/tuning/` (`99-dns.sysctl.conf`, `postgresql-dns-tuning.conf`, `redis-dns.conf`, `nginx-tuning.conf`); the blocks below explain them. Change one group, restart what it names, and check the result (see the end of this section). Keep a copy of every file you edit (`sudo cp -a file /var/backups/...`).
@@ -563,3 +568,12 @@ dig +short example.com @<server>; dig +tcp +short example.com @<server>
 ```
 Watch `SELECT count(*) FROM pg_stat_activity` against `max_connections`, and the daemon error log for `database not reachable` after a PostgreSQL restart (it recovers by itself).
 
+## Known limits / deferred hardening
+
+- The MITM Root CA (`PROXY_HTTPS_MITM`) has no NameConstraints: whoever gets its key can impersonate any site to every device that enrolled it. Its key lives in the database, encrypted with a password derived from `SECRET_KEY`; rotating `SECRET_KEY` needs the CA to be created again (and re-enrolled on the devices).
+- `Record` has no `UniqueConstraint`: duplicate records are possible under concurrent writes.
+- No DRF throttling in the API (nginx limits only sign-in and second factor).
+- No pagination: the frontend expects plain arrays.
+- The nginx limits for DoH/DoT are estimates, not measured.
+
+**Behaviour changes worth knowing.** Blocklist and rule-list sources must be `https://` on public addresses (no `http://`, no LAN hosts; the list keeps its old copy and the status shows the error). Custom `/regex/` rules and DNS regex entries with nested quantifiers such as `(a+)+` or `(\w+\.)*x` are skipped for safety. The proxy log window "Last 30 days" is the longest one.
