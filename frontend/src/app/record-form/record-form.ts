@@ -1,4 +1,4 @@
-import { Component, ElementRef, computed, inject, input, output, signal, viewChild } from '@angular/core';
+import { Component, ElementRef, Injector, afterNextRender, computed, inject, input, output, signal, viewChild } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
 import { recordsCreate, recordsUpdate } from '../api/functions';
@@ -6,6 +6,7 @@ import { Record, RecordRequest, TypeEnum } from '../api/models';
 import { GROUPS, SPEC, TTL_PRESETS, TXT_TEMPLATES, TypeSpec, compose, defaults, parse, validate } from '../lib/record-types';
 import { ptrToIp } from '../lib/reverse';
 import { Ui } from '../services/ui';
+import { fieldErrors } from '../lib/error-text';
 
 /** Guided create/edit dialog for one DNS record. Open it with open() (new) or open(record) (edit). */
 @Component({
@@ -34,6 +35,11 @@ export class RecordForm {
   editingId = signal<number | null>(null);
   raw = signal(false);
   submitted = signal(false);
+  picking = signal(true); // the type grid: open for a new record, folded to "A · Change type" when editing
+  busy = signal(false);
+  server = signal<{ [k: string]: string }>({}); // the server's per-field messages of the last save
+  private injector = inject(Injector);
+  private snapshot = '';
 
   name = '@'; ttl: number | string = 300; note = ''; enabled = true; createPtr = false; rawText = '';
   vals: { [k: string]: string } = defaults(SPEC['A']);
@@ -44,8 +50,8 @@ export class RecordForm {
   hostOptions = computed(() => [...new Set(this.records().filter(r => r.name !== '*').map(r => (r.name === '@' ? this.zoneName() : `${r.name}.${this.zoneName()}`) + '.'))]);
 
   open(r?: Record) {
-    this.ui.error.set('');
-    this.submitted.set(false);
+    this.submitted.set(false); this.server.set({}); this.busy.set(false);
+    this.picking.set(!r);
     if (r) {
       this.editingId.set(r.id);
       this.type.set(r.type);
@@ -59,8 +65,22 @@ export class RecordForm {
       this.pickType(this.reverse() ? 'PTR' : 'A');
       this.name = this.reverse() ? '' : '@'; this.ttl = 300; this.note = ''; this.enabled = true; this.createPtr = false;
     }
+    this.snapshot = this.state();
     this.dlg().nativeElement.showModal();
+    if (r) this.focus('#rf-name');
   }
+
+  /** Everything the user can change, to tell whether closing would throw work away. */
+  private state() { return JSON.stringify([this.type(), this.raw(), this.rawText, this.vals, this.name, String(this.ttl), this.note, this.enabled, this.createPtr]); }
+  /** Cancel, Esc: ask first when something was changed. */
+  close() {
+    if (this.state() === this.snapshot) { this.dlg().nativeElement.close(); return; }
+    this.ui.ask('Discard your changes?', 'The record has not been saved.', () => this.dlg().nativeElement.close(), 'Discard changes');
+  }
+  private focus(sel: string) {
+    afterNextRender(() => this.dlg().nativeElement.querySelector<HTMLElement>(sel)?.focus(), { injector: this.injector });
+  }
+  choose(t: TypeEnum) { this.pickType(t); this.server.set({}); if (this.editingId() !== null) this.picking.set(false); }
 
   pickType(t: TypeEnum) { this.type.set(t); this.vals = defaults(SPEC[t]); this.raw.set(false); this.rawText = ''; }
   toRaw() { this.rawText = compose(this.spec(), this.vals); this.raw.set(true); }
@@ -69,6 +89,9 @@ export class RecordForm {
   rdata() { return this.raw() ? this.rawText.trim() : compose(this.spec(), this.vals); }
   previewLine() { return `${this.name.trim() || '@'} ${this.ttl} IN ${this.type()} ${this.rdata()}`; }
   error(f: { key: string } & Parameters<typeof validate>[0]) { return this.submitted() ? validate(f, this.vals[f.key]) : ''; }
+  nameErr = () => (this.submitted() && !this.name.trim() ? 'Enter a name: @ for the zone itself, or a host such as www.' : this.server()['name'] ?? '');
+  ttlErr = () => (this.submitted() && !this.ttlOk() ? 'Enter a whole number of seconds, 0 or more (300 is a good default).' : this.server()['ttl'] ?? '');
+  rawErr = () => (this.submitted() && !this.rawText.trim() ? 'Enter the value of the record.' : (this.raw() && this.server()['value']) || '');
 
   ttlOk() { return /^\d+$/.test(String(this.ttl ?? '').trim()); } // an emptied box is null or '', and +'' is 0
 
@@ -78,23 +101,35 @@ export class RecordForm {
   }
 
   async save(again: boolean) {
-    this.submitted.set(true);
-    if (!this.valid()) return;
+    if (this.busy()) return;
+    this.submitted.set(true); this.server.set({});
+    if (!this.valid()) { this.focus('[aria-invalid=true]'); return; }
     const ptr = this.createPtr;
     const body: RecordRequest = {
       zone: this.zoneId(), name: this.name.trim(), type: this.type(), value: this.rdata(),
       ttl: +this.ttl, enabled: this.enabled, note: this.note, create_ptr: ptr,
     };
     const id = this.editingId();
-    await this.ui.run(async () => {
+    this.busy.set(true);
+    try {
       if (id === null) await this.api.invoke(recordsCreate, { body });
       else await this.api.invoke(recordsUpdate, { id, body });
-    });
-    if (this.ui.error()) return; // stay open and show the server's message
+    } catch (e) {
+      // messages about a field go next to it; anything else (or a lost session) goes to the shell's notice
+      const fe = fieldErrors(e), shown = ['name', 'ttl', 'note', 'value'].filter(k => fe[k]);
+      this.server.set(fe);
+      if (shown.length < Object.keys(fe).length || !shown.length) await this.ui.run(() => Promise.reject(e));
+      if (shown.length) this.focus('[aria-invalid=true], #rf-value-e');
+      return;
+    } finally { this.busy.set(false); }
+    const full = this.fqdn();
+    this.ui.toast(`${id === null ? 'Created' : 'Saved'} ${full} (${this.type()})`);
     this.saved.emit(ptr);
     if (again) {
       this.vals = defaults(this.spec()); this.rawText = ''; this.raw.set(false); this.name = ''; this.note = ''; this.submitted.set(false);
       this.createPtr = ptr;
+      this.snapshot = this.state();
+      this.focus('#rf-name');
     } else this.dlg().nativeElement.close();
   }
 }

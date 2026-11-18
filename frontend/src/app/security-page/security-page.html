@@ -1,42 +1,51 @@
 <header>
   <div>
     <h2>Security</h2>
-    <p class="soft">Besides your password, signing in needs a second factor: a code from an authenticator app or a passkey.@if (st()?.required) { The second factor is mandatory. }</p>
+    <p class="soft">Besides your password, signing in needs a second factor: a code from an authenticator app or a passkey.@if (st()?.required) { The second factor is mandatory on this server.}</p>
   </div>
-  <div class="actions"><button class="primary" (click)="adding.set(!adding())">{{ adding() ? 'Close' : 'Add a factor' }}</button></div>
+  <div class="actions">
+    <button class="primary" (click)="toggleAdd()" [attr.aria-expanded]="adding()" aria-controls="add-factor">{{ adding() ? 'Close' : 'Add a factor' }}</button>
+  </div>
 </header>
 
-@if (adding()) {
-  <section class="panel"><h3>Add a factor</h3><app-mfa-enrol (done)="added()" /></section>
-}
+<div id="add-factor">
+  @if (adding()) {
+    <section class="panel" aria-labelledby="add-factor-h"><h3 id="add-factor-h">Add a factor</h3><app-mfa-enrol [start]="start()" (done)="added($event)" /></section>
+  }
+</div>
 
 @if (st(); as s) {
-  <ul class="records factors">
+  <ul class="records factors" aria-label="Your second factors">
     <li>
-      <span class="fkind">App</span>
+      <span class="fkind" [class.off]="!s.totp">App</span>
       <div class="fbody">
         <b>Authenticator app</b>
-        <span class="soft">{{ s.totp ? 'Active: every sign-in needs the 6-digit code.' : 'Not set up.' }}</span>
+        <span class="soft">{{ s.totp ? 'On: every sign-in asks for the 6-digit code.' : 'Not set up.' }}</span>
+        @if (s.totp && last(s)) { <span class="soft" id="last-totp">This is your only factor and one is required: add another before removing it.</span> }
       </div>
-      @if (s.totp) { <button class="mini danger-o" (click)="removeTotp()">Remove</button> }
-      @else { <button class="mini" (click)="adding.set(true)">Set up</button> }
+      @if (s.totp) { <button class="mini danger-o" (click)="removeTotp()" [disabled]="last(s)" [attr.aria-describedby]="last(s) ? 'last-totp' : null">Remove</button> }
+      @else { <button class="mini" (click)="open('totp')">Set up</button> }
     </li>
     @for (p of s.passkeys; track p.id) {
       <li>
         <span class="fkind">Passkey</span>
         <div class="fbody">
           <b>{{ p.name }}</b>
-          <span class="soft">Added on {{ p.created.slice(0, 10) }}</span>
+          <span class="soft">Added on {{ day(p.created) }}</span>
+          @if (last(s)) { <span class="soft" [id]="'last-pk-' + p.id">This is your only factor and one is required: add another before removing it.</span> }
         </div>
-        <button class="mini danger-o" (click)="removePasskey(p)">Remove</button>
+        <button class="mini danger-o" (click)="removePasskey(p)" [disabled]="last(s)" [attr.aria-describedby]="last(s) ? 'last-pk-' + p.id : null"
+                [attr.aria-label]="'Remove passkey ' + p.name">Remove</button>
       </li>
     } @empty {
       <li>
         <span class="fkind off">Passkey</span>
         <div class="fbody"><b>No passkey</b><span class="soft">Fingerprint, face, PIN or security key.</span></div>
-        <button class="mini" (click)="adding.set(true)">Add</button>
+        <button class="mini" (click)="open('')">Add a passkey</button>
       </li>
     }
   </ul>
-  <p class="soft note">If you lose your phone or key, an administrator can reset your factors with <code>python manage.py mfa_reset &lt;user&gt;</code>.</p>
+  <p class="soft note">Lost your phone or key? An administrator can reset your factors on the server with <code>python manage.py mfa_reset &lt;user&gt;</code>.</p>
+} @else {
+  <p class="soft" role="status">Loading…</p>
 }

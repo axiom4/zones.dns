@@ -29,7 +29,8 @@ export class ZonesStore {
       const z = await this.api.invoke(zonesCreate, { body: { name } });
       await this.load();
       ok = true;
-      this.router.navigate(['/zones', z.id]);
+      await this.router.navigate(['/zones', z.id]); // before the toast: a navigation clears notices
+      this.ui.toast(`Created zone ${z.name}`);
     });
     return ok;
   }
@@ -40,19 +41,24 @@ export class ZonesStore {
       const z = await this.api.invoke(zonesReverseCreate, { body: { cidr } });
       await this.load();
       ok = true;
-      this.router.navigate(['/zones', z.id]);
+      await this.router.navigate(['/zones', z.id]); // before the toast: a navigation clears notices
+      this.ui.toast(`Created reverse zone ${z.name}`);
     });
     return ok;
   }
 
   del(z: Zone) {
-    this.ui.ask(`Delete ${z.name}?`, 'All its records will be deleted too. This cannot be undone. You will be asked for your second factor.', () =>
+    this.ui.ask(`Delete zone ${z.name}?`, 'All its records are deleted too. This cannot be undone.', () =>
       this.ui.run(async () => {
-        const grant = await this.stepUp.request(`zone-delete:${z.id}`); // '' = no second factor set up, null = cancelled
+        const grant = await this.stepUp.request(`zone-delete:${z.id}`, `Delete zone ${z.name}`, 'Delete zone'); // '' = no second factor set up, null = cancelled
         if (grant === null) return;
         await this.api.invoke(zonesDestroy, { id: z.id, 'X-MFA-Grant': grant || undefined });
-        if (this.router.url === `/zones/${z.id}`) this.router.navigate(['/zones']);
         await this.load();
-      }));
+        if (this.router.url === `/zones/${z.id}`) { // straight to where the index would send us: a second navigation would clear the toast
+          const home = this.zones().find(x => x.name === this.defaultZone());
+          await this.router.navigate(home ? ['/zones', home.id] : ['/zones']);
+        }
+        this.ui.toast(`Deleted zone ${z.name}`);
+      }), 'Delete zone');
   }
 }

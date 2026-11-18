@@ -1,45 +1,91 @@
 <header>
   <div>
     <h2>Static hosts</h2>
-    <p class="soft">{{ hosts().length }} {{ hosts().length === 1 ? 'static host' : 'static hosts' }}. Like a hosts file: the name is answered with the address set here, whatever the real DNS says. It wins over zones, the blacklist and the upstream.</p>
+    <p class="soft">Like a hosts file: the name always gets the address set here. It overrides everything: zones, the blocklist and the upstream DNS.</p>
   </div>
   @if (hosts().length > 5) {
     <div class="actions"><input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search hosts" aria-label="Search hosts" autocomplete="off"></div>
   }
 </header>
-<form class="composer" (ngSubmit)="add()">
-  <input class="grow" name="n" [(ngModel)]="draft.name" placeholder="host name, e.g. nas.lan" autocomplete="off" aria-label="Host name" required>
-  <input class="addr" name="a" [(ngModel)]="draft.address" placeholder="IP address, e.g. 192.168.1.50" autocomplete="off" aria-label="IP address" required>
-  <input class="ttl" name="t" type="number" min="0" [(ngModel)]="draft.ttl" placeholder="TTL" aria-label="TTL in seconds">
-  <input class="comment" name="o" [(ngModel)]="draft.note" placeholder="Note (optional)" autocomplete="off" aria-label="Note">
-  <button class="primary">Add host</button>
+
+<form class="hostform" (ngSubmit)="add()" novalidate aria-label="Add a static host">
+  <div class="field">
+    <label class="lbl" for="hn-name">Host name</label>
+    <input #addName id="hn-name" name="n" [(ngModel)]="draft.name" placeholder="nas.lan" autocomplete="off" aria-required="true"
+           [attr.aria-invalid]="!!addErr()['name'] || null" [attr.aria-describedby]="addErr()['name'] ? 'hn-name-e' : null">
+    @if (addErr()['name']; as e) { <small id="hn-name-e" class="bad">{{ e }}</small> }
+  </div>
+  <div class="field">
+    <label class="lbl" for="hn-addr">IP address</label>
+    <input id="hn-addr" name="a" [(ngModel)]="draft.address" placeholder="192.168.1.50" autocomplete="off" aria-required="true"
+           [attr.aria-invalid]="!!addErr()['address'] || null" [attr.aria-describedby]="addErr()['address'] ? 'hn-addr-e' : null">
+    @if (addErr()['address']; as e) { <small id="hn-addr-e" class="bad">{{ e }}</small> }
+  </div>
+  <div class="field">
+    <label class="lbl" for="hn-ttl">TTL <em>(seconds)</em></label>
+    <input id="hn-ttl" name="t" type="number" inputmode="numeric" min="0" [(ngModel)]="draft.ttl" placeholder="300"
+           [attr.aria-invalid]="!!addErr()['ttl'] || null" [attr.aria-describedby]="addErr()['ttl'] ? 'hn-ttl-e' : null">
+    @if (addErr()['ttl']; as e) { <small id="hn-ttl-e" class="bad">{{ e }}</small> }
+  </div>
+  <div class="field">
+    <label class="lbl" for="hn-note">Note <em>(optional)</em></label>
+    <input id="hn-note" name="o" [(ngModel)]="draft.note" autocomplete="off" placeholder="What is it?">
+  </div>
+  <button class="primary" [disabled]="busy()">{{ busy() ? 'Adding…' : 'Add host' }}</button>
 </form>
-<ul class="records">
-  @for (h of shown(); track h.id) {
-    @if (editing() === h.id) {
-      <li class="editing">
-        <form class="composer inline-edit" (ngSubmit)="save(h)">
-          <input class="grow" name="en" [(ngModel)]="edit.name" autocomplete="off" aria-label="Host name" required>
-          <input class="addr" name="ea" [(ngModel)]="edit.address" autocomplete="off" aria-label="IP address" required>
-          <input class="ttl" name="et" type="number" min="0" [(ngModel)]="edit.ttl" aria-label="TTL in seconds">
-          <input class="comment" name="eo" [(ngModel)]="edit.note" autocomplete="off" aria-label="Note">
-          <button class="mini primary">Save</button>
-          <button type="button" class="mini" (click)="editing.set(null)">Cancel</button>
-        </form>
-      </li>
-    } @else {
-      <li [class.off]="h.enabled === false">
-        <span class="type" [attr.data-t]="h.address.includes(':') ? 'AAAA' : 'A'">{{ h.address.includes(':') ? 'AAAA' : 'A' }}</span>
-        <span class="rname">{{ h.name }}@if (h.note) {<small class="note-t">{{ h.note }}</small>}</span>
-        <span class="rvalue">{{ h.address }}</span>
-        <span class="ttlv">{{ h.ttl }}s</span>
-        <button class="switch" role="switch" [attr.aria-checked]="h.enabled !== false" (click)="toggle(h)"
-                [title]="h.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
-        <button class="icon edit" (click)="startEdit(h)" [attr.aria-label]="'Edit ' + h.name">✎</button>
-        <button class="icon" (click)="del(h)" [attr.aria-label]="'Delete ' + h.name">✕</button>
+
+@if (loaded()) {
+  <ul class="records zrecs">
+    @for (h of shown(); track h.id) {
+      @if (editing() === h.id) {
+        <li class="editing">
+          <form class="hostform inline-edit" (ngSubmit)="save(h)" (keydown.escape)="cancelEdit(h)" novalidate [attr.aria-label]="'Edit ' + h.name">
+            <div class="field">
+              <label class="lbl" for="he-name">Host name</label>
+              <input id="he-name" name="en" [(ngModel)]="edit.name" autocomplete="off" aria-required="true"
+                     [attr.aria-invalid]="!!editErr()['name'] || null" [attr.aria-describedby]="editErr()['name'] ? 'he-name-e' : null">
+              @if (editErr()['name']; as e) { <small id="he-name-e" class="bad">{{ e }}</small> }
+            </div>
+            <div class="field">
+              <label class="lbl" for="he-addr">IP address</label>
+              <input id="he-addr" name="ea" [(ngModel)]="edit.address" autocomplete="off" aria-required="true"
+                     [attr.aria-invalid]="!!editErr()['address'] || null" [attr.aria-describedby]="editErr()['address'] ? 'he-addr-e' : null">
+              @if (editErr()['address']; as e) { <small id="he-addr-e" class="bad">{{ e }}</small> }
+            </div>
+            <div class="field">
+              <label class="lbl" for="he-ttl">TTL <em>(seconds)</em></label>
+              <input id="he-ttl" name="et" type="number" inputmode="numeric" min="0" [(ngModel)]="edit.ttl"
+                     [attr.aria-invalid]="!!editErr()['ttl'] || null" [attr.aria-describedby]="editErr()['ttl'] ? 'he-ttl-e' : null">
+              @if (editErr()['ttl']; as e) { <small id="he-ttl-e" class="bad">{{ e }}</small> }
+            </div>
+            <div class="field">
+              <label class="lbl" for="he-note">Note <em>(optional)</em></label>
+              <input id="he-note" name="eo" [(ngModel)]="edit.note" autocomplete="off">
+            </div>
+            <span class="hostform-acts">
+              <button class="primary" [disabled]="busy()">Save host</button>
+              <button type="button" class="ghost" (click)="cancelEdit(h)">Cancel</button>
+            </span>
+          </form>
+        </li>
+      } @else {
+        <li [class.off]="h.enabled === false">
+          <span class="type" [attr.data-t]="h.address.includes(':') ? 'AAAA' : 'A'">{{ h.address.includes(':') ? 'AAAA' : 'A' }}</span>
+          <span class="rname">{{ h.name }}@if (h.note) {<small class="note-t">{{ h.note }}</small>}</span>
+          <span class="rvalue">{{ h.address }}</span>
+          <span class="ttlv">{{ h.ttl }}s</span>
+          @if (h.enabled === false) { <span class="offtag">Off</span> }
+          <button class="switch" role="switch" [attr.aria-checked]="h.enabled !== false" (click)="toggle(h)" [attr.aria-label]="'Serve ' + h.name"><i></i></button>
+          <button class="icon edit" [attr.data-edit]="h.id" (click)="startEdit(h)" [attr.aria-label]="'Edit ' + h.name" [title]="'Edit ' + h.name">✎</button>
+          <button class="icon" (click)="del(h)" [attr.aria-label]="'Delete ' + h.name" [title]="'Delete ' + h.name">✕</button>
+        </li>
+      }
+    } @empty {
+      <li class="empty">
+        @if (hosts().length) { No host matches “{{ filter().trim() }}”. <button class="link" (click)="filter.set('')">Clear the search</button> }
+        @else { No static hosts yet. Add one above: every query for that name gets your address. }
       </li>
     }
-  } @empty {
-    <li class="empty">{{ hosts().length ? 'No results for your search.' : 'No static hosts. Add one above: queries for that name get your address.' }}</li>
-  }
-</ul>
+  </ul>
+  <p class="sr-only" role="status">{{ filter().trim() ? shown().length + ' of ' + hosts().length + ' hosts shown' : '' }}</p>
+}

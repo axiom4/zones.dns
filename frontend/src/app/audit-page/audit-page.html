@@ -13,12 +13,22 @@
 </form>
 <p class="soft note">The server queries the domain and its name servers from the Internet (DNS, RDAP, HTTPS on port 443 and HTTP on port 80; with the deep analysis also the public certificate logs). Non-public addresses are never contacted. Analyse your own or public domains.</p>
 
+<p class="sr-only" role="status">{{ status() }}</p>
 @if (busy()) { <div class="blank"><p class="big-hint">Gathering the data…</p><p class="soft">{{ deep ? 'Deep analysis: it can take up to 40 seconds.' : 'It can take up to 15 seconds.' }}</p></div> }
 
 @if (report(); as r) {
-  <div class="tiles audit-tiles">
+  <div class="audit-sum" role="group" aria-label="Show findings by severity">
     @for (s of sevs; track s) {
-      <div class="tile" [attr.data-s]="s"><b>{{ r.summary[s] }}</b><span>{{ label[s] }}</span></div>
+      <button type="button" class="sumtile" [attr.data-s]="s" [attr.aria-pressed]="only() === s" [disabled]="!r.summary[s]" (click)="pick(s)">
+        <b>{{ r.summary[s] | number }}</b><span>{{ r.summary[s] === 1 ? label[s] : plural[s] }}</span>
+      </button>
+    }
+  </div>
+  <div class="audit-filter">
+    @if (only(); as o) {
+      <p class="soft">Showing only: {{ plural[o].toLowerCase() }}.</p><button type="button" class="link" (click)="only.set(null)">Show all findings</button>
+    } @else {
+      <label class="check"><input type="checkbox" name="hp" [ngModel]="hidePassed()" (ngModelChange)="hidePassed.set($event)"> Hide passed checks ({{ r.summary.ok | number }})</label>
     }
   </div>
 
@@ -33,7 +43,7 @@
         </div>
       }
     </section>
-  }
+  } @empty { <p class="soft panel">{{ only() ? 'No finding of this kind.' : 'Every check passed. Untick "Hide passed checks" to see them.' }}</p> }
 
   <h3 class="sect">Collected data</h3>
 
@@ -49,7 +59,7 @@
         <dt>Status</dt><dd>{{ g.status.join(', ') || '—' }}</dd>
         <dt>DNSSEC delegation</dt><dd>{{ g.dnssec_signed === null ? '—' : g.dnssec_signed ? 'signed' : 'unsigned' }}</dd>
         <dt>Abuse reports</dt><dd>{{ g.abuse_email ?? '—' }}</dd>
-        <dt>Name server</dt><dd>{{ g.nameservers.join(', ') || '—' }}</dd>
+        <dt>Name servers</dt><dd>{{ g.nameservers.join(', ') || '—' }}</dd>
       </dl>
     } @else { <p class="soft">Not available.</p> }
   </details>
@@ -98,7 +108,7 @@
   </details>
 
   <details class="panel" open>
-    <summary>Record DNS</summary>
+    <summary>DNS records</summary>
     @for (d of r.dns; track d.type) {
       <div class="dnsrow"><span class="type" [attr.data-t]="d.type">{{ d.type }}</span>
         <div>@for (v of d.values; track v) { <p class="mono">{{ v }}</p> }</div></div>
@@ -182,7 +192,7 @@
       @for (k of keys(r.web.headers); track k) { <dt>{{ k }}</dt><dd class="mono">{{ r.web.headers[k] }}</dd> }
     </dl>
     @if (r.web.cookies.length) {
-      <h4 class="sub">Cookie</h4>
+      <h4 class="sub">Cookies</h4>
       <table class="anstable">
         <thead><tr><th>Name</th><th>Secure</th><th>HttpOnly</th><th>SameSite</th></tr></thead>
         <tbody>@for (c of r.web.cookies; track c.name) { <tr><td class="mono">{{ c.name }}</td><td>{{ c.secure ? 'yes' : 'no' }}</td><td>{{ c.httponly ? 'yes' : 'no' }}</td><td>{{ c.samesite ?? 'no' }}</td></tr> }</tbody>
@@ -201,12 +211,12 @@
     </details>
   }
 
-  <p class="soft note">Analysis of {{ date(r.checked_at, true) }} · {{ secs(r.duration_ms) }} s{{ r.deep ? ' · deep' : '' }}</p>
+  <p class="soft note">{{ r.deep ? 'Deep analysis' : 'Analysis' }} of {{ date(r.checked_at, true) }}, done in {{ secs(r.duration_ms) }} s.</p>
 }
 
-<dialog #out class="confirm detail" (click)="$event.target === out ? out.close() : null">
+<dialog #out class="confirm detail" aria-labelledby="out-t" (click)="$event.target === out ? out.close() : null">
   @if (shown(); as f) {
-    <h3><span class="sev" [attr.data-s]="f.severity">{{ label[f.severity] }}</span> {{ f.title }}</h3>
+    <h3 id="out-t"><span class="sev" [attr.data-s]="f.severity">{{ label[f.severity] }}</span> {{ f.title }}</h3>
     <p class="soft">{{ f.category }}@if (f.detail) { · {{ f.detail }} }</p>
     <h4>Test output</h4>
     <pre class="rawout">{{ f.output }}</pre>

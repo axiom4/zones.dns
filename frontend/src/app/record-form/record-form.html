@@ -1,34 +1,43 @@
-<dialog #dlg class="confirm form-dialog" (click)="$event.target === dlg ? dlg.close() : null">
-  <form (ngSubmit)="save(false)" novalidate>
-    <h3>{{ editingId() === null ? 'New record' : 'Edit record' }} <span class="soft">in {{ zoneName() }}</span></h3>
+<dialog #dlg class="confirm form-dialog" aria-labelledby="rf-t" (cancel)="$event.preventDefault(); close()">
+  <form #frm (ngSubmit)="save(false)" novalidate>
+    <h3 id="rf-t">{{ editingId() === null ? 'New record' : 'Edit record' }} <span class="soft">in {{ zoneName() }}</span></h3>
 
-    <fieldset>
-      <legend>{{ editingId() === null ? 'What do you want to create?' : 'Record type' }}</legend>
-      <div class="typepick">
-        @for (g of groups; track g.name) {
-          <div class="tgroup">
-            <span class="tglabel">{{ g.name }}</span>
-            <div class="tgrid">
-              @for (s of g.specs; track s.type) {
-                <button type="button" class="tchip" [class.on]="type() === s.type" (click)="pickType(s.type)" [attr.aria-pressed]="type() === s.type">
-                  <b>{{ s.type }}</b><span>{{ s.title }}</span>
-                </button>
-              }
+    @if (picking()) {
+      <fieldset>
+        <legend>{{ editingId() === null ? 'What do you want to create?' : 'Record type' }}</legend>
+        <div class="typepick">
+          @for (g of groups; track g.name) {
+            <div class="tgroup" role="group" [attr.aria-labelledby]="'rf-g-' + $index">
+              <span class="tglabel" [id]="'rf-g-' + $index">{{ g.name }}</span>
+              <div class="tgrid">
+                @for (s of g.specs; track s.type) {
+                  <button type="button" class="tchip" [class.on]="type() === s.type" (click)="choose(s.type)" [attr.aria-pressed]="type() === s.type">
+                    <b>{{ s.type }}</b><span>{{ s.title }}</span>
+                  </button>
+                }
+              </div>
             </div>
-          </div>
-        }
+          }
+        </div>
+      </fieldset>
+    } @else {
+      <div class="tpicked">
+        <span class="type" [attr.data-t]="type()">{{ type() }}</span>
+        <span>{{ spec().title }}</span>
+        <button type="button" class="link" (click)="picking.set(true)" [attr.aria-label]="'Change the record type (now ' + type() + ')'">Change type</button>
       </div>
-    </fieldset>
+    }
 
     <div class="about">
       <p>{{ spec().about }}</p>
       <p class="soft">Example: <code>{{ spec().example }}</code></p>
     </div>
 
-    <label class="field">
-      <span class="lbl">Name</span>
-      <input name="name" list="fnames" autocomplete="off" [(ngModel)]="name" placeholder="www" aria-describedby="h-name">
-      <small id="h-name" class="help">
+    <div class="field">
+      <label class="lbl" for="rf-name">Name</label>
+      <input id="rf-name" name="name" list="fnames" autocomplete="off" [(ngModel)]="name" placeholder="www" aria-required="true"
+             [attr.aria-invalid]="!!nameErr() || null" [attr.aria-describedby]="'rf-name-h rf-name-full' + (nameErr() ? ' rf-name-e' : '')">
+      <small id="rf-name-h" class="help">
         @if (reverse()) {
           The last part of the IP address: for <code>10.0.0.7</code> in a /24 enter <code>7</code>.
         } @else {
@@ -36,83 +45,94 @@
           <code>&#64;</code> is the zone itself; <code>*</code> answers every subdomain that has no record of its own.
         }
       </small>
-      @if (submitted() && !name.trim()) { <small class="bad">Required field.</small> }
-      <small class="full">Full name: <b>{{ fqdn() }}</b>@if (ip(); as a) { · address <b>{{ a }}</b> }</small>
-    </label>
+      @if (nameErr(); as e) { <small id="rf-name-e" class="bad">{{ e }}</small> }
+      <small id="rf-name-full" class="full">Full name: <b>{{ fqdn() }}</b>@if (ip(); as a) {, address <b>{{ a }}</b>}</small>
+    </div>
 
     @if (!raw()) {
       @for (f of spec().fields; track f.key) {
-        <label class="field">
-          <span class="lbl">{{ f.label }}@if (f.optional) { <em> · optional</em> }</span>
+        <div class="field">
+          <label class="lbl" [for]="'rf-f-' + f.key">{{ f.label }}@if (f.optional) { <em>(optional)</em> }</label>
           @switch (f.kind) {
             @case ('select') {
-              <select [name]="f.key" [(ngModel)]="vals[f.key]" [attr.aria-describedby]="'h-' + f.key">
+              <select [id]="'rf-f-' + f.key" [name]="f.key" [(ngModel)]="vals[f.key]" [attr.aria-describedby]="'rf-f-' + f.key + '-h'">
                 @for (o of f.options; track o.value) { <option [value]="o.value">{{ o.label }}</option> }
               </select>
             }
             @case ('textarea') {
-              <textarea [name]="f.key" rows="3" [(ngModel)]="vals[f.key]" [placeholder]="f.placeholder ?? ''" [attr.aria-describedby]="'h-' + f.key"></textarea>
+              <textarea [id]="'rf-f-' + f.key" [name]="f.key" rows="3" [(ngModel)]="vals[f.key]" [placeholder]="f.placeholder ?? ''"
+                        [attr.aria-required]="!f.optional" [attr.aria-invalid]="!!error(f) || null"
+                        [attr.aria-describedby]="'rf-f-' + f.key + '-h' + (error(f) ? ' rf-f-' + f.key + '-e' : '')"></textarea>
             }
             @default {
-              <input [name]="f.key" [type]="f.kind === 'number' ? 'number' : 'text'" autocomplete="off"
+              <input [id]="'rf-f-' + f.key" [name]="f.key" [type]="f.kind === 'number' ? 'number' : 'text'" autocomplete="off"
+                     [attr.inputmode]="f.kind === 'number' ? 'numeric' : null"
                      [attr.list]="f.key === 'target' || f.key === 'replacement' ? 'fhosts' : null"
-                     [min]="f.min ?? null" [max]="f.max ?? null"
-                     [(ngModel)]="vals[f.key]" [placeholder]="f.placeholder ?? ''" [attr.aria-describedby]="'h-' + f.key">
+                     [min]="f.min ?? null" [max]="f.max ?? null" [attr.aria-required]="!f.optional" [attr.aria-invalid]="!!error(f) || null"
+                     [(ngModel)]="vals[f.key]" [placeholder]="f.placeholder ?? ''"
+                     [attr.aria-describedby]="'rf-f-' + f.key + '-h' + (error(f) ? ' rf-f-' + f.key + '-e' : '')">
             }
           }
-          <small [id]="'h-' + f.key" class="help">{{ f.help }}</small>
-          @if (error(f); as e) { <small class="bad">{{ e }}</small> }
-        </label>
+          <small [id]="'rf-f-' + f.key + '-h'" class="help">{{ f.help }}</small>
+          @if (error(f); as e) { <small [id]="'rf-f-' + f.key + '-e'" class="bad">{{ e }}</small> }
+        </div>
       }
       @if (type() === 'TXT') {
-        <div class="presets">Templates:
+        <div class="presets" role="group" aria-label="Text templates">Templates:
           @for (t of txtTemplates; track t.label) { <button type="button" class="mini" (click)="vals['text'] = t.text">{{ t.label }}</button> }
         </div>
       }
       <button type="button" class="link small" (click)="toRaw()">Edit as text (advanced)</button>
     } @else {
-      <label class="field">
-        <span class="lbl">Value (text)</span>
-        <textarea name="raw" rows="3" [(ngModel)]="rawText" aria-describedby="h-raw"></textarea>
-        <small id="h-raw" class="help">BIND zone file format. The guided fields do not recognise this value, so it is edited as text.</small>
-        @if (submitted() && !rawText.trim()) { <small class="bad">Required field.</small> }
-      </label>
+      <div class="field">
+        <label class="lbl" for="rf-raw">Value (text)</label>
+        <textarea id="rf-raw" name="raw" rows="3" [(ngModel)]="rawText" aria-required="true" [attr.aria-invalid]="!!rawErr() || null"
+                  [attr.aria-describedby]="'rf-raw-h' + (rawErr() ? ' rf-raw-e' : '')"></textarea>
+        <small id="rf-raw-h" class="help">BIND zone file format, the part after the type. The guided fields do not recognise this value, so it is edited as text.</small>
+        @if (rawErr(); as e) { <small id="rf-raw-e" class="bad">{{ e }}</small> }
+      </div>
       @if (parse_(rawText)) { <button type="button" class="link small" (click)="fromRaw()">Back to the guided fields</button> }
     }
+    @if (server()['value'] && !raw()) { <p class="bad" id="rf-value-e" tabindex="-1">{{ server()['value'] }}</p> }
 
-    <label class="field">
-      <span class="lbl">TTL (seconds)</span>
-      <input name="ttl" type="number" min="0" [(ngModel)]="ttl" aria-describedby="h-ttl">
-      <span class="presets">
-        @for (p of ttlPresets; track p.value) { <button type="button" class="mini" [class.on]="+ttl === p.value" (click)="ttl = p.value">{{ p.label }}</button> }
+    <div class="field">
+      <label class="lbl" for="rf-ttl">TTL (seconds)</label>
+      <input id="rf-ttl" name="ttl" type="number" inputmode="numeric" min="0" [(ngModel)]="ttl" [attr.aria-invalid]="!!ttlErr() || null"
+             [attr.aria-describedby]="'rf-ttl-h' + (ttlErr() ? ' rf-ttl-e' : '')">
+      <span class="presets" role="group" aria-label="TTL presets">
+        @for (p of ttlPresets; track p.value) { <button type="button" class="mini" [class.on]="+ttl === p.value" [attr.aria-pressed]="+ttl === p.value" (click)="ttl = p.value">{{ p.label }}</button> }
       </span>
-      <small id="h-ttl" class="help">How long clients may reuse the answer without asking again. Low = changes show up quickly; high = less traffic.</small>
-      @if (submitted() && !ttlOk()) { <small class="bad">Enter a whole number greater than or equal to 0.</small> }
-    </label>
+      <small id="rf-ttl-h" class="help">How long clients may reuse the answer without asking again. Low: changes show up quickly. High: less traffic.</small>
+      @if (ttlErr(); as e) { <small id="rf-ttl-e" class="bad">{{ e }}</small> }
+    </div>
 
-    <label class="field">
-      <span class="lbl">Note <em>· optional</em></span>
-      <input name="note" [(ngModel)]="note" autocomplete="off" placeholder="What is this record for?" aria-describedby="h-note">
-      <small id="h-note" class="help">Only for you: it is never sent in DNS answers.</small>
-    </label>
+    <div class="field">
+      <label class="lbl" for="rf-note">Note <em>(optional)</em></label>
+      <input id="rf-note" name="note" [(ngModel)]="note" autocomplete="off" placeholder="What is this record for?"
+             [attr.aria-invalid]="!!server()['note'] || null" [attr.aria-describedby]="'rf-note-h' + (server()['note'] ? ' rf-note-e' : '')">
+      <small id="rf-note-h" class="help">Only for you: it is never sent in DNS answers.</small>
+      @if (server()['note']; as e) { <small id="rf-note-e" class="bad">{{ e }}</small> }
+    </div>
 
     <div class="opts">
-      <label class="check"><input type="checkbox" name="enabled" [(ngModel)]="enabled"> Enabled
-        <small class="help">when disabled it stays saved but DNS does not serve it</small></label>
+      <div>
+        <label class="check"><input type="checkbox" name="enabled" [(ngModel)]="enabled" aria-describedby="rf-en-h"> Served</label>
+        <small id="rf-en-h" class="help">When off, the record stays saved but DNS does not answer with it.</small>
+      </div>
       @if (editingId() === null && (type() === 'A' || type() === 'AAAA')) {
-        <label class="check"><input type="checkbox" name="ptr" [(ngModel)]="createPtr"> Also create the reverse record (PTR)
-          <small class="help">lets you go from the address back to the name</small></label>
+        <div>
+          <label class="check"><input type="checkbox" name="ptr" [(ngModel)]="createPtr" aria-describedby="rf-ptr-h"> Also create the reverse record (PTR)</label>
+          <small id="rf-ptr-h" class="help">Lets you go from the address back to the name.</small>
+        </div>
       }
     </div>
 
     <div class="preview"><span class="soft">Will be saved as</span><code>{{ previewLine() }}</code></div>
 
-    @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
-
     <div class="actions">
-      <button type="button" class="ghost" (click)="dlg.close()">Cancel</button>
-      @if (editingId() === null) { <button type="button" class="ghost" (click)="save(true)">Save and new</button> }
-      <button class="primary">Save</button>
+      <button type="button" class="ghost" (click)="close()">Cancel</button>
+      @if (editingId() === null) { <button type="button" class="ghost" [disabled]="busy()" (click)="save(true)">Save and add another</button> }
+      <button class="primary" [disabled]="busy()">{{ busy() ? 'Saving…' : editingId() === null ? 'Create record' : 'Save record' }}</button>
     </div>
 
     <datalist id="fnames">@for (n of nameOptions(); track n) { <option [value]="n"></option> }</datalist>

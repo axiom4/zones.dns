@@ -1,6 +1,7 @@
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { geoDestinationsRetrieve } from '../api/functions';
 import { Destinations } from '../api/models';
@@ -10,7 +11,7 @@ import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-geo-page',
-  imports: [FormsModule, RouterLink, GeoMap],
+  imports: [FormsModule, RouterLink, GeoMap, DecimalPipe],
   templateUrl: './geo-page.html',
 })
 export class GeoPage implements OnDestroy {
@@ -19,6 +20,7 @@ export class GeoPage implements OnDestroy {
   flag = flag; name = countryName;
   hours = 24;
   data = signal<Destinations | null>(null);
+  failed = signal(false);
   filter = signal('');
   /** The countries matching the search: name, code, or one of their most requested domains. */
   shown = computed(() => {
@@ -29,14 +31,26 @@ export class GeoPage implements OnDestroy {
   private timer?: ReturnType<typeof setTimeout>;
   private retries = 0;
 
-  constructor() { this.load(); }
+  private router = inject(Router);
+  constructor() {
+    const h = Number(inject(ActivatedRoute).snapshot.queryParamMap.get('hours')); // ?hours=168: a reload or a shared link keeps the period
+    if ([1, 24, 168, 720].includes(h)) this.hours = h;
+    this.load();
+  }
+  changed() {
+    this.router.navigate([], { queryParams: { hours: this.hours !== 24 ? this.hours : null }, replaceUrl: true });
+    this.load();
+  }
   private destroyed = false;
   ngOnDestroy() { this.destroyed = true; clearTimeout(this.timer); }
 
   async load(auto = false) {
     clearTimeout(this.timer);
     if (!auto) this.retries = 0;
-    await this.ui.run(async () => this.data.set(await this.api.invoke(geoDestinationsRetrieve, { hours: this.hours })));
+    await this.ui.run(async () => {
+      try { this.data.set(await this.api.invoke(geoDestinationsRetrieve, { hours: this.hours })); this.failed.set(false); }
+      catch (e) { this.failed.set(true); throw e; }
+    }, { silent: auto });
     // Unknown addresses are looked up in batches: ask again a few times until they are all located.
     if (!this.destroyed && (this.data()?.pending ?? 0) > 0 && this.retries++ < 8) this.timer = setTimeout(() => this.load(true), 2500);
   }

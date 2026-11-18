@@ -1,14 +1,14 @@
 <nav class="subtabs" aria-label="Logs">
-  <a routerLink="/logs/dns" [class.on]="true">DNS queries</a>
-  <a routerLink="/logs/proxy" [class.on]="false">Proxy requests</a>
+  <a routerLink="/logs/dns" routerLinkActive="on" ariaCurrentWhenActive="page">DNS queries</a>
+  <a routerLink="/logs/proxy" routerLinkActive="on" ariaCurrentWhenActive="page">Proxy requests</a>
 </nav>
 <header>
   <div>
     <h2>Query log</h2>
-    <p class="soft">{{ grouped ? gCount() + ' domains' : count() + ' results' }}</p>
+    <p class="soft">@if (grouped) { {{ gCount() | number }} {{ gCount() === 1 ? 'domain' : 'domains' }} } @else { {{ count() | number }} {{ count() === 1 ? 'query' : 'queries' }} }</p>
   </div>
   <div class="actions">
-    <label class="live"><input type="checkbox" [(ngModel)]="grouped" name="grouped" (ngModelChange)="reset()"> Group by domain</label>
+    <label class="live"><input type="checkbox" [(ngModel)]="grouped" name="grouped" (ngModelChange)="changed()"> Group by domain</label>
     <label class="live"><input type="checkbox" [(ngModel)]="live" name="live" (ngModelChange)="toggleLive()"> Refresh automatically</label>
     <button class="ghost" (click)="openPurge()">Purge log…</button>
   </div>
@@ -21,22 +21,21 @@
   <p class="notice" role="status">Only domains whose answers point to <b>{{ countryName(country) }}</b> ({{ hours > 24 ? 'last ' + hours / 24 + ' days' : hours === 1 ? 'last hour' : 'last 24 hours' }}).
     <button class="mini" (click)="clearCountry()">Remove filter</button></p>
 }
-@if (notice()) { <p class="notice" role="status">{{ notice() }}</p> }
 
 <div class="composer filters">
   <input class="grow" type="search" name="q" [(ngModel)]="q" (ngModelChange)="search()" placeholder="Search by domain name" aria-label="Search by name">
-  <select name="o" [(ngModel)]="outcome" (ngModelChange)="reset()" aria-label="Outcome">
+  <select name="o" [(ngModel)]="outcome" (ngModelChange)="changed()" aria-label="Outcome">
     <option value="">All outcomes</option>
     <option value="local">Internal zones</option>
     <option value="forwarded">Forwarded</option>
     <option value="blocked">Blocked</option>
     <option value="error">Errors</option>
   </select>
-  <select name="t" [(ngModel)]="type" (ngModelChange)="reset()" aria-label="Type">
+  <select name="t" [(ngModel)]="type" (ngModelChange)="changed()" aria-label="Type">
     <option value="">All types</option>
     @for (t of types; track t) { <option>{{ t }}</option> }
   </select>
-  <select name="rc" [(ngModel)]="rcode" (ngModelChange)="reset()" aria-label="Response code">
+  <select name="rc" [(ngModel)]="rcode" (ngModelChange)="changed()" aria-label="Response code">
     <option value="">All responses</option>
     <option value="NOERROR">NOERROR</option>
     <option value="NXDOMAIN">NXDOMAIN</option>
@@ -45,7 +44,7 @@
   </select>
   <input class="ip" name="ans" [(ngModel)]="answer" (ngModelChange)="search()" placeholder="Search the answer (e.g. IP)" aria-label="Search the answer">
   <app-autocomplete [(value)]="client" (valueChange)="search()" [options]="clientOptions()" (opened)="loadClients()" placeholder="Client (IP or name)" label="Client" />
-  <select name="h" [(ngModel)]="hours" (ngModelChange)="reset(); loadClients()" aria-label="Period">
+  <select name="h" [(ngModel)]="hours" (ngModelChange)="changed(); loadClients()" aria-label="Period">
     <option [ngValue]="1">Last hour</option>
     <option [ngValue]="24">Last 24 hours</option>
     <option [ngValue]="168">Last 7 days</option>
@@ -53,13 +52,22 @@
     <option [ngValue]="0">All time</option>
   </select>
   @if (grouped) {
-    <select name="ord" [(ngModel)]="ordering" (ngModelChange)="reset()" aria-label="Order">
+    <select name="ord" [(ngModel)]="ordering" (ngModelChange)="changed()" aria-label="Order">
       <option value="last">Most recent</option>
       <option value="count">Most requested</option>
     </select>
   }
 </div>
 
+@if (live && busy()) {
+  <div class="livepill">
+    @if (fresh()) {
+      <button class="ghost" (click)="showFresh()">{{ fresh() < 0 ? 'Show the latest activity' : fresh() >= PAGE ? 'Show ' + PAGE + '+ new queries' : 'Show ' + fresh() + (fresh() === 1 ? ' new query' : ' new queries') }}</button>
+    } @else { <span class="soft">Live updates wait while you work in the list</span> }
+  </div>
+}
+
+<div class="logwrap" (pointerenter)="point(true, $event)" (pointerleave)="point(false, $event)" (focusin)="focusIn.set(true)" (focusout)="focusOut($event)">
 @if (grouped) {
   <ul class="records logs">
     @for (g of groups(); track g.name) {
@@ -107,17 +115,19 @@
   </ul>
   @if (rows().length < count()) { <div class="more"><button class="ghost" (click)="more()">Show {{ PAGE }} more</button></div> }
 }
+</div>
 
-<dialog #det class="confirm detail" (click)="$event.target === det ? det.close() : null">
+<dialog #det class="confirm detail" aria-labelledby="det-t" (close)="dialogClosed()" (click)="$event.target === det ? det.close() : null">
   @if (detail(); as d) {
     @if (d.kind === 'q') {
-      <h3><span class="type" [attr.data-t]="d.row.type">{{ d.row.type }}</span> {{ d.row.name }}</h3>
+      <h3 id="det-t"><span class="type" [attr.data-t]="d.row.type">{{ d.row.type }}</span> {{ d.row.name }}</h3>
       <dl>
         <dt>Time</dt><dd>{{ time(d.row.time) }}</dd>
         <dt>Client</dt><dd class="mono">{{ d.row.client }}@if (who(d.row.client) !== d.row.client) { · {{ who(d.row.client) }} }</dd>
         <dt>Outcome</dt><dd><span class="out" [attr.data-o]="d.row.outcome">{{ labels[d.row.outcome] }}</span></dd>
         <dt>Response code</dt><dd><span class="rc" [attr.data-rc]="d.row.rcode">{{ d.row.rcode }}</span></dd>
-        <dt>Resolved by</dt><dd>{{ d.row.via || '—' }}</dd>
+        @if (d.row.outcome === 'blocked') { <dt>Why</dt><dd>{{ why(d.row) }}</dd> }
+        @else { <dt>Resolved by</dt><dd>{{ d.row.via || '—' }}</dd> }
         <dt>Response time</dt><dd>{{ d.row.ms }} ms</dd>
         <dt>Main domain</dt><dd>{{ d.row.domain }}</dd>
       </dl>
@@ -137,17 +147,17 @@
         }
       } @else { <p class="soft">Loading the answer…</p> }
     } @else {
-      <h3>{{ d.g.name }}</h3>
+      <h3 id="det-t">{{ d.g.name }}</h3>
       <dl>
-        <dt>Query</dt><dd>{{ d.g.count }}</dd>
-        @if (d.level === 0) { <dt>Distinct hosts</dt><dd>{{ d.g.names }}</dd> }
-        <dt>Distinct clients</dt><dd>{{ d.g.clients }}</dd>
+        <dt>Queries</dt><dd>{{ d.g.count | number }}</dd>
+        @if (d.level === 0) { <dt>Distinct hosts</dt><dd>{{ d.g.names | number }}</dd> }
+        <dt>Distinct clients</dt><dd>{{ d.g.clients | number }}</dd>
         <dt>Outcomes</dt>
         <dd class="mix">
-          @if (d.g.local) { <span class="out sm" data-o="local">Internal {{ d.g.local }}</span> }
-          @if (d.g.forwarded) { <span class="out sm" data-o="forwarded">Forwarded {{ d.g.forwarded }}</span> }
-          @if (d.g.blocked) { <span class="out sm" data-o="blocked">Blocked {{ d.g.blocked }}</span> }
-          @if (d.g.error) { <span class="out sm" data-o="error">Error {{ d.g.error }}</span> }
+          @if (d.g.local) { <span class="out sm" data-o="local">Internal {{ d.g.local | number }}</span> }
+          @if (d.g.forwarded) { <span class="out sm" data-o="forwarded">Forwarded {{ d.g.forwarded | number }}</span> }
+          @if (d.g.blocked) { <span class="out sm" data-o="blocked">Blocked {{ d.g.blocked | number }}</span> }
+          @if (d.g.error) { <span class="out sm" data-o="error">Error {{ d.g.error | number }}</span> }
         </dd>
         <dt>Average time</dt><dd>{{ d.g.avg_ms | number: '1.0-0' }} ms</dd>
         <dt>Last request</dt><dd>{{ time(d.g.last) }}</dd>
@@ -169,11 +179,18 @@
     @else if (w.error) { <p class="soft">{{ w.error }}</p> }
     @else { <pre class="whois">{{ w.text }}</pre> }
   }
-  <div class="actions"><button class="ghost" (click)="det.close()">Close</button></div>
+  <div class="actions">
+    @if (detail(); as d) {
+      @if (d.kind === 'q' && canAllow(d.row) && !allowedNow().has(d.row.name)) {
+        <button class="ghost" (click)="allow(d.row.name)">Allow {{ d.row.name }}</button>
+      }
+    }
+    <button class="primary" (click)="det.close()">Close</button>
+  </div>
 </dialog>
 
-<dialog #pg class="confirm" (click)="$event.target === pg ? pg.close() : null">
-  <h3>Purge the log</h3>
+<dialog #pg class="confirm" aria-labelledby="pg-t" (close)="dialogClosed()" (click)="$event.target === pg ? pg.close() : null">
+  <h3 id="pg-t">Purge the log</h3>
   <p class="soft pl">Permanently deletes queries older than the chosen period. It applies to the whole log, not only the active filters.</p>
   <label class="field">
     <span class="lbl">Delete queries older than</span>
@@ -186,11 +203,10 @@
     </select>
     <small class="help">The daemon already deletes queries older than the days set in <code>QUERY_LOG_DAYS</code>.</small>
   </label>
-  <p class="purgecount">@if (purgeCount() === null) { Counting queries… } @else { <b>{{ purgeCount() }}</b> queries will be deleted. This cannot be undone. }</p>
-  @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+  <p class="purgecount">@if (purgeCount() === null) { Counting queries… } @else { <b>{{ purgeCount() | number }}</b> {{ purgeCount() === 1 ? 'query' : 'queries' }} will be deleted. This cannot be undone. }</p>
   <div class="actions">
     <button class="ghost" (click)="pg.close()">Cancel</button>
-    <button class="danger" (click)="doPurge()" [disabled]="!purgeCount()">Delete</button>
+    <button class="danger" (click)="doPurge()" [disabled]="!purgeCount()">Delete queries</button>
   </div>
 </dialog>
 
@@ -199,26 +215,28 @@
     <button class="chev" (click)="level === 0 ? toggleDomain(g) : toggleName(g)" [attr.aria-expanded]="isOpen(g.name, level)"
             [attr.aria-label]="(isOpen(g.name, level) ? 'Hide' : 'Show') + (level === 0 && g.names > 1 ? ' the subdomains of ' : ' the queries of ') + g.name">▸</button>
     <button class="rvalue linkish" (click)="level === 0 ? toggleDomain(g) : toggleName(g)">{{ g.name }}</button>
-    @if (level === 0) { <span class="hosts" [class.none]="g.names < 2" title="Distinct hosts queried">{{ g.names }} host</span> }
+    @if (level === 0) { <span class="hosts" [class.none]="g.names < 2" title="Distinct hosts queried">{{ g.names | number }} {{ g.names === 1 ? 'host' : 'hosts' }}</span> }
     <span class="mix">
-      @if (g.local) { <span class="out sm" data-o="local" title="Internal zones">{{ g.local }}</span> }
-      @if (g.forwarded) { <span class="out sm" data-o="forwarded" title="Forwarded">{{ g.forwarded }}</span> }
-      @if (g.blocked) { <span class="out sm" data-o="blocked" title="Blocked">{{ g.blocked }}</span> }
-      @if (g.error) { <span class="out sm" data-o="error" title="Errors">{{ g.error }}</span> }
+      @if (g.local) { <span class="out sm" data-o="local" title="Internal zones">{{ g.local | number }}<span class="sr-only"> internal</span></span> }
+      @if (g.forwarded) { <span class="out sm" data-o="forwarded" title="Forwarded">{{ g.forwarded | number }}<span class="sr-only"> forwarded</span></span> }
+      @if (g.blocked) { <span class="out sm" data-o="blocked" title="Blocked">{{ g.blocked | number }}<span class="sr-only"> blocked</span></span> }
+      @if (g.error) { <span class="out sm" data-o="error" title="Errors">{{ g.error | number }}<span class="sr-only"> failed</span></span> }
     </span>
-    <span class="ttlv wide"><b>{{ g.count }}</b> queries</span>
-    <span class="ttlv wide nclients">{{ g.clients }} client</span>
+    <span class="ttlv wide"><b>{{ g.count | number }}</b> {{ g.count === 1 ? 'query' : 'queries' }}</span>
+    <span class="ttlv wide nclients">{{ g.clients | number }} {{ g.clients === 1 ? 'client' : 'clients' }}</span>
     <span class="when">{{ time(g.last) }}</span>
-    <button class="mini" [disabled]="g.blocked >= g.count" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name">Answer</button>
+    <button class="mini" [disabled]="g.blocked >= g.count" (click)="openGroup(g, level)" [attr.aria-label]="'Show the addresses of ' + g.name" [title]="g.blocked >= g.count ? 'Every query was blocked: no addresses' : ''">Addresses</button>
     @if (g.name !== '.') { <a class="mini" routerLink="/audit" [queryParams]="{ domain: g.name }" [attr.aria-label]="'Analyse ' + g.name">Audit</a> }
-    @else { <button class="mini" disabled>Audit</button> }
+    @else { <button class="mini" disabled title="The root cannot be audited">Audit</button> }
     @if (blockedNow().has(g.name)) {
       <button class="mini" disabled>Blocked</button>
-    } @else if (g.blocked) {
+    } @else if (allowedNow().has(g.name)) {
+      <button class="mini" disabled>Allowed</button>
+    } @else if (g.blocked && g.name !== '.') {
       <button class="mini" (click)="allow(g.name)" [attr.aria-label]="'Allow ' + g.name" title="Never block this name">Allow</button>
     } @else {
       <button class="mini" [disabled]="!g.forwarded || g.name === '.'" (click)="block(g.name)" [attr.aria-label]="'Block ' + g.name"
-              [title]="level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
+              [title]="!g.forwarded || g.name === '.' ? 'Only names answered from the Internet can be blocked' : level === 0 ? 'Block the domain and all its subdomains' : 'Block this host'">Block</button>
     }
   </li>
 </ng-template>
@@ -229,9 +247,9 @@
     <span class="out" [attr.data-o]="l.outcome">{{ labels[l.outcome] }}</span>
     <span class="type" [attr.data-t]="l.type">{{ l.type }}</span>
     <span class="rc" [attr.data-rc]="l.rcode">{{ l.rcode }}</span>
-    @if (!sub) { <button class="rvalue linkish" (click)="q = l.name; reset()" title="Filter by this name">{{ l.name }}</button> }
+    @if (!sub) { <button class="rvalue linkish" (click)="filterBy('q', l.name)" title="Filter by this name">{{ l.name }}</button> }
     @else { <span class="rvalue"></span> }
-    <button class="ttlv linkish" (click)="client = l.client; reset()" [title]="'Filter by this client' + (who(l.client) !== l.client ? ' (' + l.client + ')' : '')">{{ who(l.client) }}</button>
+    <button class="ttlv linkish" (click)="filterBy('client', l.client)" [title]="'Filter by this client' + (who(l.client) !== l.client ? ' (' + l.client + ')' : '')">{{ who(l.client) }}</button>
     <span class="ttlv">{{ l.ms }} ms</span>
     <span class="acts">
       @if (l.rcode) {
@@ -239,9 +257,11 @@
       }
       @if (!sub) {
         @if (blockedNow().has(l.name)) { <span class="out sm" data-o="blocked">Blocked</span> }
-        @else if (l.outcome === 'blocked') { <button class="mini" (click)="allow(l.name)" [attr.aria-label]="'Allow ' + l.name" title="Never block this name">Allow</button> }
-        @else { <button class="mini" [disabled]="l.outcome !== 'forwarded'" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name">Block</button> }
+        @else if (allowedNow().has(l.name)) { <span class="out sm" data-o="local">Allowed</span> }
+        @else if (canAllow(l)) { <button class="mini" (click)="allow(l.name)" [attr.aria-label]="'Allow ' + l.name" title="Never block this name">Allow</button> }
+        @else if (l.outcome !== 'blocked') { <button class="mini" [disabled]="l.outcome !== 'forwarded'" (click)="block(l.name)" [attr.aria-label]="'Block ' + l.name" [title]="l.outcome !== 'forwarded' ? 'Only names answered from the Internet can be blocked' : ''">Block</button> }
       }
     </span>
+    @if (l.outcome === 'blocked' && l.via) { <span class="why">{{ why(l) }}</span> }
   </li>
 </ng-template>

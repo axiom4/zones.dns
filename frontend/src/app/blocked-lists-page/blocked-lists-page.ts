@@ -1,4 +1,4 @@
-import { RouterLink } from '@angular/router';
+import { RouterLink, RouterLinkActive } from '@angular/router';
 import { Component, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
@@ -8,7 +8,7 @@ import { Ui } from '../services/ui';
 
 @Component({
   selector: 'app-blocked-lists-page',
-  imports: [FormsModule, RouterLink],
+  imports: [FormsModule, RouterLink, RouterLinkActive],
   templateUrl: './blocked-lists-page.html',
 })
 export class BlockedListsPage {
@@ -20,6 +20,7 @@ export class BlockedListsPage {
   count = signal(0);
   lists = signal<PublicList[]>([]);
 
+  loaded = signal(false);
   active = signal(true); // master switch: off = the imported domains are kept but ignored
 
   constructor() {
@@ -31,7 +32,10 @@ export class BlockedListsPage {
     });
   }
   switchAll() {
-    return this.ui.run(async () => { this.active.set((await this.api.invoke(blockedPublicPartialUpdate, { body: { enabled: !this.active() } })).enabled); });
+    return this.ui.run(async () => {
+      this.active.set((await this.api.invoke(blockedPublicPartialUpdate, { body: { enabled: !this.active() } })).enabled);
+      this.ui.toast(this.active() ? 'Public lists are on' : 'Public lists are off: none of their domains is blocked');
+    });
   }
   pickList(name: string) {
     this.list.set(this.list() === name ? '' : name);
@@ -45,6 +49,7 @@ export class BlockedListsPage {
       const r = await this.api.invoke(blockedImportedRetrieve, { q: this.q, list: this.list() || undefined, offset, limit: 100 });
       this.names.set(offset ? [...this.names(), ...r.names] : r.names);
       this.count.set(r.count);
+      this.loaded.set(true);
     });
   }
 }

@@ -1,3 +1,4 @@
+import { DecimalPipe } from '@angular/common';
 import { Component, computed, input, output, signal } from '@angular/core';
 import { geoNaturalEarth1, geoPath } from 'd3-geo';
 import { feature } from 'topojson-client';
@@ -10,6 +11,7 @@ const W = 960, H = 500;
 /** World map: countries shaded by how many queries point there, plus a bubble per city when coordinates are known. */
 @Component({
   selector: 'app-geo-map',
+  imports: [DecimalPipe],
   templateUrl: './geo-map.html',
 })
 export class GeoMap {
@@ -20,6 +22,8 @@ export class GeoMap {
 
   private world = signal<any>(null);
   ready = computed(() => !!this.world());
+  failed = signal(false);
+  hint = signal(false); // a wheel over the map without Ctrl: say how to zoom instead of taking the page scroll
   private projection = geoNaturalEarth1().fitSize([W, H], { type: 'Sphere' } as any);
   private path = geoPath(this.projection);
 
@@ -41,6 +45,8 @@ export class GeoMap {
     return { k: v.k, x: Math.min(W - W / v.k, Math.max(0, v.x)), y: Math.min(H - H / v.k, Math.max(0, v.y)) };
   }
   wheel(e: WheelEvent) {
+    // the page scrolls as usual; the map zooms with Ctrl/⌘ (or a trackpad pinch, sent as ctrlKey), or once it is zoomed in
+    if (!e.ctrlKey && !e.metaKey && !this.zoomed()) { this.hint.set(true); clearTimeout(this.hintT); this.hintT = setTimeout(() => this.hint.set(false), 1800); return; }
     e.preventDefault();
     const r = (e.currentTarget as SVGElement).getBoundingClientRect();
     // in proportion to the scroll: a trackpad sends many small events, each was a whole 1.25x step. About 1.1x per mouse wheel notch (deltaY ~100)
@@ -57,12 +63,24 @@ export class GeoMap {
     d.moved = true; d.px = e.clientX; d.py = e.clientY;
     this.view.set(this.clamp({ k: v.k, x: v.x - dx * (W / v.k) / r.width, y: v.y - dy * (H / v.k) / r.height }));
   }
+  private hintT?: ReturnType<typeof setTimeout>;
   up() { setTimeout(() => this.drag = undefined); } // after the click event of this release
   click(code: string, queries: number) { if (queries && !this.drag?.moved) this.pick.emit(code); }
 
-  constructor() {
-    fetch('/world-110m.json').then(r => r.json()).then(w => this.world.set(w)).catch(() => {});
+  constructor() { this.fetchWorld(); }
+  fetchWorld() {
+    this.failed.set(false);
+    fetch('/world-110m.json').then(r => { if (!r.ok) throw new Error(); return r.json(); }).then(w => this.world.set(w)).catch(() => this.failed.set(true));
   }
+
+  /** The shade scale (log): what the palest and the darkest shade stand for. */
+  scale = computed(() => Math.max(0, ...this.countries().map(c => c.queries)));
+  /** What the map shows, in words: the screen-reader text of the picture. */
+  label = computed(() => {
+    const top = [...this.countries()].filter(c => c.country !== 'PRIV' && c.country !== '??').sort((a, b) => b.queries - a.queries).slice(0, 3);
+    return top.length ? `World map of where the DNS answers point. Most queries go to ${top.map(c => `${countryName(c.country)} (${c.queries.toLocaleString()})`).join(', ')}. Every country is listed in the table below.`
+      : 'World map of where the DNS answers point: no external country in this period.';
+  });
 
   shapes = computed(() => {
     const w = this.world();
@@ -75,8 +93,9 @@ export class GeoMap {
       return {
         id: f.id ?? `x${i}`, code, queries, d: this.path(f) ?? '',
         // darker the more queries point there (logarithmic scale); countries without traffic stay pale
-        fill: queries ? `color-mix(in srgb, var(--brand) ${25 + Math.round((Math.log1p(queries) / top) * 70)}%, #ece8ff)` : null,
-        title: `${f.properties?.name ?? countryName(code)}${queries ? ' · ' + queries + ' queries' : ''}`,
+        // the palest shade starts at 35% so a country with one query stands out from the countries without any
+        fill: queries ? `color-mix(in srgb, var(--brand) ${35 + Math.round((Math.log1p(queries) / top) * 65)}%, var(--brand-soft))` : null,
+        title: `${f.properties?.name ?? countryName(code)}${queries ? ': ' + queries.toLocaleString() + (queries === 1 ? ' query' : ' queries') : ''}`,
       };
     });
   });
@@ -88,7 +107,7 @@ export class GeoMap {
       const xy = this.projection([p.longitude, p.latitude]);
       return xy ? [{
         key: `${p.latitude},${p.longitude}`, x: xy[0], y: xy[1], r: (4 + Math.sqrt(p.queries / max) * 13) / Math.sqrt(this.view().k), // stay readable when zoomed
-        title: `${p.city || countryName(p.country)} · ${p.queries} queries · ${p.ips} addresses\n${p.domains.join(', ')}`,
+        title: `${p.city || countryName(p.country)}: ${p.queries.toLocaleString()} queries, ${p.ips} addresses\n${p.domains.join(', ')}`,
       }] : [];
     });
   });

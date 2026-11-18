@@ -1,72 +1,96 @@
 <header>
   <div>
-    <h2>DHCP reservations</h2>
-    <p class="soft">{{ items().length }} {{ items().length === 1 ? 'reservation' : 'reservations' }}. The client with this MAC address always gets this IPv4 address; changes apply at once, no restart. A host name set here is answered by the DNS server.</p>
+    <h2>IPv4 reservations</h2>
+    <p class="soft">@if (loaded()) { {{ items().length }} {{ items().length === 1 ? 'reservation' : 'reservations' }}. } The device with this MAC address always gets this IPv4 address; changes apply at once. A name set here is answered by the DNS server.</p>
   </div>
   <div class="actions">
-    @if (items().length > 5) {
-      <input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search" aria-label="Search reservations" autocomplete="off">
-    }
-    <button class="ghost" type="button" (click)="pingAll()" [disabled]="ping.busy() || !items().length">{{ ping.busy() ? 'Pinging…' : 'Ping all' }}</button>
-    <button class="ghost" type="button" (click)="openImport()">Import</button>
-    <button class="ghost" type="button" (click)="exportCsv()" [disabled]="!items().length">Export</button>
+    <button class="ghost" type="button" (click)="pingAll()" [disabled]="ping.busy() || !shown().length">{{ ping.busy() ? 'Pinging…' : 'Ping all' }}</button>
+    <button class="ghost" type="button" (click)="openImport()">Import CSV</button>
+    <button class="ghost" type="button" (click)="exportCsv()" [disabled]="!items().length">Export CSV</button>
   </div>
 </header>
-<form class="composer" (ngSubmit)="add()">
-  <input class="addr" name="m" [(ngModel)]="draft.mac" (blur)="lookupVendor()" placeholder="MAC aa:bb:cc:dd:ee:ff" autocomplete="off" aria-label="MAC address" required>
-  <input class="addr" name="i" [(ngModel)]="draft.ip" placeholder="IP, e.g. 192.168.1.50" autocomplete="off" aria-label="IPv4 address" required>
-  <input class="grow" name="h" [(ngModel)]="draft.hostname" placeholder="Host name (optional)" autocomplete="off" aria-label="Host name">
-  <input class="comment" name="o" [(ngModel)]="draft.note" placeholder="Note (optional)" autocomplete="off" aria-label="Note">
+<form class="composer res-add" (ngSubmit)="add()" aria-label="New reservation">
+  <div class="cf">
+    <label for="rv4-mac">MAC address</label>
+    <input id="rv4-mac" class="addr" name="m" [(ngModel)]="draft.mac" (blur)="lookupVendor()" placeholder="aa:bb:cc:dd:ee:ff" autocomplete="off" required
+           [attr.aria-invalid]="errs()['mac'] ? true : null" [attr.aria-describedby]="errs()['mac'] ? 'rv4-mac-e rv4-mac-v' : 'rv4-mac-v'">
+    <small id="rv4-mac-v" class="help" aria-live="polite">{{ vendorHint() }}</small>
+    @if (errs()['mac']; as e) { <small id="rv4-mac-e" class="bad">{{ e }}</small> }
+  </div>
+  <div class="cf">
+    <label for="rv4-ip">IPv4 address</label>
+    <input id="rv4-ip" class="addr" name="i" [(ngModel)]="draft.ip" placeholder="e.g. 192.168.1.50" autocomplete="off" required
+           [attr.aria-invalid]="errs()['ip'] ? true : null" [attr.aria-describedby]="errs()['ip'] ? 'rv4-ip-e' : null">
+    @if (errs()['ip']; as e) { <small id="rv4-ip-e" class="bad">{{ e }}</small> }
+  </div>
+  <div class="cf grow">
+    <label for="rv4-h">Name <span class="soft">(optional)</span></label>
+    <input id="rv4-h" name="h" [(ngModel)]="draft.hostname" placeholder="e.g. nas" autocomplete="off"
+           [attr.aria-invalid]="errs()['hostname'] ? true : null" [attr.aria-describedby]="errs()['hostname'] ? 'rv4-h-e' : null">
+    @if (errs()['hostname']; as e) { <small id="rv4-h-e" class="bad">{{ e }}</small> }
+  </div>
+  <div class="cf grow">
+    <label for="rv4-o">Note <span class="soft">(optional)</span></label>
+    <input id="rv4-o" name="o" [(ngModel)]="draft.note" autocomplete="off">
+  </div>
   <button class="primary">Reserve</button>
-  @if (vendorHint()) { <span class="soft vendor-hint">{{ vendorHint() }}</span> }
 </form>
-<ul class="records">
+<ul class="records" [attr.aria-busy]="!loaded()">
   @for (r of shown(); track r.id) {
     @if (editing() === r.id) {
       <li class="editing">
-        <form class="composer inline-edit" (ngSubmit)="save(r)">
-          <input class="addr" name="em" [(ngModel)]="edit.mac" autocomplete="off" aria-label="MAC address" required>
-          <input class="addr" name="ei" [(ngModel)]="edit.ip" autocomplete="off" aria-label="IPv4 address" required>
-          <input class="grow" name="eh" [(ngModel)]="edit.hostname" autocomplete="off" aria-label="Host name">
+        <form class="composer inline-edit" (ngSubmit)="save(r)" [attr.aria-label]="'Edit the reservation of ' + r.ip">
+          <input [id]="'rv4-em-' + r.id" class="addr" name="em" [(ngModel)]="edit.mac" autocomplete="off" aria-label="MAC address" required
+                 [attr.aria-invalid]="editErrs()['mac'] ? true : null">
+          <input class="addr" name="ei" [(ngModel)]="edit.ip" autocomplete="off" aria-label="IPv4 address" required [attr.aria-invalid]="editErrs()['ip'] ? true : null">
+          <input class="grow" name="eh" [(ngModel)]="edit.hostname" autocomplete="off" aria-label="Name" [attr.aria-invalid]="editErrs()['hostname'] ? true : null">
           <input class="comment" name="eo" [(ngModel)]="edit.note" autocomplete="off" aria-label="Note">
           <button class="mini primary">Save</button>
-          <button type="button" class="mini" (click)="editing.set(null)">Cancel</button>
+          <button type="button" class="mini" (click)="cancelEdit(r)">Cancel</button>
+          @for (e of editErrs() | keyvalue; track e.key) { <small class="bad">{{ e.value }}</small> }
         </form>
       </li>
     } @else {
       <li [class.off]="r.enabled === false">
         <span class="type" data-t="A">v4</span>
         <span class="rname">{{ r.ip }}@if (r.hostname) {<small class="note-t">{{ r.hostname }}</small>}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
-        <span class="rvalue">{{ r.mac }}@if (r.vendor) {<small class="note-t">{{ r.vendor }}</small>}</span>
+        <span class="rvalue">{{ r.mac }}@if (r.vendor) {<small class="note-t">{{ r.vendor }}</small>}@if (r.enabled === false) {<small class="note-t">Off</small>}</span>
         @if (ping.label(r.ip); as p) { <span class="pingr" [class.up]="ping.results()[r.ip]?.up">{{ p }}</span> }
-        <button class="mini" type="button" (click)="pingOne(r)" (dblclick)="watch(r)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + r.ip">Ping</button>
-        <button class="switch" role="switch" [attr.aria-checked]="r.enabled !== false" (click)="toggle(r)"
-                [title]="r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
-        <button class="icon edit" (click)="startEdit(r)" [attr.aria-label]="'Edit ' + r.mac">✎</button>
-        <button class="icon" (click)="del(r)" [attr.aria-label]="'Delete ' + r.mac">✕</button>
+        <button class="mini" type="button" (click)="pingOne(r)" [attr.aria-label]="'Ping ' + r.ip">Ping</button>
+        <button class="mini" type="button" (click)="watch(r)" [attr.aria-label]="'Ping ' + r.ip + ' every second'">Live</button>
+        <button class="switch" type="button" role="switch" [attr.aria-checked]="r.enabled !== false" (click)="toggle(r)"
+                [attr.aria-label]="'Reservation of ' + r.ip + ' for ' + (r.hostname || r.mac)"><i></i></button>
+        <button class="icon edit" type="button" [id]="'rv4-edit-' + r.id" (click)="startEdit(r)" [attr.aria-label]="'Edit the reservation of ' + r.ip">✎</button>
+        <button class="icon" type="button" (click)="del(r)" [attr.aria-label]="'Delete the reservation of ' + r.ip">✕</button>
       </li>
     }
   } @empty {
-    <li class="empty">{{ items().length ? 'No results for your search.' : 'No reservations. Add one above, or import a CSV file.' }}</li>
+    <li class="empty">{{ !loaded() ? 'Loading reservations…' : items().length ? 'No reservation matches “' + filter() + '”.' : 'No reservations yet. Add one above, press Reserve on a lease, or import a CSV file.' }}</li>
   }
 </ul>
 
-<dialog #imp class="confirm wide" (click)="$event.target === imp ? imp.close() : null">
-  <h3>Import reservations</h3>
-  <p class="soft">CSV, one per line: <code>hostname,mac,ip</code> (optional: note, enabled). With a header line (<code>hostname,mac,ip</code>…) the columns can be in any order; without one the MAC and the IP are found by their look. Separator <code>,</code> <code>;</code> or tab. Matched by MAC: existing ones are updated. Any error: nothing is changed.</p>
-  <input type="file" accept=".csv,.txt,text/csv,text/plain" (change)="pickFile($event)" aria-label="CSV file">
-  <textarea [(ngModel)]="importText" name="it" rows="9" placeholder="nas,aa:bb:cc:dd:ee:ff,192.168.1.50" aria-label="CSV content" (ngModelChange)="importResult.set(null)"></textarea>
-  <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Replace the existing reservations</label>
-  @if (importResult(); as r) {
-    <div class="result">
-      <b>{{ r.created }}</b> to create, <b>{{ r.updated }}</b> to update, <b>{{ r.skipped }}</b> unchanged
+<dialog #imp class="confirm wide" aria-labelledby="rv4-imp-t">
+  <h3 id="rv4-imp-t">Import IPv4 reservations</h3>
+  <p class="help">One reservation per line: <code>hostname,mac,ip</code>, then optionally note and enabled. With a header line the columns can be in any order. Separator: comma, semicolon or tab. Existing reservations with the same MAC are updated. If any line has an error, nothing is changed.</p>
+  <div class="field">
+    <label class="lbl" for="rv4-file">CSV file</label>
+    <input id="rv4-file" type="file" accept=".csv,.txt,text/csv,text/plain" (change)="pickFile($event)">
+  </div>
+  <div class="field">
+    <label class="lbl" for="rv4-text">Or paste the lines</label>
+    <textarea id="rv4-text" [(ngModel)]="importText" name="it" rows="9" placeholder="nas,aa:bb:cc:dd:ee:ff,192.168.1.50" (ngModelChange)="importResult.set(null)"></textarea>
+  </div>
+  <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Delete all existing reservations first</label>
+  <div class="result" role="status">
+    @if (importResult(); as r) {
+      <b>{{ r.created }}</b> to add, <b>{{ r.updated }}</b> to update, <b>{{ r.skipped }}</b> unchanged.
       @for (e of r.errors; track e) { <p class="error">{{ e }}</p> }
-    </div>
-  }
+    }
+  </div>
   <div class="actions">
-    <button class="ghost" (click)="imp.close()">Close</button>
-    <button class="ghost" (click)="runImport(true)" [disabled]="!importText.trim()">Preview</button>
-    <button class="primary" (click)="confirmImport()" [disabled]="!importText.trim()">Import</button>
+    <button class="ghost" type="button" (click)="imp.close()">Cancel</button>
+    <button class="ghost" type="button" (click)="runImport(true)" [disabled]="!importText.trim()">Preview</button>
+    <button class="primary" type="button" (click)="confirmImport()" [disabled]="!importText.trim()">Import</button>
   </div>
 </dialog>
 <app-ping-live />

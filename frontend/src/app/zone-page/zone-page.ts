@@ -1,7 +1,8 @@
 import { Component, ElementRef, computed, effect, inject, input, signal, untracked, viewChild } from '@angular/core';
+import { Title } from '@angular/platform-browser';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
-import { recordsBulkCreate, recordsDestroy, recordsList, zonesExportRetrieve, zonesImportCreate, zonesPartialUpdate, zonesSyncPtrCreate } from '../api/functions';
+import { recordsBulkCreate, recordsCreate, recordsDestroy, recordsList, zonesExportRetrieve, zonesImportCreate, zonesPartialUpdate, zonesSyncPtrCreate } from '../api/functions';
 import { ActionEnum, Record, Zone, ZoneImportResult } from '../api/models';
 import { RecordForm } from '../record-form/record-form';
 import { ptrToIp } from '../lib/reverse';
@@ -26,6 +27,8 @@ export class ZonePage {
   off = computed(() => this.zone()?.enabled === false); // zone switched off: its records show as disabled and cannot be changed
   private stepUp = inject(StepUp);
   records = signal<Record[]>([]);
+  loading = signal(true); // no "this zone is empty" flash before the first answer
+  importBusy = signal(false);
   filter = signal('');
   selected = signal(this.empty);
 
@@ -66,11 +69,18 @@ export class ZonePage {
 
   constructor() {
     // Reload whenever the route param changes (zone -> zone keeps this component alive).
-    effect(() => { this.id(); untracked(() => { this.filter.set(''); this.records.set([]); this.syncMsg.set(''); this.load(); }); });
+    effect(() => { this.id(); untracked(() => { this.filter.set(''); this.records.set([]); this.loading.set(true); this.selected.set(this.empty); this.load(); }); });
+    // the tab title names the zone (the route only knows "Zone"; a title strategy may add the app name after it)
+    const title = inject(Title);
+    effect(() => { const n = this.zone()?.name; if (n) setTimeout(() => title.setTitle(title.getTitle().replace(/^[^–]*?(?=\s–|$)/, n))); });
   }
+
+  /** "www (A)": how a record is named in labels, toasts and questions */
+  label = (r: Record) => `${r.name || '@'} (${r.type})`;
 
   async load() {
     await this.ui.run(async () => this.records.set(await this.api.invoke(recordsList, { zone: +this.id() })));
+    this.loading.set(false);
     // drop selections of records that no longer exist
     const ids = new Set(this.records().map(r => r.id));
     this.selected.update(s => new Set([...s].filter(i => ids.has(i))));
@@ -80,20 +90,20 @@ export class ZonePage {
     this.selected.set(this.empty);
     return this.ui.run(async () => {
       const off = z.enabled !== false; // switching a zone off stops serving it: confirmed with a second factor, like deleting it
-      const grant = off ? await this.stepUp.request(`zone-delete:${z.id}`) : '';
+      const grant = off ? await this.stepUp.request(`zone-delete:${z.id}`, `Turn off zone ${z.name}`, 'Turn off zone') : '';
       if (grant === null) return;
       await this.api.invoke(zonesPartialUpdate, { id: z.id, body: { enabled: !off }, 'X-MFA-Grant': grant || undefined });
       await this.store.load();
+      this.ui.toast(off ? `Turned off zone ${z.name}: it is no longer served` : `Zone ${z.name} is served again`);
     });
   }
 
-  syncMsg = signal('');
   ipOf = (r: Record) => (r.type === 'PTR' && this.zone()?.reverse ? ptrToIp(this.zone()!.name, r.name ?? '') : null);
   syncPtr() {
     return this.ui.run(async () => {
       const r = await this.api.invoke(zonesSyncPtrCreate, { id: +this.id() });
-      this.syncMsg.set(r.created ? `Created ${r.created} PTR${r.skipped ? `, ${r.skipped} already present` : ''}.` : 'No PTR to create: everything is in sync.');
       await this.load();
+      this.ui.toast(r.created ? `Created ${r.created} PTR ${r.created === 1 ? 'record' : 'records'}${r.skipped ? ` (${r.skipped} already present)` : ''}` : 'No PTR record to create: everything is in sync');
     });
   }
 
@@ -102,12 +112,20 @@ export class ZonePage {
     if (ptr) this.store.load(); // a reverse zone may have been created
   }
 
+  /** No question first: the toast offers Undo, which creates the record again. */
   del(r: Record) {
-    this.ui.ask(`Delete the record ${r.name}?`, `${r.type} ${r.value}`, () =>
-      this.ui.run(async () => {
-        await this.api.invoke(recordsDestroy, { id: r.id });
-        await this.load();
-      }));
+    return this.ui.run(async () => {
+      await this.api.invoke(recordsDestroy, { id: r.id });
+      await this.load();
+      this.ui.toast(`Deleted ${this.label(r)}`, () => this.restore([r]));
+    });
+  }
+  private async restore(rs: Record[]) {
+    for (const r of rs) {
+      await this.api.invoke(recordsCreate, { body: { zone: r.zone, name: r.name, type: r.type, value: r.value, ttl: r.ttl, enabled: r.enabled, note: r.note } });
+    }
+    await this.load();
+    this.ui.toast(rs.length === 1 ? `Restored ${this.label(rs[0])}` : `Restored ${rs.length} records`);
   }
 
   // --- selection and bulk actions ---
@@ -121,16 +139,21 @@ export class ZonePage {
       // factor, like deleting the zone. The same rule as the server (views/record.py, BULK_MIN).
       const total = this.records().length;
       const all = (action === 'delete' || action === 'disable') && (ids.length >= total || (ids.length >= 10 && ids.length * 2 > total));
-      const grant = all ? await this.stepUp.request(`zone-delete:${this.id()}`) : ''; // '' = nothing to prove, null = cancelled
+      const n = ids.length, what = n === 1 ? this.label(this.records().find(r => r.id === ids[0])!) : `${n} records`;
+      const verb = action === 'delete' ? 'Delete' : 'Turn off';
+      const grant = all ? await this.stepUp.request(`zone-delete:${this.id()}`, `${verb} ${what} in ${this.zone()?.name}`, `${verb} ${n === 1 ? 'record' : 'records'}`) : ''; // '' = nothing to prove, null = cancelled
       if (grant === null) return;
+      const gone = action === 'delete' ? this.records().filter(r => ids.includes(r.id)) : [];
       await this.api.invoke(recordsBulkCreate, { body: { ids, action }, 'X-MFA-Grant': grant || undefined });
       if (action === 'delete') this.selected.set(new Set());
       await this.load();
+      if (action === 'delete') this.ui.toast(`Deleted ${what}`, () => this.restore(gone));
+      else if (n > 1) this.ui.toast(`${action === 'enable' ? 'Turned on' : 'Turned off'} ${what}`);
     });
   }
   bulkDelete() {
     const n = this.selected().size;
-    this.ui.ask(`Delete ${n} records?`, 'This cannot be undone.', () => { this.bulk('delete'); });
+    this.ui.ask(`Delete ${n} ${n === 1 ? 'record' : 'records'}?`, 'You can undo it right after, from the notice.', () => { this.bulk('delete'); }, n === 1 ? 'Delete record' : `Delete ${n} records`);
   }
 
   // --- zone file import / export ---
@@ -144,17 +167,23 @@ export class ZonePage {
     const f = (e.target as HTMLInputElement).files?.[0];
     if (f) { this.importText = await f.text(); this.importResult.set(null); }
   }
-  runImport(dry_run: boolean) {
-    return this.ui.run(async () => {
-      const grant = this.importReplace && !dry_run ? await this.stepUp.request(`zone-delete:${this.id()}`) : ''; // replacing deletes every record first
+  async runImport(dry_run: boolean) {
+    this.importBusy.set(true);
+    await this.ui.run(async () => {
+      const name = this.zone()?.name;
+      const grant = this.importReplace && !dry_run ? await this.stepUp.request(`zone-delete:${this.id()}`, `Replace all records of ${name}`, 'Replace records') : ''; // replacing deletes every record first
       if (grant === null) return;
       const r = await this.api.invoke(zonesImportCreate, { id: +this.id(), body: { text: this.importText, replace: this.importReplace, dry_run }, 'X-MFA-Grant': grant || undefined });
       this.importResult.set(r);
-      if (!dry_run) { await this.load(); if (!r.errors.length) this.imp()!.nativeElement.close(); }
+      if (!dry_run) {
+        await this.load();
+        if (!r.errors.length) { this.imp()!.nativeElement.close(); this.ui.toast(`Imported ${r.created} ${r.created === 1 ? 'record' : 'records'} into ${name}`); }
+      }
     });
+    this.importBusy.set(false);
   }
   confirmImport() {
     if (!this.importReplace) { this.runImport(false); return; }
-    this.ui.ask('Replace all records?', `The existing records of ${this.zone()?.name} will be deleted before the import.`, () => this.runImport(false));
+    this.ui.ask('Replace all records?', `The existing records of ${this.zone()?.name} are deleted before the import. This cannot be undone.`, () => this.runImport(false), 'Replace records');
   }
 }

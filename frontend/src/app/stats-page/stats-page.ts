@@ -1,6 +1,7 @@
 import { DecimalPipe } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, statsRetrieve } from '../api/functions';
 import { Stats } from '../api/models';
@@ -20,7 +21,7 @@ const ANSWERS: Record<string, { label: string; hint: string }> = {
   address: { label: 'With an address', hint: 'An A/AAAA record in the answer: the total of the geolocation page' },
   no_address: { label: 'Without an address', hint: 'NOERROR with no A/AAAA: HTTPS, PTR, TXT, SRV, an AAAA for a name without IPv6...' },
   nxdomain: { label: 'Name does not exist', hint: 'NXDOMAIN from a zone or upstream (blocked names are counted apart)' },
-  blocked: { label: 'Blocked', hint: 'Blacklist, suspicious name or rate limit' },
+  blocked: { label: 'Blocked', hint: 'Blocklist, suspicious name or rate limit' },
   error: { label: 'Failed', hint: 'SERVFAIL, REFUSED, upstream not answering' },
   proxied: { label: 'Through the proxy', hint: 'Web requests the filtering proxy let through (pages cleaned included)' },
   uncounted: { label: 'Not split yet', hint: 'Hours saved before this counter existed: manage.py rebuild_stats splits them' },
@@ -28,13 +29,16 @@ const ANSWERS: Record<string, { label: string; hint: string }> = {
 
 @Component({
   selector: 'app-stats-page',
-  imports: [FormsModule, DecimalPipe],
+  imports: [FormsModule, DecimalPipe, RouterLink],
   templateUrl: './stats-page.html',
 })
 export class StatsPage {
   private api = inject(Api);
   private ui = inject(Ui);
   stats = signal<Stats | null>(null);
+  loading = signal(true);
+  failed = signal(false);
+  sel = signal(-1); // the chart bar shown in the readout line (-1: the latest)
   done = signal(new Set<string>());
   hours = 24;
   source: 'all' | 'dns' | 'proxy' = 'all';
@@ -60,7 +64,18 @@ export class StatsPage {
     return out;
   });
 
-  constructor() { this.load(); }
+  private router = inject(Router);
+  constructor() {
+    const p = inject(ActivatedRoute).snapshot.queryParamMap; // ?hours=168&source=dns: a reload or a shared link keeps the view
+    if ([1, 24, 168, 720].includes(Number(p.get('hours')))) this.hours = Number(p.get('hours'));
+    if (p.get('source') === 'dns' || p.get('source') === 'proxy') this.source = p.get('source') as 'dns' | 'proxy';
+    this.load();
+  }
+  /** The period or the source was changed: keep it in the URL, then load. */
+  changed() {
+    this.router.navigate([], { queryParams: { hours: this.hours !== 24 ? this.hours : null, source: this.source !== 'all' ? this.source : null }, replaceUrl: true });
+    this.load();
+  }
 
   load() {
     return this.ui.run(async () => {
@@ -71,15 +86,49 @@ export class StatsPage {
         const first = new Date(); first.setHours(0, 0, 0, 0); first.setDate(first.getDate() - hours / 24 + 1);
         from = first.getTime(); hours = Math.min(Math.ceil((Date.now() - from) / 3_600_000), 720); since = first.toISOString();
       }
-      const st = await this.api.invoke(statsRetrieve, { hours, since, source: this.source });
-      this.period.set(hours); this.from.set(from); this.stats.set(st);
+      this.loading.set(true);
+      try {
+        const st = await this.api.invoke(statsRetrieve, { hours, since, source: this.source });
+        this.period.set(hours); this.from.set(from); this.stats.set(st); this.failed.set(false); this.sel.set(-1);
+      } catch (e) { this.failed.set(true); throw e; }
+      finally { this.loading.set(false); }
     });
   }
   block(name: string) {
-    return this.ui.run(async () => {
-      await this.api.invoke(blockedCreate, { body: { name } });
-      this.done.update(s => new Set(s).add(name));
-    });
+    this.ui.ask(`Block ${name}?`, 'The domain and its subdomains will receive NXDOMAIN from the next query. Undo it in Blocklist > Personal blocks.', () =>
+      this.ui.run(async () => {
+        await this.api.invoke(blockedCreate, { body: { name } });
+        this.done.update(s => new Set(s).add(name));
+      }, { ok: `Blocked ${name}` }), 'Block domain');
+  }
+
+  /** Share of all queries that were blocked, one decimal. */
+  rate = computed(() => { const st = this.stats(); return st?.total ? Math.round((this.outcome('blocked') / st.total) * 1000) / 10 : 0; });
+  /** The log window for the chosen period (the log takes the same hours). */
+  logQ(extra: { [k: string]: string } = {}) { return { ...(this.hours !== 24 ? { hours: this.hours } : {}), ...extra }; }
+  /** Where a figure is listed: the DNS log, or the proxy log for proxy-only counts (it has no URL filters yet). */
+  logPath() { return this.source === 'proxy' ? '/logs/proxy' : '/logs/dns'; }
+  isDnsType(t: string) { return /^[A-Z0-9]+$/.test(t) && !['GET', 'POST', 'PUT', 'HEAD', 'DELETE', 'PATCH', 'OPTIONS', 'CONNECT'].includes(t); }
+
+  // ---- the chart: a text summary, a readout line moved by pointer, tap or arrow keys ----
+  /** Until the user picks one: the latest bar with queries (the current minute is often still empty). */
+  private latest = computed(() => { const b = this.bars(); let i = b.length - 1; while (i > 0 && !b[i].count) i--; return i; });
+  bar = computed(() => this.bars()[this.sel() < 0 ? this.latest() : this.sel()]);
+  peak = computed(() => this.bars().reduce((a, b) => (b.count > (a?.count ?? -1) ? b : a), this.bars()[0]));
+  summary = computed(() => {
+    const st = this.stats(), p = this.peak();
+    if (!st?.total || !p) return 'No queries in this period.';
+    return `Queries per ${this.grain().name}: ${st.total.toLocaleString()} in all, ${this.outcome('blocked').toLocaleString()} blocked (${this.rate()}%). Busiest ${this.grain().name}: ${p.full} with ${p.count.toLocaleString()}. Use the arrow keys to read each ${this.grain().name}.`;
+  });
+  pickAt(e: PointerEvent) {
+    const i = (e.target as HTMLElement).closest<HTMLElement>('[data-i]')?.dataset['i'];
+    if (i !== undefined) this.sel.set(Number(i));
+  }
+  key(e: KeyboardEvent) {
+    const n = this.bars().length, cur = this.sel() < 0 ? this.latest() : this.sel();
+    const to = { ArrowLeft: cur - 1, ArrowRight: cur + 1, Home: 0, End: n - 1 }[e.key];
+    if (to === undefined) return;
+    e.preventDefault(); this.sel.set(Math.max(0, Math.min(n - 1, to)));
   }
   answers = computed(() => {
     const st = this.stats();

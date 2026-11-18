@@ -1,37 +1,36 @@
-<nav class="subtabs" aria-label="Blacklist">
-  <a routerLink="/blacklist/manual" [class.on]="false">Personal blocks</a>
-  <a routerLink="/blacklist/lists" [class.on]="true">Public lists</a>
+<nav class="subtabs" aria-label="Blocklist">
+  <a routerLink="/blacklist/manual" routerLinkActive="on" ariaCurrentWhenActive="page">Personal blocks</a>
+  <a routerLink="/blacklist/lists" routerLinkActive="on" ariaCurrentWhenActive="page">Public lists</a>
 </nav>
 <header>
   <div>
     <div class="title-row">
       <h2>Public lists</h2>
-      <button class="switch" role="switch" [attr.aria-checked]="active()" (click)="switchAll()" aria-label="Public lists"
-              [title]="active() ? 'Public lists are on: click to turn them all off' : 'Public lists are off: click to turn them on'"><i></i></button>
+      <button class="switch" type="button" role="switch" [attr.aria-checked]="active()" (click)="switchAll()" aria-label="Use the public lists"><i></i></button>
       <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
     </div>
-    <p class="soft">{{ count() }} domains {{ q || list() ? 'found' : 'imported' }}@if (list()) { in <b>{{ list() }}</b> }@else if (lists().length) { across {{ lists().length }} lists }. Read-only: updated by <code>import_blocklist</code>; to remove one, use the Django admin.</p>
+    <p class="soft">@if (loaded()) { {{ count() }} domains {{ q || list() ? 'found' : 'blocked' }}{{ list() ? ' in ' + list() : lists().length ? ' from ' + lists().length + (lists().length === 1 ? ' list' : ' lists') : '' }}. } Read-only here: the server command <code>import_blocklist</code> adds and updates lists; to remove one, use Advanced admin.</p>
     @if (lists().length) {
-      <p class="soft">
-        @for (l of lists(); track l.name; let last = $last) {
-          <button type="button" class="link" [class.on]="list() === l.name" (click)="pickList(l.name)" [title]="'Filter by ' + l.name">{{ l.name }} ({{ l.count }})</button>@if (!last) { · }
+      <div class="bl-lists" role="group" aria-label="Show one list">
+        @for (l of lists(); track l.name) {
+          <button type="button" class="mini" [class.on]="list() === l.name" [attr.aria-pressed]="list() === l.name" (click)="pickList(l.name)">{{ l.name }}<span class="soft">{{ ' ' + l.count }}</span></button>
         }
-        @if (list()) { · <button type="button" class="link" (click)="pickList('')">show all</button> }
-      </p>
+        @if (list()) { <button type="button" class="mini" (click)="pickList('')">Show all lists</button> }
+      </div>
     }
   </div>
 </header>
-<form class="composer" (ngSubmit)="search()">
-  <input class="grow" name="q" [(ngModel)]="q" placeholder="search the imported lists" autocomplete="off" aria-label="Search the imported lists">
+<form class="composer single" (ngSubmit)="search()" role="search">
+  <input class="grow" type="search" name="q" [(ngModel)]="q" placeholder="Is a domain on the lists? e.g. doubleclick.net" autocomplete="off" aria-label="Search the public lists">
   <button class="primary">Search</button>
 </form>
-<ul class="records">
+<ul class="records" [attr.aria-busy]="!loaded()">
   @for (n of names(); track n) {
     <li [class.off]="!active()"><span class="rvalue">{{ n }}</span></li>
   } @empty {
-    <li class="empty">{{ q ? 'No results.' : 'No list imported. Run import_blocklist.' }}</li>
+    <li class="empty">{{ !loaded() ? 'Loading…' : q ? '“' + q + '” is not on the lists.' : 'No list imported yet. Run manage.py import_blocklist on the server.' }}</li>
   }
   @if (names().length < count()) {
-    <li><button (click)="more()">Show more</button></li>
+    <li class="more"><button class="ghost" type="button" (click)="more()">Show {{ count() - names().length > 100 ? '100' : count() - names().length }} more</button><span class="soft">{{ names().length }} of {{ count() }} shown</span></li>
   }
 </ul>

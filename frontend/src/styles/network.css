@@ -1,0 +1,95 @@
+/* network pages: rules of this area only (the shared look is in styles.css and styles/shell.css). */
+
+/* settings fields (DHCP settings dialog, proxy settings): label above, help under, error under the help */
+app-settings-fields { display: block; }
+.sf-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem 1.25rem; align-items: start; }
+.sf { display: grid; gap: .3rem; min-width: 0; }
+.sf.wide { grid-column: 1 / -1; }
+.sf .lbl { font-weight: 700; }
+.sf .term { font-weight: 400; color: var(--muted); }
+.sf input:not([type=checkbox]), .sf textarea { width: 100%; box-sizing: border-box; margin: 0; }
+.sf textarea { font-family: var(--mono); font-size: 13.5px; }
+.sf-check { grid-template-columns: auto minmax(0, 1fr); column-gap: .6rem; align-items: start; }
+.sf-check input { width: 20px; height: 20px; margin: .1rem 0 0; accent-color: var(--brand); }
+.sf-check > :not(input) { grid-column: 2; }
+.sf [aria-invalid=true] { border-color: var(--danger); }
+.settings .help code, .sf .help { overflow-wrap: anywhere; }
+
+/* DHCP settings: basics open, the rest in sections that open on demand */
+.dhcp-settings details.group { padding: 0; }
+.dhcp-settings details.group > summary { cursor: pointer; font-weight: 800; padding: .85rem 1rem; border-radius: var(--radius); list-style-position: inside; }
+.dhcp-settings details.group > summary:hover { background: var(--hover); }
+.dhcp-settings details.group[open] > summary { border-bottom: 1px solid var(--line-soft); border-radius: var(--radius) var(--radius) 0 0; }
+.dhcp-settings details.group > :not(summary) { margin: .8rem 1rem 1rem; }
+.dhcp-settings .group > p.help { margin: 0 0 .8rem; }
+
+/* one device search for every DHCP tab */
+.dhcp-find { margin: 0 0 1rem; }
+.dhcp-find .search { width: min(28rem, 100%); }
+
+/* forms in a composer with a visible label over each input */
+.composer:has(> .cf) { align-items: flex-end; }
+.composer .cf { display: grid; gap: .25rem; min-width: 0; }
+.composer .cf label { font-size: 13px; font-weight: 700; color: var(--muted); }
+.composer .cf.grow { flex: 1 1 12rem; }
+.composer .cf input { width: 100%; box-sizing: border-box; }
+.composer .cf:not(.grow) input.addr { width: 230px; }
+.composer .cf .help, .composer .cf .bad { min-height: 0; }
+.composer .cf .help:empty { display: none; }
+.composer [aria-invalid=true] { border-color: var(--danger); }
+.records .inline-edit .bad { flex-basis: 100%; }
+
+/* proxy log: client, duration and time as separate quiet values */
+.records.proxy-log .out { width: 5.5rem; }
+.pl-meta { display: flex; gap: .75rem; color: var(--muted); font-size: 13px; white-space: nowrap; }
+.pl-meta .pl-client { font-family: var(--mono); }
+
+/* proxy: test field and device setup */
+.px-test .cf.grow { flex: 1 1 20rem; }
+.px-device h4 { margin: 0 0 .4rem; font-size: .95rem; }
+.px-device ol { margin: 0 0 .6rem; padding-left: 1.2rem; display: grid; gap: .2rem; }
+.px-os { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem 1.5rem; margin: .5rem 0 1rem; }
+.px-device .fp { overflow-wrap: anywhere; }
+.px-device details { margin: .5rem 0; }
+.px-device summary { cursor: pointer; font-weight: 700; }
+.px-device .actions { display: flex; justify-content: flex-end; margin-top: .75rem; }
+
+/* blacklist: add form, list picker, show more */
+.bl-add { align-items: flex-end; }
+.bl-add .bl-rx { align-self: center; }
+.bl-allow { display: inline-flex; gap: .4rem; align-items: stretch; }
+.bl-allow select { width: auto; }
+.bl-lists { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .5rem; }
+.records li.more { justify-content: center; gap: 1rem; }
+
+@media (max-width: 1100px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .composer .cf, .composer .cf.grow { flex: 1 1 100%; }
+  .composer .cf:not(.grow) input.addr { width: 100%; }
+  .bl-allow { flex: 1 1 100%; }
+  .bl-allow button { flex: 1 1 0; }
+  .bl-allow select { flex: 1 1 0; }
+  .records.proxy-log li { flex-wrap: wrap; row-gap: .4rem; }
+  .records.proxy-log .rname { flex: 1 1 0; min-width: 0; overflow-wrap: anywhere; }
+  .records.proxy-log .rvalue { order: 5; flex-basis: 100%; }
+  .pl-meta { order: 6; flex: 1 1 auto; flex-wrap: wrap; white-space: normal; }
+  .records.proxy-log .mini { order: 7; }
+}
+@media (max-width: 700px) {
+  .sf-grid { grid-template-columns: minmax(0, 1fr); }
+  .sf textarea, .sf input:not([type=checkbox]) { font-size: 16px; }
+}
+
+/* help paragraphs in this area's dialogs: the global .confirm p is monospace (meant for confirm texts with names) */
+:is(app-dhcp-page, app-dhcp-reservations, app-dhcp-reservations6, app-proxy-page) .confirm p:is(.help, .soft) { font-family: var(--sans); font-size: 13.5px; }
+
+/* phone and tablet: rows with a switch here are not zone records; keep the name on top, the controls on one line under it
+   (the shared zone-record grid would put Edit first and the name on the second line) */
+@media (max-width: 1100px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  :is(app-blocked-page, app-dhcp-reservations, app-dhcp-reservations6) .records li:has(> .switch) { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .6rem; }
+  :is(app-blocked-page, app-dhcp-reservations, app-dhcp-reservations6) .records li:has(> .switch) > * { grid-area: auto; }
+  app-blocked-page .records li:has(> .switch) > .rvalue { order: -1; flex: 1 1 100%; }
+  :is(app-dhcp-reservations, app-dhcp-reservations6) .records li:has(> .switch) > .rname { flex: 1 1 0; width: auto; min-width: 0; overflow-wrap: anywhere; }
+  :is(app-dhcp-reservations, app-dhcp-reservations6) .records li:has(> .switch) > .rvalue { order: 1; flex: 1 1 100%; }
+  :is(app-dhcp-reservations, app-dhcp-reservations6) .records li:has(> .switch) > :is(.pingr, .mini, .switch, .icon) { order: 2; }
+  :is(app-blocked-page, app-dhcp-reservations, app-dhcp-reservations6) .records li:has(> .switch) > .switch { margin-left: auto; }
+}

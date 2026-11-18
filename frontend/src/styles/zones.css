@@ -1,0 +1,52 @@
+/* zones pages: rules of this area only (the shared look is in styles.css and styles/shell.css). */
+
+/* zone page: search and sort under the header, off rows say so in words */
+.ztools { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+.ztools .search { flex: 0 1 320px; }
+button.ghost.del { color: var(--danger); }
+button.ghost.del:hover:not(:disabled) { border-color: var(--danger); color: var(--danger); background: color-mix(in srgb, var(--danger) 8%, transparent); }
+.offtag { flex: none; font-size: 12px; font-weight: 700; color: var(--muted); border: 1px dashed var(--line); border-radius: 999px; padding: 0 .5rem; }
+.zrecs li.off { opacity: 1; color: var(--muted); }  /* dimmed by colour, not opacity: the text keeps 4.5:1 */
+.records li.head .check { font-weight: 600; }
+.zempty { flex-direction: column; gap: .4rem; text-align: center; }
+.zempty b { color: var(--ink); }
+.zempty-acts, .blank-acts { display: flex; flex-wrap: wrap; justify-content: center; gap: .5rem; margin-top: .5rem; }
+.records .empty .link { margin-left: .35rem; }
+.confirm .result p.plain { font-size: 14px; }
+
+/* record form: the picked type folded into one line when editing */
+.tpicked { display: flex; align-items: center; gap: .6rem; margin-bottom: 1rem; flex-wrap: wrap; }
+.tpicked .link { margin-left: auto; }
+.form-dialog .opts > div { display: grid; gap: .15rem; }
+.form-dialog .opts .help { padding-left: 1.6rem; }
+
+/* zones index: the zones as a list, for when no default zone opens by itself */
+.zlist-h { font-size: 1rem; margin: 1.25rem 0 .5rem; }
+.zlist { margin-bottom: .5rem; }
+.zlist li { position: relative; }
+.zlist a.rname { color: var(--brand); text-decoration: none; width: auto; flex: 1; font-family: var(--mono); }
+.zlist a.rname::after { content: ''; position: absolute; inset: 0; }  /* the whole row is the link */
+.zlist a.rname:focus-visible { outline: none; } .zlist li:has(a:focus-visible) { outline: 2px solid var(--focus); outline-offset: -2px; }
+.zlist .rvalue { flex: none; }
+
+/* static hosts: labelled fields on one line, stacked on a phone */
+.hostform { display: grid; grid-template-columns: minmax(10rem, 2fr) minmax(9rem, 1.5fr) 6.5rem minmax(8rem, 1.5fr) auto; gap: .6rem; align-items: start;
+            background: var(--surface); padding: .75rem; border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 1rem; }
+.hostform .field { margin: 0; min-width: 0; }
+.hostform .field input { width: 100%; }
+.hostform > button, .hostform-acts { align-self: start; margin-top: 1.6rem; }  /* in line with the inputs, under the labels */
+.hostform-acts { display: flex; gap: .5rem; }
+.records li.editing .hostform { margin: 0; padding: 0; box-shadow: none; background: none; }
+@media (max-width: 1100px) {
+  .hostform { grid-template-columns: 1fr 1fr; }
+  .hostform > button, .hostform-acts { grid-column: 1 / -1; margin-top: 0; }
+  .hostform-acts > * { flex: 1 1 0; }
+}
+@media (max-width: 700px) {
+  .zhead .actions { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }  /* New record on its own row, the three others share one */
+  .zhead .actions .primary { grid-column: 1 / -1; }
+  .ztools .search { flex: 1 1 100%; }
+  .ztools select { flex: 1 1 auto; }
+  .hostform { grid-template-columns: 1fr; }
+  .hostform input { font-size: 16px; }
+}

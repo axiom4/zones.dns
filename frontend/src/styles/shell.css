@@ -1,0 +1,133 @@
+/* App frame (Signal room): a top bar carrying the live activity trace, the section rail on desktop and tablet, a bottom bar on phones.
+   Page-level chrome shared by every page (page title row, tabs) lives here too. */
+
+.skip { position: absolute; left: .75rem; top: -4rem; z-index: 100; background: var(--brand); color: var(--brand-ink); padding: .55rem .95rem; border-radius: var(--radius-s); font-weight: 700; text-decoration: none; }
+.skip:focus { top: .6rem; }
+
+.shell { --top: 3.6rem; --railw: 228px; display: grid; grid-template-columns: var(--railw) minmax(0, 1fr); grid-template-rows: auto 1fr;
+         grid-template-areas: "top top" "rail main"; min-height: 100vh; min-height: 100dvh; }
+
+/* ---- top bar ---- */
+.topbar { grid-area: top; position: sticky; top: 0; z-index: 40; display: flex; align-items: center; gap: 1.25rem; min-height: var(--top);
+          padding: max(.4rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) .4rem max(1.25rem, env(safe-area-inset-left));
+          background: color-mix(in srgb, var(--rail) 94%, transparent); backdrop-filter: blur(10px); border-bottom: 1px solid var(--line-soft); }
+.brand { display: inline-flex; align-items: center; gap: .55rem; color: var(--ink); text-decoration: none; font-weight: 800; font-size: 1.12rem;
+         letter-spacing: -.01em; width: calc(var(--railw) - 2.5rem); flex: none; }
+.brand img { border-radius: 7px; flex: none; }
+.brand i { font-style: normal; font-weight: 500; color: var(--muted); }
+
+/* the activity trace: queries per minute, the last hour. The one bold element on every page; everything else stays quiet */
+app-activity { flex: 1; min-width: 0; display: flex; justify-content: flex-end; }
+.activity { display: flex; align-items: center; gap: .9rem; min-width: 0; padding: .3rem .5rem .3rem .75rem; border-radius: var(--radius-s); color: var(--ink); text-decoration: none; }
+.activity:hover { background: var(--hover); }
+.trace { width: clamp(140px, 28vw, 380px); height: 30px; flex: 0 1 auto; overflow: visible; }
+.trace .area { fill: color-mix(in srgb, var(--c-dns) 13%, transparent); }
+.trace .line, .trace .blk { fill: none; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.trace .line { stroke: var(--c-dns); stroke-width: 1.6; }
+.trace .blk { stroke: var(--c-dnsblk); stroke-width: 1.4; stroke-dasharray: 3 2; }  /* dashed as well as red: not colour alone */
+.activity .num { display: grid; line-height: 1.1; white-space: nowrap; }
+.activity .num b { font-size: 1.05rem; font-weight: 700; }
+.activity .num span { font-size: 12px; color: var(--muted); }
+.led { --l: var(--line); width: 10px; height: 10px; flex: none; border-radius: 50%; background: var(--l); box-shadow: 0 0 0 3px color-mix(in srgb, var(--l) 22%, transparent); }
+.led[data-s=ok] { --l: var(--led-ok); } .led[data-s=idle] { --l: var(--led-warn); }
+@media (prefers-reduced-motion: no-preference) {
+  .led[data-s=ok] { animation: led-beat 2.6s ease-in-out infinite; }
+  @keyframes led-beat { 50% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--l) 8%, transparent); } }
+}
+
+/* ---- section rail ---- */
+.rail { grid-area: rail; position: sticky; top: var(--top); align-self: start; height: calc(100dvh - var(--top)); overflow-y: auto; overscroll-behavior: contain;
+        display: flex; flex-direction: column; gap: 2px; padding: .9rem .75rem 1rem; background: var(--rail); border-right: 1px solid var(--line-soft); }
+.rail > :is(a, button) { display: flex; align-items: center; gap: .7rem; min-height: 40px; padding: .45rem .7rem; border: 0; border-radius: var(--radius-s);
+                         background: none; color: var(--rail-ink); text-decoration: none; font-weight: 600; text-align: left; }
+.rail > :is(a, button):hover { background: var(--hover); color: var(--ink); }
+.rail > a.on { background: var(--raised); color: var(--brand); box-shadow: inset 3px 0 0 var(--brand), 0 0 0 1px var(--line-soft); }  /* lit like a port LED */
+.rail svg, .sheet svg { width: 20px; height: 20px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.rail .more { display: none; }
+.rail .grow { flex: 1; min-height: 1rem; }
+.rail .aux { min-height: 36px; font-weight: 500; font-size: 14px; }
+
+/* ---- page ---- */
+main { grid-area: main; min-width: 0; width: 100%; max-width: 1600px; padding: 1.75rem max(2.25rem, env(safe-area-inset-right)) 3rem 2.25rem; }
+main:focus { outline: none; }
+main header { display: flex; justify-content: space-between; align-items: end; gap: 1rem; margin-bottom: 1.25rem; flex-wrap: wrap; }
+main h2 { font-size: 1.75rem; line-height: 1.15; letter-spacing: -.015em; font-weight: 700; }
+main header .actions { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+.search { width: 280px; max-width: 100%; }
+
+/* tabs inside a page (Leases / Reservations..., the zone switcher): a filled pill marks where you are */
+.subtabs { display: flex; flex-wrap: wrap; gap: .25rem; margin-bottom: 1rem; }
+.subtabs :is(a, button) { display: inline-flex; align-items: center; min-height: 34px; padding: .3rem .85rem; border: 1px solid transparent; border-radius: 999px;
+                          background: none; color: var(--muted); font-weight: 700; text-decoration: none; cursor: pointer; white-space: nowrap; }
+.subtabs :is(a, button):hover { color: var(--ink); background: var(--hover); }
+.subtabs :is(a, button).on { background: var(--ink); color: var(--surface); }
+.subtabs a.off { text-decoration: line-through; }
+
+.zonebar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem 1rem; margin-bottom: 1.25rem; padding-bottom: 1rem; border-bottom: 1px solid var(--line-soft); }
+.zonebar .subtabs { margin: 0; min-width: 0; }
+.zgroup { display: inline-flex; flex-wrap: wrap; gap: .25rem; padding-left: .55rem; margin-left: .3rem; border-left: 1px solid var(--line-soft); }  /* forward zones | reverse zones */
+.zactions { display: flex; gap: .5rem; flex-wrap: wrap; }
+.zactions .soft { font-weight: 400; font-size: 13px; }
+
+/* ---- More (phone), notices ---- */
+.sheet { margin: auto 0 0; width: 100%; max-width: 100%; max-height: 85dvh; border: 0; border-radius: 14px 14px 0 0; padding: 1rem 1rem calc(1rem + env(safe-area-inset-bottom));
+         background: var(--surface); color: var(--ink); box-shadow: var(--shadow-pop); }
+.sheet::backdrop { background: color-mix(in srgb, #0b1420 55%, transparent); }
+.sheet nav { display: grid; gap: 2px; margin-bottom: .75rem; }
+.sheet nav :is(a, button) { display: flex; align-items: center; gap: .85rem; min-height: 48px; padding: .5rem .75rem; border: 0; border-radius: var(--radius-s); background: none;
+                            color: inherit; text-decoration: none; font-weight: 600; font-size: 1rem; text-align: left; }
+.sheet nav a.on { color: var(--brand); background: var(--brand-soft); }
+.sheet > .ghost { width: 100%; }
+
+.notice-pop { position: fixed; inset: auto auto 1.25rem 50%; translate: -50% 0; margin: 0; width: max-content; max-width: min(560px, calc(100vw - 2rem));
+              display: flex; align-items: center; gap: .75rem; padding: .55rem .55rem .55rem 1rem; border: 1px solid var(--line-soft); border-radius: var(--radius);
+              background: var(--raised); color: var(--ink); box-shadow: var(--shadow-pop); }
+.notice-pop:not(:popover-open) { display: none; }
+.notice-pop::before { content: ''; flex: none; width: .6rem; height: .6rem; border-radius: 50%; background: var(--led-ok); }
+.notice-pop[data-k=error] { border-left: 4px solid var(--danger); }
+.notice-pop[data-k=error]::before { background: var(--led-bad); }
+.notice-pop p { margin: 0; flex: 1; font-weight: 600; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) {
+  .notice-pop:popover-open { animation: notice-in .18s ease-out; }  /* answers the user's action: it shows what changed */
+  @keyframes notice-in { from { opacity: 0; translate: -50% .5rem; } }
+}
+
+/* ---- tablet and phone held sideways: a compact rail, icon over label ---- */
+@media (max-width: 1100px), (orientation: landscape) and (max-height: 500px) and (pointer: coarse) {
+  .shell { --railw: 86px; }
+  .brand { width: auto; }
+  .rail { padding: .6rem .4rem; }
+  .rail > :is(a, button) { flex-direction: column; justify-content: center; gap: .2rem; min-height: 56px; padding: .45rem .2rem; text-align: center; font-size: 11.5px; line-height: 1.15; }
+  .rail > a.on { box-shadow: inset 3px 0 0 var(--brand), 0 0 0 1px var(--line-soft); }
+  .rail .aux { min-height: 52px; font-size: 11px; }
+  main { padding: 1.25rem max(1.25rem, env(safe-area-inset-right)) 2.5rem 1.25rem; }
+  main h2 { font-size: 1.5rem; }
+}
+
+/* ---- phone: bottom bar with the four main sections and More ---- */
+@media (max-width: 700px) and (min-height: 501px), (max-width: 700px) and (pointer: fine) {
+  .shell { display: block; }
+  .topbar { gap: .6rem; padding-inline: max(.75rem, env(safe-area-inset-left)) max(.75rem, env(safe-area-inset-right)); }
+  .brand span { display: none; }  /* the logo stays, with its label for screen readers */
+  app-activity { justify-content: stretch; }
+  .activity { flex: 1; gap: .6rem; padding-left: .4rem; }
+  .trace { width: auto; flex: 1 1 0; min-width: 60px; }
+  .activity .num span { font-size: 11px; }
+  .rail { position: fixed; inset: auto 0 0 0; z-index: 40; height: auto; flex-direction: row; justify-content: space-around; gap: 0; overflow: visible;
+          padding: .25rem max(.25rem, env(safe-area-inset-right)) calc(.25rem + env(safe-area-inset-bottom)) max(.25rem, env(safe-area-inset-left));
+          border-right: 0; border-top: 1px solid var(--line-soft); background: color-mix(in srgb, var(--rail) 95%, transparent); backdrop-filter: blur(10px); }
+  .rail > .extra, .rail .grow { display: none; }
+  .rail .more { display: flex; }
+  .rail > :is(a, button) { flex: 1 1 0; min-width: 0; min-height: 54px; }
+  .rail > :is(a, button) { border-radius: 0; }
+  .rail > a.on { background: none; box-shadow: inset 0 3px 0 var(--brand); }
+  main { padding: 1rem max(.9rem, env(safe-area-inset-right)) calc(5.75rem + env(safe-area-inset-bottom)) max(.9rem, env(safe-area-inset-left)); }
+  main h2 { font-size: 1.4rem; }
+  .notice-pop { bottom: calc(5rem + env(safe-area-inset-bottom)); }
+  /* the zone switcher scrolls sideways; the fade says there is more */
+  .zonebar .subtabs { flex-wrap: nowrap; width: 100%; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 88%, transparent); }
+  .zonebar .subtabs::-webkit-scrollbar { display: none; }
+  .zgroup { flex-wrap: nowrap; }
+  .zactions { width: 100%; } .zactions > * { flex: 1 1 0; }
+  .zactions .soft { display: none; }
+}

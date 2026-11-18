@@ -2,7 +2,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import nacl from 'tweetnacl';
-import { errorText } from './error-text.ts';
+import { errorText, fieldErrors } from './error-text.ts';
+import { byMinute } from './activity.ts';
 import { countryName, flag } from './geo-util.ts';
 import { LoginError, seal } from './login-crypto.ts';
 import { SPEC, TYPE_SPECS, compose, parse, tokenize, validate } from './record-types.ts';
@@ -78,4 +79,28 @@ test('errorText: only the strings of the error body', () => {
   assert.equal(errorText({ error: '<html>502</html>', message: 'Http failure response: 502' }), 'Http failure response: 502');
   assert.equal(errorText({ error: { isTrusted: true }, message: 'Http failure response: 0 Unknown Error' }), 'Http failure response: 0 Unknown Error'); // network error
   assert.equal(errorText({ message: 'Cancelled or timed out.' }), 'Cancelled or timed out.');
+});
+
+test('fieldErrors: one message per field, detail left out', () => {
+  assert.deepEqual(fieldErrors({ error: { name: ['Taken.', 'Too long.'], detail: 'x', non_field_errors: ['y'] } }), { name: 'Taken. Too long.' });
+  assert.deepEqual(fieldErrors({ error: ['a list'] }), {});
+  assert.deepEqual(fieldErrors({}), {});
+});
+
+test('byMinute: 60 slots ending now, gaps are 0, blocked = DNS + proxy', () => {
+  const now = Date.parse('2026-11-18T10:30:20Z');
+  const [c, b] = byMinute([
+    { t: '2026-11-18T10:30:00Z', count: 5, blocked: 1, proxy_blocked: 1 },
+    { t: '2026-11-18T10:28:00Z', count: 3, blocked: 0, proxy_blocked: 0 },
+    { t: '2026-11-18T09:00:00Z', count: 99, blocked: 9, proxy_blocked: 0 },  // older than the hour
+  ], now);
+  assert.equal(c.length, 60);
+  assert.equal(c[59], 5); assert.equal(b[59], 2); assert.equal(c[57], 3); assert.equal(c[58], 0);
+  assert.equal(c.reduce((a, x) => a + x, 0), 8);
+});
+
+test('validate: a missing value names its field, acronyms intact', () => {
+  assert.equal(validate({ key: 'ip', label: 'IPv4 address', help: '' }, ''), 'Enter the IPv4 address.');
+  assert.equal(validate({ key: 't', label: 'Text', help: '' }, ' '), 'Enter the text.');
+  assert.equal(validate({ key: 'f', label: 'Flag', help: '', optional: true }, ''), '');
 });

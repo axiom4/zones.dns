@@ -178,7 +178,7 @@ export function defaults(spec: TypeSpec) {
 /** First problem with a field value, or '' if fine. */
 export function validate(f: Field, v: string): string {
   const x = (v ?? '').trim();
-  if (!x) return f.optional ? '' : 'Required field.';
+  if (!x) return f.optional ? '' : `Enter the ${/^[A-Z][a-z]/.test(f.label) ? f.label[0].toLowerCase() + f.label.slice(1) : f.label}.`;  // IPv4, TTL keep their capitals
   if (f.kind === 'number') {
     const n = Number(x);
     if (!/^\d+$/.test(x) || // Number() also takes 1e3, 0x10 and 1.0, which the zone file would get as typed

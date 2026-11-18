@@ -1,7 +1,8 @@
 import { DecimalPipe, NgTemplateOutlet } from '@angular/common';
 import { Component, ElementRef, OnDestroy, computed, inject, signal, viewChild } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
-import { ActivatedRoute, Router, RouterLink } from '@angular/router';
+import { ActivatedRoute, ParamMap, Router, RouterLink, RouterLinkActive } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, logsAnswersList, logsClientsList, logsGroupedList, logsList, logsPurgeCreate, logsResolvedList, geoIpsRetrieve, geoWhoisRetrieve } from '../api/functions';
 import { Answer, GeoIp, QueryLog, QueryLogClient, QueryLogGroup, Resolved } from '../api/models';
@@ -23,7 +24,7 @@ interface Open { subs: QueryLogGroup[] | null; total: number; rows: QueryLog[]; 
 
 @Component({
   selector: 'app-logs-page',
-  imports: [FormsModule, NgTemplateOutlet, RouterLink, DecimalPipe, Autocomplete],
+  imports: [FormsModule, NgTemplateOutlet, RouterLink, RouterLinkActive, DecimalPipe, Autocomplete],
   templateUrl: './logs-page.html',
 })
 export class LogsPage implements OnDestroy {
@@ -71,18 +72,45 @@ export class LogsPage implements OnDestroy {
   }
 
   constructor() {
-    const p = this.route.snapshot.queryParamMap;  // /logs?country=IT&hours=168, from the geolocation page
-    this.country = (p.get('country') ?? '').toUpperCase();
-    this.asn = (p.get('asn') ?? '').toUpperCase();
-    if ([1, 24, 168, 720].includes(Number(p.get('hours')))) this.hours = Number(p.get('hours'));
-    this.reset(); this.loadClients(); this.toggleLive();
+    // Every filter lives in the URL (?q=&client=&outcome=&hours=...): links from Statistics and Geolocation land filtered, Back and reload keep it.
+    this.route.queryParamMap.pipe(takeUntilDestroyed()).subscribe(p => this.fromUrl(p));
+    this.loadClients(); this.toggleLive();
   }
   countryName = countryName;
-  clearCountry() {
-    this.country = ''; this.asn = '';
-    this.router.navigate([], { queryParams: { country: null, asn: null, hours: null }, queryParamsHandling: 'merge', replaceUrl: true });  // a reload or a shared link no longer brings the filter back
+  clearCountry() { this.country = ''; this.asn = ''; this.changed(); }
+
+  /** The filters as query parameters: only what differs from the defaults. */
+  private params() {
+    const p: { [k: string]: string } = {};
+    for (const k of ['q', 'outcome', 'type', 'client', 'rcode', 'answer', 'country', 'asn'] as const) if (this[k]) p[k] = this[k];
+    if (this.hours !== 24) p['hours'] = String(this.hours);
+    if (this.grouped) p['group'] = '1';
+    if (this.grouped && this.ordering !== 'last') p['order'] = this.ordering;
+    return p;
+  }
+  private shown = ''; // the filters of the rows on screen (as JSON of params()): a URL change that matches them is our own
+
+  private fromUrl(p: ParamMap) {
+    const s = (k: string) => (p.get(k) ?? '').trim();
+    this.q = s('q'); this.type = s('type'); this.client = s('client'); this.answer = s('answer');
+    this.outcome = ['local', 'forwarded', 'blocked', 'error'].includes(s('outcome')) ? s('outcome') : '';
+    this.rcode = ['NOERROR', 'NXDOMAIN', 'SERVFAIL', 'REFUSED'].includes(s('rcode')) ? s('rcode') : '';
+    this.country = s('country').toUpperCase(); this.asn = s('asn').toUpperCase();
+    this.hours = p.has('hours') && [0, 1, 24, 168, 720].includes(Number(s('hours'))) ? Number(s('hours')) : 24;
+    this.grouped = s('group') === '1'; this.ordering = s('order') === 'count' ? 'count' : 'last';
+    const key = JSON.stringify(this.params());
+    if (key === this.shown) return;
+    this.shown = key; this.domains.set({}); this.names.set({}); this.reset();
+  }
+
+  /** A filter was changed on the page: write it to the URL (replacing the entry, so Back leaves the log) and reload. */
+  changed() {
+    clearTimeout(this.timer);
+    this.shown = JSON.stringify(this.params());
+    this.router.navigate([], { queryParams: this.params(), replaceUrl: true });
     this.reset();
   }
+  filterBy(k: 'q' | 'client', v: string) { this[k] = v; this.changed(); }
 
   // ---- popup with the details of a query / group, fetched only when it is opened ----
   detail = signal<Detail | null>(null);
@@ -122,7 +150,7 @@ export class LogsPage implements OnDestroy {
   openQuery(row: QueryLog) {
     this.whois.set(null);
     this.detail.set({ kind: 'q', row, answers: null });
-    this.det().nativeElement.showModal();
+    this.det().nativeElement.showModal(); this.dialogOpen.set(true);
     return this.ui.run(async () => {
       const r = await this.api.invoke(logsAnswersList, { ids: String(row.id) });
       this.detail.update(d => (d?.kind === 'q' && d.row.id === row.id ? { ...d, answers: r[0]?.answers ?? [] } : d));
@@ -133,7 +161,7 @@ export class LogsPage implements OnDestroy {
   openGroup(g: QueryLogGroup, level: number) {
     this.whois.set(null);
     this.detail.set({ kind: 'g', g, level, resolved: null });
-    this.det().nativeElement.showModal();
+    this.det().nativeElement.showModal(); this.dialogOpen.set(true);
     return this.ui.run(async () => {
       const r = await this.api.invoke(logsResolvedList, { by: level === 0 ? 'domain' : 'name', names: g.name });
       this.detail.update(d => (d?.kind === 'g' && d.g.name === g.name ? { ...d, resolved: r[0]?.resolved ?? [] } : d));
@@ -148,14 +176,14 @@ export class LogsPage implements OnDestroy {
   isOpen(name: string, level: number) { return name in (level === 0 ? this.domains() : this.names()); }
 
   // Debounce typing so each keystroke doesn't hit the API.
-  search() { clearTimeout(this.timer); this.timer = setTimeout(() => this.reset(), 250); }
+  search() { clearTimeout(this.timer); this.timer = setTimeout(() => this.changed(), 250); }
 
   private filters() {
     return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined, country: this.country || undefined, asn: this.asn || undefined };
   }
 
   /** Reload from the start. While live, keep as many rows as were already loaded so the list doesn't jump. */
-  reset() {
+  reset(silent = false) {
     return this.ui.run(async () => {
       if (this.grouped) {
         const limit = Math.max(PAGE, this.live ? this.groups().length : 0);
@@ -175,7 +203,8 @@ export class LogsPage implements OnDestroy {
         const r = await this.api.invoke(logsList, { ...this.filters(), limit: Math.max(PAGE, this.live ? this.rows().length : 0), offset: 0 });
         this.rows.set(r.results); this.count.set(r.count); this.groups.set([]);
       }
-    });
+      this.fresh.set(0);
+    }, { silent });
   }
 
   more() {
@@ -246,7 +275,7 @@ export class LogsPage implements OnDestroy {
     });
   }
 
-  openPurge() { this.ui.error.set(''); this.pg().nativeElement.showModal(); this.previewPurge(); }
+  openPurge() { this.pg().nativeElement.showModal(); this.dialogOpen.set(true); this.previewPurge(); }
 
   previewPurge() {
     this.purgeCount.set(null);
@@ -261,13 +290,13 @@ export class LogsPage implements OnDestroy {
     return this.ui.run(async () => {
       dlg.close(); // no modal over a modal: the second factor is asked on its own
       try {
-        const grant = await this.stepUp.request('log-purge'); // the history is erased only by whoever proves a second factor
+        const grant = await this.stepUp.request('log-purge', `Delete ${this.purgeCount() ?? 0} queries from the log`, 'Delete queries'); // the history is erased only by whoever proves a second factor
         if (grant === null) { dlg.showModal(); return; }
         await this.api.invoke(logsPurgeCreate, { body: { older_than_hours: this.purgeHours, dry_run: false }, 'X-MFA-Grant': grant || undefined });
       } catch (e) { dlg.showModal(); throw e; } // the error is shown in the dialog
       this.domains.set({}); this.names.set({});
       await this.reset();
-    });
+    }, { ok: `Deleted ${this.purgeCount() ?? 0} queries from the log` });
   }
 
   toggleLive() {
@@ -280,28 +309,72 @@ export class LogsPage implements OnDestroy {
   private refresh(delay: number) {
     this.poll = setTimeout(async () => {
       let next = delay;
-      if (!document.hidden) { const t = Date.now(); await this.reset(); next = Math.max(3000, 3 * (Date.now() - t)); }
+      if (!document.hidden) {
+        const t = Date.now();
+        await (this.busy() ? this.peek() : this.reset(true));
+        next = Math.max(3000, 3 * (Date.now() - t));
+      }
       if (this.live && !this.destroyed) this.refresh(next); // a refresh still running when the page was left must not start the loop again
     }, delay);
   }
 
-  notice = signal('');
+  // ---- live mode: it holds still while the user points at, or works in, the list (rows moving under the cursor caused wrong clicks) ----
+  private hover = signal(false);
+  focusIn = signal(false);
+  private dialogOpen = signal(false);
+  busy = computed(() => this.hover() || this.focusIn() || this.dialogOpen());
+  fresh = signal(0); // newer rows seen while paused (flat list); -1: something changed (grouped view)
+  point(on: boolean, e?: PointerEvent) { if (!e || e.pointerType === 'mouse') this.hover.set(on); }
+  focusOut(e: FocusEvent) { if (!(e.currentTarget as HTMLElement).contains(e.relatedTarget as Node)) this.focusIn.set(false); }
+  dialogClosed() { this.dialogOpen.set(false); }
+
+  /** While paused: only count what is new, without touching the rows on screen. */
+  private peek() {
+    return this.ui.run(async () => {
+      if (this.grouped) {
+        const r = await this.api.invoke(logsGroupedList, { ...this.filters(), by: 'domain', ordering: this.ordering, limit: 1, offset: 0 });
+        if (r.results[0] && (r.results[0].last !== this.groups()[0]?.last || r.count !== this.gCount())) this.fresh.set(-1);
+      } else {
+        const top = this.rows()[0]?.id ?? 0;
+        const r = await this.api.invoke(logsList, { ...this.filters(), limit: PAGE, offset: 0 });
+        this.fresh.set(r.results.filter(x => x.id > top).length);
+      }
+    }, { silent: true });
+  }
+  showFresh() { this.reset(); window.scrollTo({ top: 0 }); }
+
   blockedNow = signal<ReadonlySet<string>>(new Set()); // blocked in this session: the log rows are history and keep their old outcome
+  allowedNow = signal<ReadonlySet<string>>(new Set()); // same, for names allowed here
+
+  /** Why a blocked query was blocked, in words (the daemon logs the rule in `via`). */
+  why(l: QueryLog) {
+    const v = l.via ?? '';
+    if (!v) return 'Blocked (the rule was not recorded)';
+    if (v === 'rate limit') return 'Blocked: this client sent too many queries (rate limit)';
+    const m = /^blacklist (\S+) \((.+)\)$/.exec(v);
+    if (m) return m[1] === l.name ? `Blocked by the list ${m[2]}` : `Blocked by the list ${m[2]} (entry ${m[1]})`;
+    const c = /^cname (\S+) -> blacklist (\S+) \((.+)\)$/.exec(v);
+    if (c) return `Blocked: its alias ${c[1]} is on the list ${c[3]}`;
+    if (v.startsWith('suspicious: ')) return 'Blocked as suspicious: ' + v.slice(12);
+    return 'Blocked: ' + v;
+  }
+  /** An exception helps unless the block was the rate limit. */
+  canAllow(l: QueryLog) { return l.outcome === 'blocked' && l.via !== 'rate limit'; }
 
   block(name: string) {
-    this.ui.ask(`Block ${name}?`, 'The domain and its subdomains will receive NXDOMAIN. You can unblock it from Blacklist > Personal blocks.', () =>
+    this.ui.ask(`Block ${name}?`, 'The domain and its subdomains will receive NXDOMAIN from the next query. Rows already in the log keep their outcome. Undo it in Blocklist > Personal blocks.', () =>
       this.ui.run(async () => {
         await this.api.invoke(blockedCreate, { body: { name } });
         this.blockedNow.set(new Set([...this.blockedNow(), name]));
-        this.notice.set(`${name} blocked: from the next query it answers NXDOMAIN. The log rows stay as they were.`);
-      }));
+      }, { ok: `Blocked ${name}` }), 'Block domain');
   }
 
   allow(name: string) {
-    this.ui.ask(`Allow ${name}?`, 'The name and its subdomains will never be blocked by the public lists (a longer personal block still wins). You can remove the exception from Blacklist > Personal blocks.', () =>
+    this.ui.ask(`Allow ${name}?`, 'The name and its subdomains will never be blocked by the public lists (a longer personal block still wins). Rows already in the log keep their outcome. Remove the exception in Blocklist > Personal blocks.', () =>
       this.ui.run(async () => {
         await this.api.invoke(blockedCreate, { body: { name, allow: true } });
-        this.notice.set(`${name} allowed: from the next query it is no longer blocked. The log rows stay as they were.`);
-      }));
+        this.allowedNow.set(new Set([...this.allowedNow(), name]));
+        this.det().nativeElement.close();
+      }, { ok: `Allowed ${name}` }), 'Allow name');
   }
 }

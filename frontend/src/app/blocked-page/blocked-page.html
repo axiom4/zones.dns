@@ -1,27 +1,34 @@
-<nav class="subtabs" aria-label="Blacklist">
-  <a routerLink="/blacklist/manual" [class.on]="true">Personal blocks</a>
-  <a routerLink="/blacklist/lists" [class.on]="false">Public lists</a>
+<nav class="subtabs" aria-label="Blocklist">
+  <a routerLink="/blacklist/manual" routerLinkActive="on" ariaCurrentWhenActive="page">Personal blocks</a>
+  <a routerLink="/blacklist/lists" routerLinkActive="on" ariaCurrentWhenActive="page">Public lists</a>
 </nav>
 <header>
   <div>
     <div class="title-row">
       <h2>Personal blocks</h2>
-      <button class="switch" role="switch" [attr.aria-checked]="active()" (click)="switchAll()" aria-label="Personal blocks"
-              [title]="active() ? 'Personal blocks are on: click to turn them all off' : 'Personal blocks are off: click to turn them on'"><i></i></button>
+      <button class="switch" type="button" role="switch" [attr.aria-checked]="active()" (click)="switchAll()" aria-label="Use personal blocks"><i></i></button>
       <span class="soft">{{ active() ? 'On' : 'Off: none of these domains is blocked' }}</span>
     </div>
-    <p class="soft">{{ blocked().length }} {{ blocked().length === 1 ? 'entry' : 'entries' }}. A blocked domain and its subdomains answer NXDOMAIN (switch a block off to keep it without blocking); an allowed one is never blocked by the public lists, and the longest entry wins. Internal zones are never blocked.</p>
+    <p class="soft">@if (loaded()) { {{ blocked().length }} {{ blocked().length === 1 ? 'entry' : 'entries' }}. } A blocked domain and its subdomains stop resolving (the DNS answers “does not exist”). An allowed one is never blocked by the public lists. When two entries match, the longer one wins. Your own zones are never blocked.</p>
   </div>
   @if (blocked().length > 5) {
     <div class="actions"><input class="search" type="search" [ngModel]="filter()" (ngModelChange)="filter.set($event)" name="f" placeholder="Search blocks" aria-label="Search blocks" autocomplete="off"></div>
   }
 </header>
-<form class="composer single" (ngSubmit)="add()">
-  <input class="grow" name="b" [(ngModel)]="name" placeholder="domain, e.g. ads.example.com" autocomplete="off" aria-label="Domain" required>
+<form class="composer bl-add" (ngSubmit)="add()" aria-label="Block or allow a domain">
+  <div class="cf grow">
+    <label for="bl-name">Domain</label>
+    <input id="bl-name" name="b" [(ngModel)]="name" placeholder="e.g. ads.example.com" autocomplete="off" required
+           [attr.aria-invalid]="errs()['name'] ? true : null" [attr.aria-describedby]="errs()['name'] ? 'bl-name-e' : null">
+    @if (errs()['name']; as e) { <small id="bl-name-e" class="bad">{{ e }}</small> }
+  </div>
+  <label class="check bl-rx"><input type="checkbox" name="r" [(ngModel)]="regex"> Pattern <span class="soft">(regex)</span></label>
   <button class="primary">Block</button>
-  <button type="button" class="ghost" (click)="add(true)" [disabled]="!name.trim()" title="Never block this domain and its subdomains">Allow</button>
-  <select name="h" [(ngModel)]="hours" aria-label="How long an Allow lasts" title="How long an Allow lasts"><option [ngValue]="0">always</option><option [ngValue]="1">1 hour</option><option [ngValue]="24">1 day</option><option [ngValue]="168">7 days</option></select>
-  <label class="check"><input type="checkbox" name="r" [(ngModel)]="regex"> pattern (regex)</label>
+  <span class="bl-allow">
+    <button type="button" class="ghost" (click)="add(true)" [disabled]="!name.trim()">Allow</button>
+    <label class="sr-only" for="bl-hours">Allow for</label>
+    <select id="bl-hours" name="h" [(ngModel)]="hours"><option [ngValue]="0">for always</option><option [ngValue]="1">for 1 hour</option><option [ngValue]="24">for 1 day</option><option [ngValue]="168">for 7 days</option></select>
+  </span>
 </form>
 @if (suggestions().length) {
   <details class="panel">
@@ -29,33 +36,34 @@
     <p class="soft">Asked for in the last 7 days, not blocked. A hint, not a verdict: check before blocking.</p>
     <ul class="records blocked">
       @for (s of suggestions(); track s.name) {
-        <li><span class="rvalue">{{ s.name }}</span><span class="ttlv">{{ s.count }} queries</span><button class="mini" (click)="suggested(s.name)" [attr.aria-label]="'Block ' + s.name">Block</button></li>
+        <li><span class="rvalue">{{ s.name }}</span><span class="ttlv wide">{{ s.count }} queries</span><button class="mini" type="button" (click)="suggested(s.name)" [attr.aria-label]="'Block ' + s.name">Block</button></li>
       }
     </ul>
   </details>
 }
-<ul class="records blocked">
+<ul class="records blocked" [attr.aria-busy]="!loaded()">
   @for (b of shown(); track b.id) {
     <li [class.off]="!active() || b.enabled === false || expired(b)">
       @if (editing() === b.id) {
         <form class="grow inline" (ngSubmit)="save(b)">
-          <input class="grow" name="e" [(ngModel)]="draft" autocomplete="off" aria-label="New name" required autofocus>
+          <input class="grow" name="e" [(ngModel)]="draft" autocomplete="off" [attr.aria-label]="'New name for ' + b.name" required autofocus>
           <button class="mini primary">Save</button>
-          <button type="button" class="mini" (click)="editing.set(null)">Cancel</button>
+          <button type="button" class="mini" (click)="cancelEdit(b)">Cancel</button>
         </form>
       } @else {
         <span class="rvalue">{{ b.name }}</span>
-        @if (b.regex) { <span class="type" data-t="TXT" title="Matches the queried name as a regular expression">regex</span> }
+        @if (b.regex) { <span class="type" data-t="TXT" title="Matches the queried name as a regular expression">Pattern</span> }
         @if (b.allow) { <span class="out sm" data-o="local" title="Never blocked by the lists">Allowed</span> }
-        @if (b.expires) { <span class="soft" [title]="'Ends ' + until(b)">{{ expired(b) ? 'expired' : 'until ' + until(b) }}</span> }
+        @if (b.expires) { <span class="soft" [title]="'Ends ' + until(b)">{{ expired(b) ? 'Expired' : 'Until ' + until(b) }}</span> }
+        @if (b.enabled === false) { <span class="soft">Off</span> }
         <span class="ttlv wide">{{ b.created.slice(0, 10) }}</span>
-        <button class="switch" role="switch" [attr.aria-checked]="active() && b.enabled !== false" (click)="toggle(b)" [disabled]="!active()"
-                [title]="!active() ? 'Personal blocks are off' : b.enabled === false ? (b.allow ? 'Disabled: click to allow again' : 'Disabled: click to block again') : (b.allow ? 'Enabled: click to stop allowing' : 'Enabled: click to stop blocking')"><i></i></button>
-        <button class="mini" (click)="edit(b)" [disabled]="!active()" [attr.aria-label]="'Edit ' + b.name">Edit</button>
-        <button class="icon" (click)="del(b)" [disabled]="!active()" [attr.aria-label]="'Unblock ' + b.name">✕</button>
+        <button class="switch" type="button" role="switch" [attr.aria-checked]="active() && b.enabled !== false" (click)="toggle(b)" [disabled]="!active()"
+                [attr.aria-label]="(b.allow ? 'Allow ' : 'Block ') + b.name"><i></i></button>
+        <button class="mini" type="button" [id]="'bl-edit-' + b.id" (click)="edit(b)" [disabled]="!active()" [attr.aria-label]="'Edit ' + b.name">Edit</button>
+        <button class="icon" type="button" (click)="del(b)" [disabled]="!active()" [attr.aria-label]="(b.allow ? 'Remove the exception for ' : 'Unblock ') + b.name">✕</button>
       }
     </li>
   } @empty {
-    <li class="empty">{{ blocked().length ? 'No results for your search.' : 'No entries. Add one above.' }}</li>
+    <li class="empty">{{ !loaded() ? 'Loading…' : blocked().length ? 'No entry matches “' + filter() + '”.' : 'No entries yet. Type a domain above and press Block or Allow.' }}</li>
   }
 </ul>

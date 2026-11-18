@@ -1,9 +1,10 @@
-<dialog #dlg class="confirm wide" (close)="stop()" (click)="$event.target === dlg ? dlg.close() : null">
-  <h3>Ping {{ address() }}</h3>
+<dialog #dlg class="confirm wide" aria-labelledby="ping-live-t" (close)="stop()" (click)="$event.target === dlg ? dlg.close() : null">
+  <h3 id="ping-live-t">Ping {{ address() }} every second</h3>
+  <p class="sr-only" aria-live="polite">{{ running() ? '' : summary() }}</p>
   <textarea #out class="ping-out" readonly rows="14" spellcheck="false" aria-label="Output of ping" [value]="text()"></textarea>
   <div class="actions">
-    <button class="ghost" (click)="copy()">{{ copied() ? 'Copied' : 'Copy' }}</button>
-    @if (running()) { <button class="ghost" (click)="stop()">Stop</button> } @else { <button class="ghost" (click)="start()">Restart</button> }
-    <button class="primary" (click)="dlg.close()">Close</button>
+    <button class="ghost" type="button" (click)="copy()">{{ copied() ? 'Copied' : 'Copy' }}</button>
+    @if (running()) { <button class="ghost" type="button" (click)="stop()">Stop</button> } @else { <button class="ghost" type="button" (click)="start()">Restart</button> }
+    <button class="primary" type="button" (click)="dlg.close()">Close</button>
   </div>
 </dialog>

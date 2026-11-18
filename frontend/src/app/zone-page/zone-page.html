@@ -1,27 +1,21 @@
 @if (zone(); as z) {
-  <header>
+  <header class="zhead">
     <div>
       <div class="title-row">
         <h2>{{ z.name }}</h2>
-        <button class="switch" role="switch" [attr.aria-checked]="z.enabled !== false" (click)="toggleZone(z)" [attr.aria-label]="'Zone ' + z.name"
-                [title]="z.enabled === false ? 'Zone is off: click to serve it' : 'Zone is on: click to turn it off'"><i></i></button>
-        <span class="soft">{{ z.enabled === false ? 'Off: not served' : 'On' }}</span>
+        <button class="switch" role="switch" [attr.aria-checked]="z.enabled !== false" (click)="toggleZone(z)" [attr.aria-label]="'Serve zone ' + z.name"><i></i></button>
+        <span class="soft" aria-hidden="true">{{ z.enabled === false ? 'Off' : 'Served' }}</span>
       </div>
-      <p class="soft">{{ records().length }} records@if (z.enabled === false) { · its names are answered as if the zone did not exist (forwarded to the upstream)}</p>
+      <p class="soft">
+        @if (loading()) { Loading records… } @else { {{ records().length }} {{ records().length === 1 ? 'record' : 'records' }} }
+        @if (z.enabled === false) { <br>Off: this zone is not served, so its names go to your upstream DNS. Turn it on to change its records. }
+      </p>
     </div>
     <div class="actions">
-      <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records">
-      <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
-        <option value="">Sort: default (IP)</option>
-        <option value="type">Sort: type</option>
-        <option value="name">{{ z.reverse ? 'Sort: IP' : 'Sort: host' }}</option>
-        <option value="value">{{ z.reverse ? 'Sort: host' : 'Sort: IP / value' }}</option>
-        <option value="ttl">Sort: TTL</option>
-      </select>
-      <button class="ghost" (click)="desc.set(!desc())" [attr.aria-label]="desc() ? 'Descending' : 'Ascending'" [title]="desc() ? 'Descending' : 'Ascending'">{{ desc() ? '↓' : '↑' }}</button>
       <button class="primary" (click)="form.open()" [disabled]="off()">New record</button>
       <button class="ghost" (click)="openImport()" [disabled]="off()">Import</button>
       <button class="ghost" (click)="exportZone()">Export</button>
+      <button class="ghost del" (click)="store.del(z)">Delete zone</button>
     </div>
   </header>
 
@@ -29,66 +23,103 @@
     <div class="about rev">
       <p><b>Reverse zone</b> for the network <code>{{ z.cidr }}</code>. Here PTR records link an address to its name: the record name is the last part of the address (for <code>10.0.0.7</code> in a /24 it is <code>7</code>).</p>
       <div class="actions">
-        <button class="ghost" (click)="syncPtr()" [disabled]="off()">Generate PTR from A/AAAA records</button>
-        @if (syncMsg()) { <span class="soft">{{ syncMsg() }}</span> }
+        <button class="ghost" (click)="syncPtr()" [disabled]="off()">Create PTR records from A/AAAA records</button>
       </div>
     </div>
   }
 
   <app-record-form #form [zoneId]="z.id" [zoneName]="z.name" [reverse]="z.reverse" [records]="records()" (saved)="onSaved($event)" />
 
+  @if (records().length) {
+    <div class="ztools">
+      <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records" autocomplete="off">
+      <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
+        <option value="">Sort by IP (default)</option>
+        <option value="type">Sort by type</option>
+        <option value="name">{{ z.reverse ? 'Sort by IP' : 'Sort by host' }}</option>
+        <option value="value">{{ z.reverse ? 'Sort by host' : 'Sort by IP / value' }}</option>
+        <option value="ttl">Sort by TTL</option>
+      </select>
+      <button class="ghost" (click)="desc.set(!desc())" [attr.aria-pressed]="desc()" title="Reverse order">
+        <span aria-hidden="true">{{ desc() ? '↓' : '↑' }}</span><span class="sr-only">Reverse order</span>
+      </button>
+      <p class="sr-only" role="status">{{ filter().trim() ? shown().length + ' of ' + records().length + ' records shown' : '' }}</p>
+    </div>
+  }
+
   @if (selected().size && !off()) {
-    <div class="bulk" role="toolbar" aria-label="Actions on the selected records">
+    <div class="bulk" aria-label="Actions on the selected records" role="group">
       <b>{{ selected().size }} selected</b>
       <button class="mini" (click)="bulk('enable')">Enable</button>
       <button class="mini" (click)="bulk('disable')">Disable</button>
       <button class="mini danger-o" (click)="bulkDelete()">Delete</button>
-      <button class="mini" (click)="selected.set(empty)">Deselect</button>
+      <button class="mini" (click)="selected.set(empty)">Clear selection</button>
     </div>
   }
 
-  <ul class="records">
-    @if (shown().length) {
-      <li class="head">
-        <input type="checkbox" [checked]="allSelected()" [disabled]="off()" (change)="toggleAll()" aria-label="Select all">
-        <span class="soft">Select all</span>
-      </li>
-    }
-    @for (r of shown(); track r.id) {
-      <li [class.off]="off() || r.enabled === false">
-        <input type="checkbox" [checked]="selected().has(r.id)" [disabled]="off()" (change)="toggle(r.id)" [attr.aria-label]="'Select ' + r.name">
-        <span class="type" [attr.data-t]="r.type">{{ r.type }}</span>
-        <span class="rname">{{ r.name }}@if (ipOf(r); as ip) {<small class="note-t">{{ ip }}</small>}</span>
-        <span class="rvalue">{{ r.value }}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
-        <span class="ttlv">{{ r.ttl }}s</span>
-        <button class="switch" role="switch" [attr.aria-checked]="!off() && r.enabled !== false" (click)="toggleOne(r)" [disabled]="off()"
-                [title]="off() ? 'The zone is off' : r.enabled === false ? 'Disabled: click to enable' : 'Enabled: click to disable'"><i></i></button>
-        <button class="icon edit" (click)="form.open(r)" [disabled]="off()" [attr.aria-label]="'Edit ' + r.name">✎</button>
-        <button class="icon" (click)="del(r)" [disabled]="off()" [attr.aria-label]="'Delete ' + r.name">✕</button>
-      </li>
-    } @empty {
-      <li class="empty">{{ records().length ? 'No results for your search.' : 'This zone is empty. Create the first record with “New record” or import a zone file.' }}</li>
-    }
-  </ul>
+  @if (!loading()) {
+    <ul class="records zrecs">
+      @if (shown().length) {
+        <li class="head">
+          <label class="check"><input type="checkbox" [checked]="allSelected()" [disabled]="off()" (change)="toggleAll()"> Select all</label>
+        </li>
+      }
+      @for (r of shown(); track r.id) {
+        <li [class.off]="off() || r.enabled === false">
+          <input type="checkbox" [checked]="selected().has(r.id)" [disabled]="off()" (change)="toggle(r.id)" [attr.aria-label]="'Select ' + label(r)">
+          <span class="type" [attr.data-t]="r.type">{{ r.type }}</span>
+          <span class="rname">{{ r.name }}@if (ipOf(r); as ip) {<small class="note-t">{{ ip }}</small>}</span>
+          <span class="rvalue">{{ r.value }}@if (r.note) {<small class="note-t">{{ r.note }}</small>}</span>
+          <span class="ttlv">{{ r.ttl }}s</span>
+          @if (r.enabled === false) { <span class="offtag">Off</span> }
+          <button class="switch" role="switch" [attr.aria-checked]="!off() && r.enabled !== false" (click)="toggleOne(r)" [disabled]="off()"
+                  [attr.aria-label]="'Serve ' + label(r)"><i></i></button>
+          <button class="icon edit" (click)="form.open(r)" [disabled]="off()" [attr.aria-label]="'Edit ' + label(r)" [title]="'Edit ' + label(r)">✎</button>
+          <button class="icon" (click)="del(r)" [disabled]="off()" [attr.aria-label]="'Delete ' + label(r)" [title]="'Delete ' + label(r)">✕</button>
+        </li>
+      } @empty {
+        @if (records().length) {
+          <li class="empty">No record matches “{{ filter().trim() }}”. <button class="link" (click)="filter.set('')">Clear the search</button></li>
+        } @else {
+          <li class="empty zempty">
+            <b>This zone has no records yet</b>
+            <span>Add one, or import a zone file you already have.</span>
+            <span class="zempty-acts">
+              <button class="primary" (click)="form.open()" [disabled]="off()">New record</button>
+              <button class="ghost" (click)="openImport()" [disabled]="off()">Import a zone file</button>
+            </span>
+          </li>
+        }
+      }
+    </ul>
+  }
 
-  <dialog #imp class="confirm wide" (click)="$event.target === imp ? imp.close() : null">
-    <h3>Import a zone file</h3>
-    <p class="soft">BIND format, one record per line. SOA and out-of-zone records are ignored.</p>
-    <input type="file" accept=".zone,.txt,text/plain" (change)="pickFile($event)" aria-label="Zone file">
-    <textarea [(ngModel)]="importText" name="it" rows="9" placeholder="www 300 IN A 10.0.0.5" aria-label="Zone file content" (ngModelChange)="importResult.set(null)"></textarea>
-    <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Replace the existing records</label>
-    @if (importResult(); as r) {
-      <div class="result">
-        <b>{{ r.created }}</b> to create, <b>{{ r.skipped }}</b> already present
-        @for (e of r.errors; track e) { <p class="error">{{ e }}</p> }
-      </div>
-    }
+  <dialog #imp class="confirm wide" aria-labelledby="imp-t" (cancel)="importBusy() && $event.preventDefault()">
+    <h3 id="imp-t">Import a zone file</h3>
+    <p class="soft plain">BIND format, one record per line. SOA records and records outside the zone are skipped.</p>
+    <div class="field">
+      <label class="lbl" for="imp-file">File</label>
+      <input id="imp-file" type="file" accept=".zone,.txt,text/plain" (change)="pickFile($event)">
+    </div>
+    <div class="field">
+      <label class="lbl" for="imp-text">Or paste the records</label>
+      <textarea id="imp-text" [(ngModel)]="importText" name="it" rows="9" placeholder="www 300 IN A 10.0.0.5" (ngModelChange)="importResult.set(null)"></textarea>
+    </div>
+    <label class="check"><input type="checkbox" [(ngModel)]="importReplace" name="ir" (ngModelChange)="importResult.set(null)"> Delete the existing records first</label>
+    <div role="status">
+      @if (importResult(); as r) {
+        <div class="result">
+          <p class="plain"><b>{{ r.created }}</b> to create, <b>{{ r.skipped }}</b> already present@if (r.errors.length) {, <b>{{ r.errors.length }}</b> lines with errors}.</p>
+          @for (e of r.errors; track e) { <p class="error">{{ e }}</p> }
+        </div>
+      }
+    </div>
     <div class="actions">
-      <button class="ghost" (click)="imp.close()">Close</button>
-      <button class="ghost" (click)="runImport(true)" [disabled]="!importText.trim()">Preview</button>
-      <button class="primary" (click)="confirmImport()" [disabled]="!importText.trim()">Import</button>
+      <button class="ghost" (click)="imp.close()">Cancel</button>
+      <button class="ghost" (click)="runImport(true)" [disabled]="!importText.trim() || importBusy()">Preview</button>
+      <button class="primary" (click)="confirmImport()" [disabled]="!importText.trim() || importBusy()">Import records</button>
     </div>
   </dialog>
 } @else if (store.loaded()) {
-  <div class="blank"><p class="big-hint">Zone not found</p><p class="soft">Pick another one from the list.</p></div>
+  <div class="blank"><p class="big-hint">Zone not found</p><p class="soft">It may have been deleted. Pick another zone above.</p></div>
 }

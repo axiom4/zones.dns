@@ -1,45 +1,52 @@
-@if (stats(); as st) {
-  <header>
-    <div>
-      <h2>Statistics</h2>
-      <p class="soft">Queries received by the DNS daemon and requests handled by the filtering proxy.</p>
-    </div>
-    <div class="actions">
-      <select [(ngModel)]="source" name="src" (ngModelChange)="load()" aria-label="What is counted">
-        <option value="all">DNS + proxy</option>
-        <option value="dns">DNS only (blacklist)</option>
-        <option value="proxy">Proxy only</option>
-      </select>
-      <select [(ngModel)]="hours" name="h" (ngModelChange)="load()" aria-label="Period">
-        <option [ngValue]="1">Last hour</option>
-        <option [ngValue]="24">Last 24 hours</option>
-        <option [ngValue]="168">Last 7 days</option>
-        <option [ngValue]="720">Last 30 days</option>
-      </select>
-      <button class="ghost" (click)="load()">Refresh</button>
-    </div>
-  </header>
-
-  <div class="tiles">
-    <div class="tile"><b>{{ st.total }}</b><span>Queries and requests</span></div>
-    <div class="tile"><b>{{ outcome('local') }}</b><span>From internal zones</span></div>
-    <div class="tile"><b>{{ outcome('forwarded') }}</b><span>Forwarded</span></div>
-    @if (outcome('proxied') + outcome('filtered')) {
-      <div class="tile"><b>{{ outcome('proxied') }}</b><span>Through the proxy</span></div>
-      <div class="tile"><b>{{ outcome('filtered') }}</b><span>Pages cleaned</span></div>
-    }
-    <div class="tile warn"><b>{{ outcome('blocked') }}</b><span>Blocked</span></div>
-    <div class="tile"><b>{{ outcome('error') }}</b><span>Errors</span></div>
-    <div class="tile"><b>{{ st.avg_ms | number: '1.0-0' }} ms</b><span>Average time</span></div>
+<header>
+  <div>
+    <h2>Statistics</h2>
+    <p class="soft">Queries received by the DNS daemon and requests handled by the filtering proxy.</p>
   </div>
+  <div class="actions">
+    <select [(ngModel)]="source" name="src" (ngModelChange)="changed()" aria-label="What is counted">
+      <option value="all">DNS and proxy</option>
+      <option value="dns">DNS queries only</option>
+      <option value="proxy">Proxy requests only</option>
+    </select>
+    <select [(ngModel)]="hours" name="h" (ngModelChange)="changed()" aria-label="Period">
+      <option [ngValue]="1">Last hour</option>
+      <option [ngValue]="24">Last 24 hours</option>
+      <option [ngValue]="168">Last 7 days</option>
+      <option [ngValue]="720">Last 30 days</option>
+    </select>
+    <button class="ghost" (click)="load()" [disabled]="loading()">{{ loading() ? 'Loading…' : 'Refresh' }}</button>
+  </div>
+</header>
+
+@if (stats(); as st) {
+  <section class="lead" [class.stale]="loading()" aria-label="Summary">
+    <a class="rate" [routerLink]="logPath()" [queryParams]="logQ({ outcome: 'blocked' })">
+      <b>{{ rate() | number: '1.0-1' }}%</b>
+      <span>blocked: {{ outcome('blocked') | number }} of {{ st.total | number }} {{ st.total === 1 ? 'query' : 'queries' }}</span>
+    </a>
+    <dl class="figs">
+      <div><dt>Queries and requests</dt><dd><a [routerLink]="logPath()" [queryParams]="logQ()">{{ st.total | number }}</a></dd></div>
+      <div><dt>From internal zones</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'local' })">{{ outcome('local') | number }}</a></dd></div>
+      <div><dt>Forwarded</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'forwarded' })">{{ outcome('forwarded') | number }}</a></dd></div>
+      @if (outcome('proxied') + outcome('filtered')) {
+        <div><dt>Through the proxy</dt><dd><a routerLink="/logs/proxy">{{ outcome('proxied') | number }}</a></dd></div>
+        <div><dt>Pages with ads removed</dt><dd><a routerLink="/logs/proxy">{{ outcome('filtered') | number }}</a></dd></div>
+      }
+      <div><dt>Failed</dt><dd><a routerLink="/logs/dns" [queryParams]="logQ({ outcome: 'error' })">{{ outcome('error') | number }}</a></dd></div>
+      <div><dt>Average time</dt><dd>{{ st.avg_ms | number: '1.0-0' }} ms</dd></div>
+    </dl>
+  </section>
 
   <section class="panel">
-    <h3>Queries per {{ grain().name }} <small class="legend"><i></i> DNS <i class="blk"></i> blocked by DNS <i class="pok"></i> proxy <i class="pblk"></i> blocked by the proxy</small></h3>
+    <h3>Queries per {{ grain().name }}</h3>
+    <p class="legend soft" aria-hidden="true"><i></i> DNS <i class="blk"></i> blocked by DNS <i class="pok"></i> proxy <i class="pblk"></i> blocked by the proxy (striped)</p>
     @if (st.total) {
-      <div class="chart" [class.dense]="bars().length > 30">
-        @for (p of bars(); track p.at) {
-          <div class="col" [title]="p.full + ': ' + (p.count - p.pcount - p.blocked) + ' DNS, ' + p.blocked + ' blocked by DNS, ' + (p.pcount - p.proxy) + ' proxy, ' + p.proxy + ' blocked by the proxy'" [style.--h]="pct(p.count, bars()) + '%'">
-            <b>{{ p.count }}</b>
+      <div class="chart" [class.dense]="bars().length > 30" role="img" tabindex="0" [attr.aria-label]="summary()"
+           (pointermove)="pickAt($event)" (pointerdown)="pickAt($event)" (keydown)="key($event)">
+        @for (p of bars(); track p.at; let i = $index) {
+          <div class="col" [attr.data-i]="i" [class.sel]="bar() === p" [style.--h]="pct(p.count, bars()) + '%'">
+            <b>{{ p.count | number }}</b>
             <div class="stack" [style.height.%]="pct(p.count, bars())">
               @if (p.blocked) { <i class="blk" [style.flex-grow]="p.blocked"></i> }
               @if (p.proxy) { <i class="pblk" [style.flex-grow]="p.proxy"></i> }
@@ -50,17 +57,37 @@
           </div>
         }
       </div>
-    } @else { <p class="soft">No queries in this period.</p> }
+      @if (bar(); as b) {
+        <p class="readout" aria-live="polite"><b>{{ b.full }}</b>
+          <span>{{ b.count | number }} in all</span>
+          <span><i></i>{{ b.count - b.pcount - b.blocked | number }} DNS</span>
+          <span><i class="blk"></i>{{ b.blocked | number }} blocked by DNS</span>
+          @if (b.pcount) {
+            <span><i class="pok"></i>{{ b.pcount - b.proxy | number }} proxy</span>
+            <span><i class="pblk"></i>{{ b.proxy | number }} blocked by the proxy</span>
+          }
+        </p>
+      }
+      <table class="sr-only">
+        <caption>Queries per {{ grain().name }}</caption>
+        <thead><tr><th>Start</th><th>All</th><th>DNS</th><th>Blocked by DNS</th><th>Proxy</th><th>Blocked by the proxy</th></tr></thead>
+        <tbody>
+          @for (p of bars(); track p.at) {
+            <tr><th>{{ p.full }}</th><td>{{ p.count }}</td><td>{{ p.count - p.pcount - p.blocked }}</td><td>{{ p.blocked }}</td><td>{{ p.pcount - p.proxy }}</td><td>{{ p.proxy }}</td></tr>
+          }
+        </tbody>
+      </table>
+    } @else { <p class="soft">No queries in this period. Pick a longer period, or check that clients use this server for DNS.</p> }
   </section>
 
   <section class="panel">
     <h3>Answers</h3>
     @for (a of answers(); track a.name) {
-      <div class="row" [title]="a.hint">
+      <div class="row answer">
         <span class="bar" [class.warn]="a.name === 'blocked' || a.name === 'error'" [style.width.%]="share(a.count)"></span>
-        <span class="n">{{ a.label }}</span><span class="c">{{ a.count }} · {{ share(a.count) }}%</span>
+        <span class="n"><span>{{ a.label }}</span><small>{{ a.hint }}</small></span><span class="c">{{ a.count | number }} <span class="soft">({{ share(a.count) }}%)</span></span>
       </div>
-    } @empty { <p class="soft">No data.</p> }
+    } @empty { <p class="soft">No answers in this period.</p> }
   </section>
 
   <div class="grid2">
@@ -69,29 +96,40 @@
       @for (d of st.top_domains; track d.name) {
         <div class="row">
           <span class="bar" [style.width.%]="pct(d.count, st.top_domains)"></span>
-          <span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span>
+          <a class="n" [routerLink]="logPath()" [queryParams]="logQ({ q: d.name })">{{ d.name }}</a><span class="c">{{ d.count | number }}</span>
           @if (done().has(d.name)) { <span class="soft">Blocked</span> }
           @else { <button class="mini" (click)="block(d.name)" [attr.aria-label]="'Block ' + d.name">Block</button> }
         </div>
-      } @empty { <p class="soft">No data.</p> }
+      } @empty { <p class="soft">No queries in this period.</p> }
     </section>
     <section class="panel">
       <h3>Most requested blocked domains</h3>
       @for (d of st.top_blocked; track d.name) {
-        <div class="row"><span class="bar warn" [style.width.%]="pct(d.count, st.top_blocked)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
-      } @empty { <p class="soft">No blocked queries.</p> }
+        <div class="row"><span class="bar warn" [style.width.%]="pct(d.count, st.top_blocked)"></span>
+          <a class="n" [routerLink]="logPath()" [queryParams]="logQ({ q: d.name, outcome: 'blocked' })" [attr.aria-label]="d.name + ': see why it was blocked'">{{ d.name }}</a><span class="c">{{ d.count | number }}</span></div>
+      } @empty { <p class="soft">Nothing was blocked in this period.</p> }
     </section>
     <section class="panel">
       <h3>Most active clients</h3>
       @for (d of st.top_clients; track d.name) {
-        <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.top_clients)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
-      } @empty { <p class="soft">No data.</p> }
+        <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.top_clients)"></span>
+          <a class="n" [routerLink]="logPath()" [queryParams]="logQ({ client: d.name })">{{ d.name }}</a><span class="c">{{ d.count | number }}</span></div>
+      } @empty { <p class="soft">No clients in this period.</p> }
     </section>
     <section class="panel">
       <h3>Query types and proxy methods</h3>
       @for (d of st.by_type; track d.name) {
-        <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.by_type)"></span><span class="n">{{ d.name }}</span><span class="c">{{ d.count }}</span></div>
-      } @empty { <p class="soft">No data.</p> }
+        <div class="row"><span class="bar" [style.width.%]="pct(d.count, st.by_type)"></span>
+          @if (isDnsType(d.name) && source !== 'proxy') { <a class="n" routerLink="/logs/dns" [queryParams]="logQ({ type: d.name })">{{ d.name }}</a> }
+          @else { <span class="n">{{ d.name }}</span> }
+          <span class="c">{{ d.count | number }}</span></div>
+      } @empty { <p class="soft">No queries in this period.</p> }
     </section>
   </div>
+} @else if (failed()) {
+  <div class="blank" role="alert"><p class="big-hint">The statistics could not be loaded</p>
+    <p class="soft">The server did not answer. Check that it is running, then try again.</p>
+    <p><button class="primary" (click)="load()">Try again</button></p></div>
+} @else {
+  <div class="blank" role="status"><p class="big-hint">Loading the statistics…</p></div>
 }

@@ -1,23 +1,31 @@
 @if (mode() === 'choose') {
-  <div class="choices">
-    <button type="button" class="choice" (click)="startTotp()">
+  <div class="choices" role="group" aria-label="Choose a second factor">
+    <button type="button" class="choice" (click)="startTotp()" [disabled]="busy()">
       <b>Authenticator app</b>
-      <span class="soft">6-digit code from Google Authenticator, 1Password, Authy…</span>
+      <span class="soft">A 6-digit code from Google Authenticator, 1Password, Authy…</span>
     </button>
-    <button type="button" class="choice" (click)="addPasskey()" [disabled]="!supported">
+    <button type="button" class="choice" (click)="addPasskey()" [disabled]="!supported || busy()">
       <b>Passkey</b>
-      <span class="soft">{{ supported ? 'Fingerprint, face, PIN or security key.' : 'Not supported by this browser.' }}</span>
+      <span class="soft">{{ supported ? 'Fingerprint, face, PIN or security key.' : 'This browser does not support passkeys.' }}</span>
     </button>
   </div>
 } @else {
-  <form (ngSubmit)="confirmTotp()" class="totp">
+  <form (ngSubmit)="confirmTotp()" class="totp" novalidate>
     <p class="soft">1. Scan the code with your authenticator app.</p>
-    @if (qr()) { <img class="qr" [src]="qr()" width="176" height="176" alt="QR code for the authenticator app"> }
-    <details><summary class="soft">Can't scan it?</summary><p class="soft">Enter this key by hand: <code>{{ secret() }}</code></p></details>
-    <label>2. Type the code the app shows <input name="c" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" required></label>
+    @if (qr()) { <img class="qr" [src]="qr()" width="176" height="176" alt="QR code to scan with the authenticator app"> }
+    <details>
+      <summary class="soft">Can't scan it?</summary>
+      <p class="soft">Enter this key in the app by hand:</p>
+      <p class="secret"><code>{{ grouped() }}</code>
+        <button type="button" class="mini" (click)="copy()">{{ copied() ? 'Copied' : 'Copy key' }}</button></p>
+    </details>
+    <div class="field">
+      <label class="lbl" for="mfa-code">2. Type the code the app shows</label>
+      <input #codeInput id="mfa-code" name="c" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456" aria-required="true">
+    </div>
     <div class="actions">
       <button type="button" class="ghost" (click)="mode.set('choose')">Back</button>
-      <button class="primary">Activate</button>
+      <button class="primary" [disabled]="busy() || !code.trim()">{{ busy() ? 'Checking…' : 'Turn on the app' }}</button>
     </div>
   </form>
 }

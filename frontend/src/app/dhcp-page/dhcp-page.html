@@ -1,123 +1,83 @@
 <nav class="subtabs" aria-label="DHCP">
-  <a routerLink="/dhcp/leases" [class.on]="tab() === 'leases'" (click)="reserve.set(null); load()">Leases</a>
-  <a routerLink="/dhcp/leases6" [class.on]="tab() === 'leases6'" (click)="reserve.set(null); load()">Leases 6</a>
-  <a routerLink="/dhcp/reservations" [class.on]="tab() === 'reservations'">Reservations</a>
-  <a routerLink="/dhcp/reservations6" [class.on]="tab() === 'reservations6'" (click)="reserve6.set(null)">Reservations 6</a>
-  <a routerLink="/dhcp/neighbors" [class.on]="tab() === 'neighbors'">Neighbours</a>
+  <a routerLink="/dhcp/leases" routerLinkActive="on" ariaCurrentWhenActive="page" (click)="load()">IPv4 leases</a>
+  <a routerLink="/dhcp/leases6" routerLinkActive="on" ariaCurrentWhenActive="page" (click)="load()">IPv6 leases</a>
+  <a routerLink="/dhcp/reservations" routerLinkActive="on" ariaCurrentWhenActive="page">IPv4 reservations</a>
+  <a routerLink="/dhcp/reservations6" routerLinkActive="on" ariaCurrentWhenActive="page">IPv6 reservations</a>
+  <a routerLink="/dhcp/neighbors" routerLinkActive="on" ariaCurrentWhenActive="page">IPv6 neighbours</a>
 </nav>
+<div class="dhcp-find">
+  <label class="sr-only" for="dhcp-q">Find a device</label>
+  <input id="dhcp-q" class="search" type="search" [ngModel]="q()" (ngModelChange)="q.set($event)" name="q"
+         placeholder="Find a device: name, address, MAC or maker" autocomplete="off">
+</div>
 @if (tab() === 'reservations') {
-  @for (r of [reserve()]; track r) { <app-dhcp-reservations [prefill]="r" /> }
+  <app-dhcp-reservations [filter]="q()" />
 } @else if (tab() === 'neighbors') {
-  <app-dhcp-neighbors />
+  <app-dhcp-neighbors [filter]="q()" />
 } @else if (tab() === 'reservations6') {
-  @for (r of [reserve6()]; track r) { <app-dhcp-reservations6 [prefill]="r" /> }
+  <app-dhcp-reservations6 [filter]="q()" />
 } @else {
 <header>
   <div>
-    <h2>{{ tab() === 'leases6' ? 'DHCPv6 leases' : 'DHCP leases' }}</h2>
-    <p class="soft">{{ shown().length }} {{ all ? 'leases' : 'active leases' }} from the {{ tab() === 'leases6' ? 'DHCPv6' : 'DHCPv4' }} server{{ tab() === 'leases6' ? ' (addresses and delegated prefixes)' : '' }}. Configure DHCPv4, DHCPv6 and Router Advertisements with “DHCP settings”.</p>
+    <h2>{{ tab() === 'leases6' ? 'IPv6 leases' : 'IPv4 leases' }}</h2>
+    <p class="soft">
+      @if (loaded()) { {{ shown().length }} {{ all ? 'leases' : 'active leases' }}{{ q() ? ' match' : '' }}. }
+      {{ tab() === 'leases6' ? 'Addresses and delegated prefixes handed out by the DHCPv6 server.' : 'Addresses handed out by the DHCPv4 server.' }}
+    </p>
   </div>
   <div class="actions">
-    <label class="check"><input type="checkbox" name="all" [(ngModel)]="all" (ngModelChange)="load()"> include ended</label>
-    <button class="ghost" type="button" (click)="openSettings(cfgdlg)">DHCP settings</button>
-    <button class="ghost" type="button" (click)="pingAll()" [disabled]="ping.busy()">{{ ping.busy() ? 'Pinging…' : 'Ping all' }}</button>
+    <label class="check"><input type="checkbox" name="all" [(ngModel)]="all" (ngModelChange)="load()"> Show ended leases</label>
+    <button class="ghost" type="button" (click)="openSettings()">DHCP settings</button>
+    <button class="ghost" type="button" (click)="pingAll()" [disabled]="ping.busy() || !shown().length">{{ ping.busy() ? 'Pinging…' : 'Ping all' }}</button>
     <button class="ghost" type="button" (click)="load()">Refresh</button>
   </div>
 </header>
-<dialog #cfgdlg class="confirm form-dialog settings-dialog" (click)="$event.target === cfgdlg ? cfgdlg.close() : null">
-  <h3>DHCP settings</h3>
-  <form class="settings" (ngSubmit)="saveSettings()">
-    <fieldset class="group">
-      <legend>DHCPv4 · network</legend>
-      <p class="soft">Turn it on only after the router's own DHCP server is off. Saved settings apply at once: <code>rundhcp</code> restarts itself with them.</p>
-      <div class="grid">
-      <label class="check"><input type="checkbox" name="DHCP" [(ngModel)]="cfg().DHCP"> <span>DHCPv4 enabled<small class="hint">Master switch of the DHCPv4 server. Only one DHCP server may run on a network: turn the router's off first.</small></span></label>
-      <label class="f"><span>Server IP</span><input name="DHCP_SERVER" [(ngModel)]="cfg().DHCP_SERVER" placeholder="192.168.1.2" autocomplete="off"><small class="hint">This server's own IPv4 address on the network. Sent to clients as the server identifier; also their DNS server when “DNS servers” is empty.</small></label>
-      <label class="f"><span>Netmask</span><input name="DHCP_NETMASK" [(ngModel)]="cfg().DHCP_NETMASK" placeholder="255.255.255.0" autocomplete="off"><small class="hint">Netmask of the network, e.g. 255.255.255.0 for a /24.</small></label>
-      <label class="f"><span>Address range</span><input name="DHCP_RANGE" [(ngModel)]="cfg().DHCP_RANGE" placeholder="192.168.1.100-192.168.1.200" autocomplete="off"><small class="hint">First and last address given to clients, as first-last. Must be inside the network. Fixed addresses (Reservations tab) may lie outside it.</small></label>
-      <label class="f"><span>Router</span><input name="DHCP_ROUTER" [(ngModel)]="cfg().DHCP_ROUTER" placeholder="192.168.1.1" autocomplete="off"><small class="hint">Default gateway sent to clients (option 3). Must be inside the network. Empty = none sent.</small></label>
-      <label class="f"><span>Interface</span><input name="DHCP_INTERFACE" [(ngModel)]="cfg().DHCP_INTERFACE" placeholder="eth0" autocomplete="off"><small class="hint">Network interface to answer on (Linux), e.g. eth0. Required for DHCPv6, Router Advertisements, the neighbour list and Reply to MAC.</small></label>
-      <label class="f"><span>Lease (seconds)</span><input type="number" name="DHCP_LEASE" [(ngModel)]="cfg().DHCP_LEASE" placeholder="3600" autocomplete="off"><small class="hint">How long a client may keep its address before renewing, in seconds. 3600 = 1 hour, 86400 = 1 day.</small></label>
-      </div>
-    </fieldset>
-    <fieldset class="group">
-      <legend>DHCPv4 · what clients receive</legend>
-      <div class="grid">
-      <label class="f"><span>DNS servers</span><input name="DHCP_DNS" [(ngModel)]="cfg().DHCP_DNS" placeholder="several: 192.168.1.2 1.1.1.1 (empty = server IP)" autocomplete="off"><small class="hint">DNS servers sent to clients (option 6). Several allowed, separated by spaces, commas or semicolons. Empty = Server IP.</small></label>
-      <label class="f"><span>Domain</span><input name="DHCP_DOMAIN" [(ngModel)]="cfg().DHCP_DOMAIN" placeholder="lan" autocomplete="off"><small class="hint">Domain name of the network (option 15). Also the suffix of the names the DNS answers from the leases (client.domain).</small></label>
-      <label class="f"><span>Search domains</span><input name="DHCP_SEARCH" [(ngModel)]="cfg().DHCP_SEARCH" placeholder="lan example.lan" autocomplete="off"><small class="hint">Search domains the client tries when you type a short name (option 119), separated by spaces. Empty = Domain.</small></label>
-      <label class="f"><span>NTP servers</span><input name="DHCP_NTP" [(ngModel)]="cfg().DHCP_NTP" placeholder="several: separated by spaces or commas" autocomplete="off"><small class="hint">Time servers sent to clients (option 42). Several allowed, separated by spaces or commas. Empty = none.</small></label>
-      <label class="f wide"><span>Static routes</span><input name="DHCP_ROUTES" [(ngModel)]="cfg().DHCP_ROUTES" placeholder="10.0.0.0/8=192.168.1.254" autocomplete="off"><small class="hint">Extra routes for clients (option 121), as network/length=gateway, separated by spaces: 10.0.0.0/8=192.168.1.254. The gateway must be inside the network.</small></label>
-      <label class="f"><span>MTU</span><input type="number" name="DHCP_MTU" [(ngModel)]="cfg().DHCP_MTU" placeholder="0 = not sent" autocomplete="off"><small class="hint">Interface MTU sent to clients (option 26). 0 = not sent, otherwise 68-65535.</small></label>
-      <label class="check"><input type="checkbox" name="DHCP_DNR" [(ngModel)]="cfg().DHCP_DNR"> <span>Announce encrypted DNS <small class=soft>(DNR, RFC 9463)</small><small class="hint">Tell clients the encrypted DNS resolvers (DoT / DoH) set in DNS_DDR, so they can use them by themselves. Needs DNS_DDR in .env.</small></span></label>
-      <label class="check"><input type="checkbox" name="DHCP_NAMES" [(ngModel)]="cfg().DHCP_NAMES"> <span>Answer lease names in DNS<small class="hint">The DNS server answers the host name a client gave (name.domain) with the address of its lease. A zone record of the same type wins.</small></span></label>
-      </div>
-    </fieldset>
-    <fieldset class="group">
-      <legend>DHCPv4 · advanced</legend>
-      <p class="soft">Fixed addresses are managed in the Reservations tab.</p>
-      <div class="grid">
-      <label class="f wide"><span>Relayed subnets (JSON)</span><input name="DHCP_SUBNETS" [(ngModel)]="cfg().DHCP_SUBNETS" placeholder="[{&quot;network&quot;:&quot;10.1.0.0/24&quot;,&quot;range&quot;:&quot;10.1.0.10-10.1.0.99&quot;}]" autocomplete="off"><small class="hint">More networks reached through a relay agent, as a JSON list. Each item needs network and range; it may also set router, dns, domain, lease, ntp, search, routes, mtu, boot_server, boot_file. Networks must not overlap.</small></label>
-      <label class="f"><span>PXE boot server</span><input name="DHCP_BOOT_SERVER" [(ngModel)]="cfg().DHCP_BOOT_SERVER" placeholder="" autocomplete="off"><small class="hint">Network boot (PXE): address or name of the TFTP server (option 66). Empty = none.</small></label>
-      <label class="f"><span>PXE boot file</span><input name="DHCP_BOOT_FILE" [(ngModel)]="cfg().DHCP_BOOT_FILE" placeholder="" autocomplete="off"><small class="hint">Network boot (PXE): name of the file the client loads from the TFTP server (option 67). Empty = none.</small></label>
-      <label class="f"><span>Leasequery from</span><input name="DHCP_LEASEQUERY" [(ngModel)]="cfg().DHCP_LEASEQUERY" placeholder="" autocomplete="off"><small class="hint">Addresses or networks (IPv4 and IPv6, separated by spaces or commas) allowed to ask this server who holds a lease (Leasequery, RFC 4388 / 5007), e.g. a relay agent. Empty = nobody.</small></label>
-      <label class="f"><span>Failover delay (s)</span><input type="number" name="DHCP_FAILOVER_SECS" [(ngModel)]="cfg().DHCP_FAILOVER_SECS" placeholder="0 = primary" autocomplete="off"><small class="hint">For a standby server: answer a new client only after it has waited this many seconds, so the primary goes first. 0 = this is the primary.</small></label>
-      <label class="check"><input type="checkbox" name="DHCP_PROBE" [(ngModel)]="cfg().DHCP_PROBE"> <span>Probe an address before offering it <small class=soft>(ARP/ICMP)</small><small class="hint">Before offering an address, check that nobody uses it (ARP or ping). Avoids duplicates, adds a short delay to each new lease.</small></span></label>
-      <label class="check"><input type="checkbox" name="DHCP_UNICAST" [(ngModel)]="cfg().DHCP_UNICAST"> <span>Reply straight to the client MAC <small class=soft>(Linux, needs CAP_NET_RAW)</small><small class="hint">Answer a client that has no address yet straight to its MAC instead of broadcasting. Linux only, needs root or CAP_NET_RAW and an Interface.</small></span></label>
-      </div>
-    </fieldset>
-    <fieldset class="group">
-      <legend>DHCPv6</legend>
-      <div class="grid">
-      <label class="check"><input type="checkbox" name="DHCP6" [(ngModel)]="cfg().DHCP6"> <span>DHCPv6 enabled<small class="hint">Master switch of the DHCPv6 server. With a Prefix and an address pool it hands out addresses (stateful); with DNS servers only, it is stateless. Needs an Interface.</small></span></label>
-      <label class="f"><span>Prefix</span><input name="DHCP6_PREFIX" [(ngModel)]="cfg().DHCP6_PREFIX" placeholder="2001:db8:1::/64" autocomplete="off"><small class="hint">The /64 prefix of the network, e.g. fd4c:61da:7888:bc1a::/64. Used to check the pool and the reservations, and announced by Router Advertisements.</small></label>
-      <label class="f wide"><span>Address pool (IA_NA/IA_TA)</span><input name="DHCP6_POOL" [(ngModel)]="cfg().DHCP6_POOL" placeholder="first-last" autocomplete="off"><small class="hint">Addresses given to clients (IA_NA / IA_TA), as first-last, inside the Prefix. Empty = no addresses given, clients use SLAAC.</small></label>
-      <label class="f"><span>Prefix delegation pool</span><input name="DHCP6_PD_POOL" [(ngModel)]="cfg().DHCP6_PD_POOL" placeholder="2001:db8:ff00::/40" autocomplete="off"><small class="hint">Network the prefixes are cut from when a router asks for one (prefix delegation, IA_PD), e.g. 2001:db8:ff00::/40. Empty = none.</small></label>
-      <label class="f"><span>Delegated length</span><input type="number" name="DHCP6_PD_LEN" [(ngModel)]="cfg().DHCP6_PD_LEN" placeholder="56" autocomplete="off"><small class="hint">Length of each delegated prefix, e.g. 56. Longer than the delegation pool's prefix and at most 64.</small></label>
-      <label class="f"><span>DNS servers</span><input name="DHCP6_DNS" [(ngModel)]="cfg().DHCP6_DNS" placeholder="" autocomplete="off"><small class="hint">IPv6 addresses of the DNS servers sent to clients. Several allowed, separated by spaces or commas. Also used by Router Advertisements.</small></label>
-      <label class="f"><span>Lease (seconds)</span><input type="number" name="DHCP6_LEASE" [(ngModel)]="cfg().DHCP6_LEASE" placeholder="" autocomplete="off"><small class="hint">How long an address stays valid, in seconds. At least 120.</small></label>
-      <label class="f"><span>Preference (0-255)</span><input type="number" name="DHCP6_PREFERENCE" [(ngModel)]="cfg().DHCP6_PREFERENCE" placeholder="" autocomplete="off"><small class="hint">Preference of this server when several answer (0-255). 0 = not sent; 255 = chosen at once; a lower value makes it the backup.</small></label>
-      <label class="check"><input type="checkbox" name="DHCP6_RAPID" [(ngModel)]="cfg().DHCP6_RAPID"> <span>Rapid commit<small class="hint">Rapid commit: the client may get its address in two messages instead of four. Faster, but only for clients that ask for it.</small></span></label>
-      <label class="check"><input type="checkbox" name="DHCP6_PD_ROUTES" [(ngModel)]="cfg().DHCP6_PD_ROUTES"> <span>Add kernel routes for delegated prefixes<small class="hint">Add a kernel route (ip -6 route) towards each router that received a prefix, and remove it when the lease ends. Linux, needs root.</small></span></label>
-      </div>
-    </fieldset>
-    <fieldset class="group">
-      <legend>Router Advertisements</legend>
-      <p class="soft">Sent to all hosts on the link: DNS servers, search domain and, with an address pool, the “managed” flag that makes clients ask this server for an address. <b>Router lifetime above 0 tells clients to use this host as their IPv6 default gateway</b>: leave 0 unless it really routes IPv6.</p>
-      <div class="grid">
-      <label class="check"><input type="checkbox" name="DHCP_RA" [(ngModel)]="cfg().DHCP_RA"> <span>RA enabled<small class="hint">Master switch of the Router Advertisements. They tell hosts on the link the prefix, the DNS servers and whether to ask this server for an address. Needs an Interface and root or CAP_NET_RAW.</small></span></label>
-      <label class="f"><span>Interval (s)</span><input type="number" name="DHCP_RA_INTERVAL" [(ngModel)]="cfg().DHCP_RA_INTERVAL" placeholder="" autocomplete="off"><small class="hint">Seconds between two advertisements, 4-1800. Hosts that join in between get one at once when they ask.</small></label>
-      <label class="f"><span>Router lifetime (s)</span><input type="number" name="DHCP_RA_ROUTER_LIFETIME" [(ngModel)]="cfg().DHCP_RA_ROUTER_LIFETIME" placeholder="0 = not a router" autocomplete="off"><small class="hint">0 = this host is not a router. Above 0 (max 9000) it is announced as an IPv6 default gateway: use only if it really routes IPv6.</small></label>
-      <label class="check"><input type="checkbox" name="DHCP_RA_SLAAC" [(ngModel)]="cfg().DHCP_RA_SLAAC"> <span>Let clients build an address (SLAAC)<small class="hint">Allow clients to build their own address from the prefix. Needs a /64. Turn off to force addresses from this server only.</small></span></label>
-      </div>
-    </fieldset>
-    <div class="actions">
-      @if (saved()) { <span class="soft">Saved and applied.</span> }
-      <button class="ghost" type="button" (click)="cfgdlg.close()">Close</button>
-      <button class="primary" type="submit">Save settings</button>
-    </div>
-  </form>
-</dialog>
-<form class="composer" (ngSubmit)="load()">
-  <input class="grow" name="q" [(ngModel)]="q" placeholder="search address, MAC / DUID or host name" autocomplete="off" aria-label="Search the leases">
-  <button class="primary">Search</button>
-</form>
-<ul class="records leases">
+<ul class="records leases" [attr.aria-busy]="!loaded()">
   @for (l of shown(); track l.family + '-' + l.id) {
     <li [class.off]="!l.active">
-      <span class="type" [attr.data-t]="l.family === 6 ? 'AAAA' : 'A'">{{ l.kind === 'prefix' ? 'PD' : 'v' + l.family }}</span>
+      <span class="type" [attr.data-t]="l.family === 6 ? 'AAAA' : 'A'">{{ l.kind === 'prefix' ? 'Prefix' : 'v' + l.family }}</span>
       <span class="rname">{{ l.address }}@if (l.hostname) {<small class="note-t">{{ l.hostname }}</small>}</span>
-      <span class="rvalue" [title]="l.family === 6 ? 'DUID ' + l.client : ''">{{ l.mac || l.client }}@if (l.vendor) {<small class="note-t">{{ l.vendor }}</small>} @else if (l.family === 6 && !l.mac) {<small class="note-t">DUID</small>}</span>
+      <span class="rvalue" [title]="l.family === 6 ? 'DUID ' + l.client : ''">{{ l.mac || l.client }}@if (l.vendor) {<small class="note-t">{{ l.vendor }}</small>} @else if (l.family === 6 && !l.mac) {<small class="note-t">Device ID (DUID)</small>}</span>
       @if (ping.label(l.address); as p) { <span class="pingr" [class.up]="ping.results()[l.address]?.up">{{ p }}</span> }
-      <span class="ttlv">{{ l.active ? 'until' : 'ended' }} {{ when(l.expires) }}</span>
-      @if (l.kind === 'address') { <button class="mini" type="button" (click)="pingOne(l)" (dblclick)="watch(l)" title="Double click: ping every second" [attr.aria-label]="'Ping ' + l.address">Ping</button> }
-      @if (l.family === 4 && l.kind === 'address') { <button class="mini" type="button" (click)="fix(l)" [disabled]="isReserved(l)" [title]="isReserved(l) ? 'Already reserved' : ''" [attr.aria-label]="'Reserve ' + l.address + ' for ' + l.client">{{ isReserved(l) ? 'Reserved' : 'Reserve' }}</button> }
-      @if (l.family === 6 && l.kind === 'address') { <button class="mini" type="button" (click)="fix6(l)" [disabled]="isReserved(l)" [title]="isReserved(l) ? 'Already reserved' : ''" [attr.aria-label]="'Reserve ' + l.address + ' for ' + l.client">{{ isReserved(l) ? 'Reserved' : 'Reserve' }}</button> }
-      <button class="icon" (click)="end(l)" [attr.aria-label]="'End the lease of ' + l.address">✕</button>
+      <span class="ttlv">{{ l.active ? 'Until' : 'Ended' }} {{ when(l.expires) }}</span>
+      @if (l.kind === 'address') {
+        <button class="mini" type="button" (click)="pingOne(l)" [attr.aria-label]="'Ping ' + l.address">Ping</button>
+        <button class="mini" type="button" (click)="watch(l)" [attr.aria-label]="'Ping ' + l.address + ' every second'">Live</button>
+        <button class="mini" type="button" (click)="fix(l)" [disabled]="isReserved(l)"
+                [attr.aria-label]="isReserved(l) ? l.address + ' is already reserved' : 'Reserve ' + l.address + ' for ' + (l.hostname || l.client)">{{ isReserved(l) ? 'Reserved' : 'Reserve' }}</button>
+      }
+      <button class="icon" type="button" (click)="end(l)" [attr.aria-label]="'End the lease of ' + l.address">✕</button>
     </li>
   } @empty {
-    <li class="empty">No leases. @if (tab() === 'leases6') { DHCPv6 gives addresses only when DHCPv6 is on and an address pool (or a prefix delegation pool) is set in “DHCP settings”; clients that configure themselves with SLAAC do not appear here. } @else { Turn DHCP on in “DHCP settings” and run <code>manage.py rundhcp</code>. }</li>
+    <li class="empty">
+      @if (!loaded()) { Loading leases… }
+      @else if (q()) { No device matches “{{ q() }}”. }
+      @else if (tab() === 'leases6') { No IPv6 leases. Turn on “Hand out IPv6 addresses” with an address pool in DHCP settings; devices that build their own address (SLAAC) show under IPv6 neighbours. }
+      @else { No leases yet. Turn on “Hand out IPv4 addresses” in DHCP settings, then start <code>manage.py rundhcp</code>. }
+    </li>
   }
 </ul>
 }
+
+<dialog #cfgdlg class="confirm form-dialog settings-dialog" aria-labelledby="dhcp-cfg-t" (cancel)="closeSettings($event)">
+  <h3 id="dhcp-cfg-t">DHCP settings</h3>
+  <form class="settings dhcp-settings" (ngSubmit)="saveSettings()">
+    <fieldset class="group">
+      <legend>Basics</legend>
+      <p class="help">Saved settings apply at once: <code>rundhcp</code> restarts by itself.</p>
+      <app-settings-fields prefix="dh" [fields]="basics" [model]="cfg()" [errs]="errs()" />
+    </fieldset>
+    @for (s of sections; track s.id) {
+      <details class="group" [open]="sectionOpen(s)">
+        <summary>{{ s.title }}@if (hasErr(s)) { <span class="bad"> (check the errors)</span> }</summary>
+        @if (s.intro) { <p class="help">{{ s.intro }}</p> }
+        <app-settings-fields prefix="dh" [fields]="s.fields" [model]="cfg()" [errs]="errs()" />
+      </details>
+    }
+    <div class="actions">
+      <button class="ghost" type="button" (click)="closeSettings()">{{ dirty() ? 'Cancel' : 'Close' }}</button>
+      <button class="primary" type="submit" [disabled]="!dirty()">Save settings</button>
+    </div>
+  </form>
+</dialog>
 <app-ping-live />

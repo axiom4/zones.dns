@@ -1,49 +1,88 @@
+<a class="skip" href="#main" (click)="skip($event)">Skip to content</a>
 <div class="shell">
-  <aside>
-    <p class="brand"><img src="logo.svg" alt="" width="30" height="30"><i>Zones<span>.dns</span></i></p>
-    <div class="tabs">
-      <a routerLink="/zones" routerLinkActive="on" [routerLinkActiveOptions]="{ exact: false }">Zones</a>
-      <a routerLink="/dhcp" routerLinkActive="on">DHCP</a>
-      <a routerLink="/proxy" routerLinkActive="on">Proxy</a>
-      <a routerLink="/blacklist" routerLinkActive="on">Blacklist</a>
-      <a routerLink="/logs" routerLinkActive="on">Logs</a>
-      <a routerLink="/geo" routerLinkActive="on">Geolocation</a>
-      <a routerLink="/audit" routerLinkActive="on">Domain audit</a>
-      <a routerLink="/stats" routerLinkActive="on">Statistics</a>
-    </div>
-    <div class="grow"></div>
-    @if (superuser()) { <button class="link" (click)="openAdmin()">Django Admin ↗</button> }
-    <a class="link" routerLink="/security" routerLinkActive="on">Security</a>
-    <button class="link" (click)="logout()">Sign out</button>
-  </aside>
+  <header class="topbar">
+    <a class="brand" routerLink="/zones" aria-label="Zones.dns, home"><img src="logo.svg" alt="" width="28" height="28"><span>Zones<i>.dns</i></span></a>
+    <app-activity />
+  </header>
 
-  <main>
-    @if (inZones()) {
-      <nav class="subtabs" aria-label="Zones">
-        <a routerLink="/zones/hosts" routerLinkActive="on">Static hosts</a>
-        @for (z of zoneList(); track z.id) {
-          <span class="zt" [class.off]="z.enabled === false">
-            <a [routerLink]="['/zones', z.id]" routerLinkActive="on" [title]="z.cidr ? z.name : ''">{{ z.cidr ?? z.name }}</a>
-            <button type="button" class="icon" (click)="store.del(z)" [attr.aria-label]="'Delete ' + z.name">✕</button>
-          </span>
-        }
-        <button type="button" (click)="openZone()">+ New zone</button>
-        <button type="button" (click)="openReverse()">+ New reverse zone…</button>
-      </nav>
+  <nav class="rail" aria-label="Sections">
+    @for (s of sections; track s.path) {
+      <a [routerLink]="s.path" routerLinkActive="on" ariaCurrentWhenActive="page" [class.extra]="!s.primary">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons[s.icon]" /></svg><span>{{ s.label }}</span>
+      </a>
     }
-    @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+    <button type="button" class="more" (click)="sheet.showModal()" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.more" /></svg><span>More</span>
+    </button>
+    <div class="grow"></div>
+    <a routerLink="/security" routerLinkActive="on" ariaCurrentWhenActive="page" class="extra aux">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.security" /></svg><span>Security</span>
+    </a>
+    @if (superuser()) {
+      <button type="button" class="extra aux" (click)="openAdmin()">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.admin" /></svg><span>Advanced admin</span>
+      </button>
+    }
+    <button type="button" class="extra aux" (click)="logout()">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.signout" /></svg><span>Sign out</span>
+    </button>
+  </nav>
+
+  <main id="main" tabindex="-1">
+    @if (inZones()) {
+      <div class="zonebar">
+        <nav class="subtabs" aria-label="Zones">
+          <a routerLink="/zones/hosts" routerLinkActive="on" ariaCurrentWhenActive="page">Static hosts</a>
+          @for (g of store.groups(); track g.title) {
+            @if (g.zones.length) {
+              <span class="zgroup" [attr.aria-label]="g.title" role="group">
+                @for (z of g.zones; track z.id) {
+                  <a [routerLink]="['/zones', z.id]" routerLinkActive="on" ariaCurrentWhenActive="page" [class.off]="z.enabled === false"
+                     [title]="z.cidr ? z.name : ''">{{ z.cidr ?? z.name }}@if (z.enabled === false) {<span class="sr-only"> (off)</span>}</a>
+                }
+              </span>
+            }
+          }
+        </nav>
+        <div class="zactions">
+          <button type="button" class="ghost" (click)="openZone()">New zone</button>
+          <button type="button" class="ghost" (click)="openReverse()">New reverse zone <span class="soft">(IP → name)</span></button>
+        </div>
+      </div>
+    }
     <router-outlet />
   </main>
 </div>
 
-<dialog #nz class="confirm" (click)="$event.target === nz ? nz.close() : null">
+<dialog #sheet class="sheet" aria-label="More sections" (click)="$event.target === sheet ? sheet.close() : null">
+  <nav aria-label="More sections" (click)="sheet.close()">
+    @for (s of sections; track s.path) {
+      @if (!s.primary) {
+        <a [routerLink]="s.path" routerLinkActive="on" ariaCurrentWhenActive="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons[s.icon]" /></svg>{{ s.label }}</a>
+      }
+    }
+    <a routerLink="/security" routerLinkActive="on" ariaCurrentWhenActive="page"><svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.security" /></svg>Security</a>
+    @if (superuser()) { <button type="button" (click)="openAdmin()"><svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.admin" /></svg>Advanced admin</button> }
+    <button type="button" (click)="logout()"><svg viewBox="0 0 24 24" aria-hidden="true"><path [attr.d]="icons.signout" /></svg>Sign out</button>
+  </nav>
+  <button type="button" class="ghost" (click)="sheet.close()">Close</button>
+</dialog>
+
+<div #notice popover="manual" class="notice-pop" [attr.data-k]="ui.notice()?.kind">
+  @if (ui.notice(); as n) {
+    <p [attr.role]="n.kind === 'error' ? 'alert' : 'status'">{{ n.text }}</p>
+    @if (n.undo) { <button type="button" class="ghost" (click)="ui.undo()">Undo</button> }
+    <button type="button" class="icon" (click)="ui.dismiss()" aria-label="Dismiss">✕</button>
+  }
+</div>
+
+<dialog #nz class="confirm" aria-labelledby="nz-t">
   <form (ngSubmit)="addZone()">
-    <h3>New zone</h3>
-    <label class="field">
-      <span class="lbl">Zone name</span>
-      <input name="z" [(ngModel)]="newZone" placeholder="corp.lan" autocomplete="off" required>
-    </label>
-    @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+    <h3 id="nz-t">New zone</h3>
+    <div class="field">
+      <label class="lbl" for="nz-name">Zone name</label>
+      <input id="nz-name" name="z" [(ngModel)]="newZone" placeholder="e.g. corp.lan" autocomplete="off" required>
+    </div>
     <div class="actions">
       <button type="button" class="ghost" (click)="nz.close()">Cancel</button>
       <button class="primary">Create zone</button>
@@ -51,19 +90,16 @@
   </form>
 </dialog>
 
-<dialog #rev class="confirm" (click)="$event.target === rev ? rev.close() : null">
+<dialog #rev class="confirm" aria-labelledby="rev-t">
   <form (ngSubmit)="addReverse()">
-    <h3>New reverse zone</h3>
+    <h3 id="rev-t">New reverse zone</h3>
     <p class="soft pl">A reverse zone maps an IP address back to a name (PTR records). Enter the network you want to cover.</p>
-    <label class="field">
-      <span class="lbl">Network (CIDR)</span>
-      <input name="cidr" [(ngModel)]="cidr" placeholder="10.0.0.0/24" autocomplete="off" required aria-describedby="h-cidr">
+    <div class="field">
+      <label class="lbl" for="rev-cidr">Network (CIDR)</label>
+      <input id="rev-cidr" name="cidr" [(ngModel)]="cidr" placeholder="e.g. 10.0.0.0/24" autocomplete="off" required aria-describedby="h-cidr rev-zone">
       <small id="h-cidr" class="help">IPv4: /8, /16 or /24 (e.g. <code>10.0.0.0/24</code>). IPv6: prefixes that are multiples of 4 (e.g. <code>fd00:1234::/48</code>).</small>
-      @if (cidr.trim()) {
-        <small class="full">Zone: <b>{{ zonePreview() ?? 'worked out by the server' }}</b></small>
-      }
-    </label>
-    @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+      <small id="rev-zone" class="full" aria-live="polite">@if (cidr.trim()) {Zone: <b>{{ zonePreview() ?? 'worked out by the server' }}</b>}</small>
+    </div>
     <div class="actions">
       <button type="button" class="ghost" (click)="rev.close()">Cancel</button>
       <button class="primary">Create zone</button>
@@ -71,30 +107,30 @@
   </form>
 </dialog>
 
-<dialog #step class="confirm" (close)="stepUp.closed()" (click)="$event.target === step ? step.close() : null">
+<dialog #step class="confirm" aria-labelledby="step-t" (close)="stepUp.closed()" (click)="$event.target === step ? step.close() : null">
   <form (ngSubmit)="confirmCode()">
-    <h3>Confirm with your second factor</h3>
+    <h3 id="step-t">{{ stepUp.pending()?.what || 'Confirm with your second factor' }}</h3>
     <p class="soft pl">You are already signed in, so no user name or password is needed. Use a fresh code (not the one you signed in with) or a passkey.</p>
     @if (stepUp.pending()?.totp) {
-      <label class="field">
-        <span class="lbl">Authenticator app code</span>
-        <input name="sc" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" aria-label="Authenticator app code">
-      </label>
+      <div class="field">
+        <label class="lbl" for="step-code">Authenticator app code</label>
+        <input id="step-code" name="sc" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="123456" autofocus>
+      </div>
     }
     @if (stepUp.error()) { <p class="error" role="alert">{{ stepUp.error() }}</p> }
     <div class="actions">
       <button type="button" class="ghost" (click)="step.close()">Cancel</button>
       @if (stepUp.pending()?.passkey) { <button type="button" class="ghost" [disabled]="stepUp.busy()" (click)="stepUp.passkey()">Use a passkey</button> }
-      @if (stepUp.pending()?.totp) { <button class="danger" [disabled]="stepUp.busy() || !code.trim()">Confirm</button> }
+      @if (stepUp.pending()?.totp) { <button class="danger" [disabled]="stepUp.busy() || !code.trim()">{{ stepUp.pending()?.verb || 'Confirm' }}</button> }
     </div>
   </form>
 </dialog>
 
-<dialog #dlg class="confirm" (click)="$event.target === dlg ? dlg.close() : null">
-  <h3>{{ ui.box()?.title }}</h3>
-  <p class="soft">{{ ui.box()?.text }}</p>
+<dialog #dlg class="confirm" aria-labelledby="ask-t" aria-describedby="ask-d" (click)="$event.target === dlg ? dlg.close() : null">
+  <h3 id="ask-t">{{ ui.box()?.title }}</h3>
+  <p class="soft plain" id="ask-d">{{ ui.box()?.text }}</p>
   <div class="actions">
     <button class="ghost" autofocus (click)="dlg.close()">Cancel</button>
-    <button class="danger" (click)="ui.yes()">Confirm</button>
+    <button class="danger" (click)="ui.yes()">{{ ui.box()?.verb }}</button>
   </div>
 </dialog>

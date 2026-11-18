@@ -15,6 +15,8 @@ export class PingLive implements OnDestroy {
   running = signal(false);
   copied = signal(false);
   text = computed(() => this.lines().join('\n'));
+  /** The statistics line once stopped, read out by screen readers (the running output is not: one line a second would drown everything). */
+  summary = computed(() => this.lines().find(l => l.includes('packets transmitted')) ?? '');
   private run = 0; // a new window (or a close) ends the loop of the old one
   private times: number[] = [];
   private sent = 0;

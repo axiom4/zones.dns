@@ -50,7 +50,13 @@
               }
             ],
             "styles": [
-              "src/styles.css"
+              "node_modules/@fontsource-variable/atkinson-hyperlegible-next/wght.css",
+              "node_modules/@fontsource-variable/atkinson-hyperlegible-mono/wght.css",
+              "src/styles.css",
+              "src/styles/shell.css",
+              "src/styles/zones.css",
+              "src/styles/network.css",
+              "src/styles/insight.css"
             ],
             "allowedCommonJsDependencies": [
               "tweetnacl"

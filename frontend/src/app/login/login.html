@@ -1,43 +1,62 @@
-<div class="welcome">
-  <section class="hero">
-    <p class="brand"><img src="logo.svg" alt="" width="34" height="34"><i>Zones<span>.dns</span></i></p>
-    <h1>Your network's names, under control.</h1>
-    <p>Create zones and records in seconds. Anything that isn't yours is resolved upstream, no thinking required.</p>
-  </section>
-  @switch (step()?.mfa) {
-    @case ('verify') {
-      <form (ngSubmit)="verifyTotp()">
-        <h2>Two-step verification</h2>
-        <p class="soft">Confirm it's you with a second factor.</p>
-        @if (step()!.methods.includes('passkey')) {
-          <button type="button" class="primary big" (click)="verifyPasskey()">Use your passkey</button>
-        }
-        @if (step()!.methods.includes('totp')) {
-          <label>Authenticator app code <input name="c" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" [attr.autofocus]="step()!.methods.includes('passkey') ? null : ''"></label>
-          <button class="primary big" [class.ghost]="step()!.methods.includes('passkey')">Verify code</button>
-        }
-        @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
-        <button type="button" class="link" (click)="back()">Back to sign in</button>
-      </form>
+<main class="signin-page">
+  <div class="signin">
+    <div class="signin-head">
+      <p class="brand"><img src="logo.svg" alt="" width="28" height="28"><span>Zones<i>.dns</i></span></p>
+      <!-- the activity trace of the top bar, drawn still: a quiet nod to what is inside -->
+      <svg class="signin-trace" viewBox="0 0 120 28" preserveAspectRatio="none" aria-hidden="true">
+        <path class="area" d="M0 22 L8 20 L16 21 L24 16 L32 18 L40 12 L48 15 L56 9 L64 13 L72 11 L80 6 L88 10 L96 8 L104 12 L112 7 L120 9 L120 28 L0 28 Z" />
+        <path class="line" d="M0 22 L8 20 L16 21 L24 16 L32 18 L40 12 L48 15 L56 9 L64 13 L72 11 L80 6 L88 10 L96 8 L104 12 L112 7 L120 9" />
+      </svg>
+    </div>
+    @switch (step()?.mfa) {
+      @case ('verify') {
+        <form (ngSubmit)="verifyTotp()" novalidate>
+          <h1>Two-step verification</h1>
+          <p class="soft">Confirm it's you with your second factor.</p>
+          @if (step()!.methods.includes('passkey')) {
+            <button type="button" class="primary big" (click)="verifyPasskey()" [disabled]="busy()">Use your passkey</button>
+          }
+          @if (step()!.methods.includes('totp')) {
+            <div class="field">
+              <label class="lbl" for="lg-code">Authenticator app code</label>
+              <input id="lg-code" name="c" [(ngModel)]="code" inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="123456"
+                     aria-required="true" [attr.aria-invalid]="!!ui.error() || null" [attr.aria-describedby]="ui.error() ? 'lg-err' : null">
+            </div>
+            <button class="big" [class.primary]="!step()!.methods.includes('passkey')" [class.ghost]="step()!.methods.includes('passkey')"
+                    [disabled]="busy()">{{ busy() ? 'Checking…' : 'Verify code' }}</button>
+          }
+          @if (ui.error()) { <p class="error" id="lg-err" role="alert">{{ ui.error() }}</p> }
+          <button type="button" class="link" (click)="back()">Back to sign in</button>
+        </form>
+      }
+      @case ('setup') {
+        <div class="form">
+          <h1>Protect your account</h1>
+          <p class="soft">A second factor is required to use the app. Choose how you want to confirm future sign-ins.</p>
+          <app-mfa-enrol [ticket]="step()!.ticket" (done)="finish()" />
+          @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
+          <button type="button" class="link" (click)="back()">Back to sign in</button>
+        </div>
+      }
+      @default {
+        <form (ngSubmit)="login()" novalidate>
+          <h1>Sign in</h1>
+          @if (key.active()) { <p class="soft secure">Encrypted sign-in: your password never travels in clear text.</p> }
+          <div class="field">
+            <label class="lbl" for="lg-user">User name</label>
+            <input id="lg-user" name="u" [(ngModel)]="user" autocomplete="username" aria-required="true" autofocus
+                   [attr.aria-invalid]="!!ui.error() || null" [attr.aria-describedby]="ui.error() ? 'lg-err' : null">
+          </div>
+          <div class="field">
+            <label class="lbl" for="lg-pass">Password</label>
+            <input id="lg-pass" name="p" [(ngModel)]="pass" type="password" autocomplete="current-password" aria-required="true"
+                   [attr.aria-invalid]="!!ui.error() || null" [attr.aria-describedby]="ui.error() ? 'lg-err' : null">
+          </div>
+          @if (ui.error()) { <p class="error" id="lg-err" role="alert">{{ ui.error() }}</p> }
+          <button class="primary big" [disabled]="busy()">{{ busy() ? 'Signing in…' : 'Sign in' }}</button>
+        </form>
+      }
     }
-    @case ('setup') {
-      <div class="form">
-        <h2>Protect your account</h2>
-        <p class="soft">A second factor is required to use the app. Choose how you want to confirm future sign-ins.</p>
-        <app-mfa-enrol [ticket]="step()!.ticket" (done)="finish()" />
-        @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
-        <button type="button" class="link" (click)="back()">Back to sign in</button>
-      </div>
-    }
-    @default {
-      <form (ngSubmit)="login()">
-        <h2>Welcome back</h2>
-        @if (key.active()) { <p class="soft secure">Encrypted sign-in: your credentials never travel in clear text.</p> }
-        <label>Username <input name="u" [(ngModel)]="user" autocomplete="username" required autofocus></label>
-        <label>Password <input name="p" [(ngModel)]="pass" type="password" autocomplete="current-password" required></label>
-        @if (ui.error()) { <p class="error" role="alert">{{ ui.error() }}</p> }
-        <button class="primary big">Sign in</button>
-      </form>
-    }
-  }
-</div>
+  </div>
+  <p class="soft signin-foot">DNS, DHCP and ad blocking for your network.</p>
+</main>

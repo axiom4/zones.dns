@@ -22,6 +22,7 @@ export class Login {
   private router = inject(Router);
   user = ''; pass = ''; code = '';
   step = signal<LoginStep | null>(null);
+  busy = signal(false);
 
   constructor() {
     this.ui.error.set('');
@@ -29,17 +30,29 @@ export class Login {
   }
 
   async login() {
-    try { this.step.set(await this.auth.login(this.user, this.pass)); } catch (e) { this.ui.error.set(e instanceof LoginError ? e.message : 'Sign-in failed.'); return; }
+    if (this.busy()) return;
+    if (!this.user.trim() || !this.pass) { this.ui.error.set('Enter your user name and password.'); return; }
+    this.busy.set(true);
+    try { this.step.set(await this.auth.login(this.user, this.pass)); } catch (e) {
+      this.ui.error.set(e instanceof LoginError ? e.message : 'Sign-in failed: check the user name and password, then try again.');
+      this.busy.set(false);
+      return;
+    }
+    this.busy.set(false);
     this.pass = ''; this.ui.error.set('');
     if (!this.step()) this.router.navigateByUrl('/');
+    else if (this.step()!.mfa === 'verify' && !this.step()!.methods.includes('passkey')) setTimeout(() => document.getElementById('lg-code')?.focus());
   }
 
+  private async busyRun(f: () => Promise<unknown>) { this.busy.set(true); await this.ui.run(f); this.busy.set(false); }
+
   verifyTotp() {
-    return this.ui.run(async () => { await this.mfa.call('totp', { ticket: this.step()!.ticket, code: this.code }); this.finish(); });
+    if (!this.code.trim()) { this.ui.error.set('Enter the 6-digit code your authenticator app shows.'); return; }
+    return this.busyRun(async () => { await this.mfa.call('totp', { ticket: this.step()!.ticket, code: this.code }); this.finish(); });
   }
 
   verifyPasskey() {
-    return this.ui.run(async () => {
+    return this.busyRun(async () => {
       const ticket = this.step()!.ticket;
       const { options } = await this.mfa.call('passkey-options', { ticket });
       let credential: unknown;
@@ -50,5 +63,5 @@ export class Login {
   }
 
   finish() { this.auth.accept(); this.router.navigateByUrl('/'); }
-  back() { this.step.set(null); this.code = ''; this.ui.error.set(''); }
+  back() { this.step.set(null); this.code = ''; this.ui.error.set(''); setTimeout(() => document.getElementById('lg-user')?.focus()); }
 }

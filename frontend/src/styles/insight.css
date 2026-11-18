@@ -1,0 +1,89 @@
+/* insight pages: rules of this area only (the shared look is in styles.css and styles/shell.css). */
+
+/* ---- lead figure (Statistics, Geolocation): one big number with its meaning, then the rest as a quiet strip ---- */
+:is(app-stats-page, app-geo-page) .lead { display: grid; grid-template-columns: minmax(14rem, auto) 1fr; gap: .5rem 2rem; align-items: center;
+  background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+:is(app-stats-page, app-geo-page) .lead.stale { opacity: .6; }
+:is(app-stats-page, app-geo-page) .rate { display: grid; gap: .15rem; color: inherit; text-decoration: none; border-radius: var(--radius-s); padding: .25rem .35rem; margin: -.25rem -.35rem; }
+:is(app-stats-page, app-geo-page) a.rate:hover { background: var(--hover); }
+:is(app-stats-page, app-geo-page) a.rate:hover span { color: var(--brand); text-decoration: underline; }
+:is(app-stats-page, app-geo-page) .rate b { font-size: 3rem; line-height: 1; letter-spacing: -.03em; font-weight: 800; }
+app-stats-page .rate b { color: var(--danger); }
+:is(app-stats-page, app-geo-page) .rate span { color: var(--muted); font-size: 14px; max-width: 26ch; }
+:is(app-stats-page, app-geo-page) .figs { display: flex; flex-wrap: wrap; gap: .75rem 0; margin: 0; }
+:is(app-stats-page, app-geo-page) .figs > div { padding: 0 1.25rem; border-left: 1px solid var(--line-soft); min-width: 7.5rem; }
+:is(app-stats-page, app-geo-page) .figs dt { color: var(--muted); font-size: 13px; }
+:is(app-stats-page, app-geo-page) .figs dd { margin: 0; font-size: 1.35rem; font-weight: 700; }
+:is(app-stats-page, app-geo-page) .figs a { color: inherit; text-decoration: underline; text-decoration-color: var(--line); text-underline-offset: 4px; text-decoration-thickness: 1px; }
+:is(app-stats-page, app-geo-page) .figs a:hover { color: var(--brand); text-decoration-color: currentColor; }
+app-geo-page .leadnote { grid-column: 1 / -1; font-size: 13px; }
+@media (max-width: 700px) {
+  :is(app-stats-page, app-geo-page) .lead { grid-template-columns: 1fr; padding: .9rem; }
+  :is(app-stats-page, app-geo-page) .rate b { font-size: 2.5rem; }
+  :is(app-stats-page, app-geo-page) .figs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .6rem; }
+  :is(app-stats-page, app-geo-page) .figs > div { padding: .4rem 0 0; border-left: 0; border-top: 1px solid var(--line-soft); min-width: 0; }
+  :is(app-stats-page, app-geo-page) .figs dd { font-size: 1.15rem; }
+}
+
+/* ---- the chart: segments split by a hairline, proxy blocks striped (not told apart by colour alone), readout line instead of hover ---- */
+app-stats-page .legend { margin: -.4rem 0 .4rem; }
+app-stats-page .legend i:first-child { margin-left: 0; }
+app-stats-page :is(.legend, .readout) i { background: var(--c-dns); }
+app-stats-page :is(.legend, .readout, .chart) i.blk { background: var(--c-dnsblk); }
+app-stats-page :is(.legend, .readout, .chart) i.pok { background: var(--c-prx); }
+app-stats-page :is(.legend, .readout, .chart) i.pblk { background: repeating-linear-gradient(135deg, var(--c-prxblk) 0 3px, color-mix(in srgb, var(--c-prxblk) 35%, var(--surface)) 3px 5px); }
+app-stats-page .chart { cursor: crosshair; border-radius: var(--radius-s); touch-action: pan-y; }
+app-stats-page .chart:focus-visible { outline-offset: 4px; }
+app-stats-page .col .stack { gap: 1px; background: var(--surface); }
+app-stats-page .col i { background: var(--c-dns); }
+app-stats-page .col.sel .stack { outline: 2px solid var(--ink); outline-offset: 1px; }
+app-stats-page .col.sel b, app-stats-page .col.sel span.off { display: block; background: var(--surface); padding: 0 .25rem; border-radius: 4px; z-index: 2; }
+app-stats-page .chart.dense .col:hover b { display: none; }
+app-stats-page .chart.dense .col.sel b { display: block; }
+app-stats-page .readout { display: flex; flex-wrap: wrap; gap: .25rem 1.1rem; align-items: center; margin: .9rem 0 0; padding-top: .7rem; border-top: 1px solid var(--line-soft); font-size: 14px; min-height: 2.2rem; }
+app-stats-page .readout span { color: var(--muted); }
+app-stats-page .readout i, app-stats-page .legend i { display: inline-block; width: .75rem; height: .75rem; border-radius: 2px; margin-right: .35rem; vertical-align: -1px; }
+
+/* ---- top lists: the name is a link to the log ---- */
+app-stats-page .row a.n { color: inherit; text-decoration: none; }
+app-stats-page .row a.n:hover { color: var(--brand); text-decoration: underline; }
+app-stats-page .row.answer { align-items: flex-start; }
+app-stats-page .row.answer .n { display: grid; font-family: var(--sans); font-size: 14px; white-space: normal; }
+app-stats-page .row.answer .n small { color: var(--muted); font-size: 12.5px; }
+app-stats-page .row.answer .c { white-space: nowrap; }
+@media (pointer: coarse) { app-stats-page .row a.n { padding-block: .6rem; } }
+
+/* ---- query log: why it was blocked, and the live pill ---- */
+app-logs-page .records.logs li > .why { order: 99; flex: 1 1 100%; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; padding-left: 8.5rem; margin-top: -.25rem; }
+app-logs-page .records.logs li.subrow > .why { padding-left: 8.5rem; }
+@media (max-width: 1100px) { app-logs-page .records.logs li > .why, app-logs-page .records.logs li.subrow > .why { padding-left: 0; margin-top: 0; order: 6; } }  /* above the actions */
+app-logs-page .livepill { position: sticky; top: .5rem; z-index: 5; display: flex; justify-content: center; margin: -.25rem 0 .6rem; pointer-events: none; }
+app-logs-page .livepill > * { pointer-events: auto; }
+app-logs-page .livepill button.ghost { background: var(--raised); border-color: var(--brand); color: var(--brand); border-radius: 999px; box-shadow: var(--shadow-pop); }
+app-logs-page .livepill .soft { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 999px; padding: .2rem .8rem; font-size: 13px; }
+@media (max-width: 700px) { app-logs-page .livepill { top: auto; bottom: 5rem; position: sticky; } }
+
+/* ---- geolocation map: legend, hint and states ---- */
+app-geo-map .mapwrap { position: relative; }
+app-geo-map .maphint, app-geo-map .mapfail { position: absolute; inset: 0; display: grid; place-content: center; justify-items: center; gap: .6rem; margin: 0; text-align: center; }
+app-geo-map .maphint { background: color-mix(in srgb, var(--ink) 55%, transparent); color: var(--surface); font-weight: 700; border-radius: var(--radius); pointer-events: none; }
+app-geo-map .shades { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .6rem; margin-top: .6rem; font-size: 13px; color: var(--muted); }
+app-geo-map .ramp { display: inline-block; width: 8rem; height: .7rem; border-radius: 2px; border: 1px solid var(--line-soft);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--brand) 35%, var(--brand-soft)), var(--brand)); }
+app-geo-map .citydot i { display: inline-block; width: .7rem; height: .7rem; border-radius: 50%; background: var(--danger); margin-right: .3rem; vertical-align: -1px; }
+@media (max-width: 700px) { app-geo-page .anstable .ips { display: none; } }
+
+/* ---- domain audit: severity tiles are filters ---- */
+app-audit-page .audit-sum { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .6rem; margin-bottom: .6rem; }
+app-audit-page .sumtile { display: grid; justify-items: start; gap: .1rem; text-align: left; background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--radius); padding: .8rem 1rem; min-height: 44px; }
+app-audit-page .sumtile b { font-size: 1.9rem; line-height: 1.1; }
+app-audit-page .sumtile span { color: var(--muted); font-size: 13px; }
+app-audit-page .sumtile[data-s=bad] b { color: var(--danger); } app-audit-page .sumtile[data-s=warn] b { color: var(--warn); }
+app-audit-page .sumtile[data-s=ok] b { color: var(--ok); } app-audit-page .sumtile[data-s=info] b { color: var(--brand); }
+app-audit-page .sumtile:hover:not(:disabled) { border-color: var(--brand); }
+app-audit-page .sumtile[aria-pressed=true] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); background: var(--hover); }
+app-audit-page .sumtile:disabled { cursor: default; }
+app-audit-page .sumtile:disabled b { color: var(--muted); }
+app-audit-page .audit-filter { display: flex; flex-wrap: wrap; align-items: center; gap: .3rem .8rem; min-height: 2.5rem; margin-bottom: .6rem; }
+app-audit-page .audit-filter .check { display: inline-flex; align-items: center; gap: .45rem; min-height: 44px; }
+@media (max-width: 700px) { app-audit-page .audit-sum { gap: .4rem; } app-audit-page .sumtile { padding: .5rem .55rem; } app-audit-page .sumtile b { font-size: 1.4rem; } app-audit-page .sumtile span { font-size: 12px; } }

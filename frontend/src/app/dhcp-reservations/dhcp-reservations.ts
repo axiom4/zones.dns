@@ -1,9 +1,13 @@
 import { Component, ElementRef, computed, inject, input, signal, viewChild } from '@angular/core';
+import { KeyValuePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Api } from '../api/api';
 import { dhcpVendorRetrieve, dhcpReservationsCreate, dhcpReservationsDestroy, dhcpReservationsExportRetrieve, dhcpReservationsImportCreate, dhcpReservationsList, dhcpReservationsPartialUpdate } from '../api/functions';
 import { DhcpReservation, DhcpReservationImportResult } from '../api/models';
 import { byIp } from '../lib/ip';
+import { fieldErrors } from '../lib/error-text';
+import { pingSummary } from '../ping-live/ping-summary';
+import { focusSoon } from '../ping-live/focus';
 import { PingLive } from '../ping-live/ping-live';
 import { Ping } from '../services/ping';
 import { StepUp } from '../services/step-up';
@@ -14,7 +18,7 @@ const empty = (): Draft => ({ mac: '', ip: '', hostname: '', note: '' });
 
 @Component({
   selector: 'app-dhcp-reservations',
-  imports: [FormsModule, PingLive],
+  imports: [FormsModule, KeyValuePipe, PingLive],
   templateUrl: './dhcp-reservations.html',
 })
 export class DhcpReservations {
@@ -24,13 +28,15 @@ export class DhcpReservations {
   ping = inject(Ping);
   live = viewChild.required(PingLive);
   vendorHint = signal('');
-  /** A lease the user chose to make fixed: fills the form. */
-  prefill = input<Partial<Draft> | null>(null);
   items = signal<DhcpReservation[]>([]);
-  filter = signal('');
+  loaded = signal(false);
+  /** The device filter of the DHCP page (one search box for every tab). */
+  filter = input('');
+  errs = signal<Record<string, string>>({});
+  editErrs = signal<Record<string, string>>({});
   shown = computed(() => {
     const q = this.filter().trim().toLowerCase();
-    const rows = q ? this.items().filter(r => `${r.mac} ${r.ip} ${r.hostname ?? ''} ${r.note ?? ''}`.toLowerCase().includes(q)) : this.items();
+    const rows = q ? this.items().filter(r => `${r.mac} ${r.ip} ${r.hostname ?? ''} ${r.note ?? ''} ${r.vendor ?? ''}`.toLowerCase().includes(q)) : this.items();
     return [...rows].sort((a, b) => byIp(a.ip, b.ip));
   });
   draft = empty();
@@ -43,18 +49,23 @@ export class DhcpReservations {
 
   constructor() { this.load(); }
 
-  ngOnInit() { const p = this.prefill(); if (p) this.draft = { ...empty(), ...p }; }
-  load() { return this.ui.run(async () => this.items.set(await this.api.invoke(dhcpReservationsList))); }
+  load() { return this.ui.run(async () => { this.items.set(await this.api.invoke(dhcpReservationsList)); this.loaded.set(true); }); }
   add() {
+    const d = this.draft;
     return this.ui.run(async () => {
-      await this.api.invoke(dhcpReservationsCreate, { body: this.draft });
+      this.errs.set({});
+      try { await this.api.invoke(dhcpReservationsCreate, { body: d }); } catch (e) { this.errs.set(fieldErrors(e)); throw e; }
       this.draft = empty();
+      this.vendorHint.set('');
       await this.load();
-    });
+    }, { ok: `Reserved ${d.ip} for ${d.hostname || d.mac}` });
   }
   watch(r: DhcpReservation) { this.live().open(r.ip); }
-  pingOne(r: DhcpReservation) { return this.ui.run(() => this.ping.once(r.ip)); }
-  pingAll() { return this.ui.run(() => this.ping.run(this.items().filter(r => r.enabled !== false).map(r => r.ip))); }
+  pingOne(r: DhcpReservation) { return this.ui.run(async () => { await this.ping.once(r.ip); this.ui.toast(`${r.ip}: ${this.ping.label(r.ip)}`); }); }
+  pingAll() {
+    const list = this.shown().filter(r => r.enabled !== false).map(r => r.ip);
+    return this.ui.run(async () => { await this.ping.run(list); this.ui.toast(pingSummary(this.ping, list)); });
+  }
   /** Who made the card, shown under the MAC field while the user fills in the form. */
   async lookupVendor() {
     const mac = this.draft.mac.trim();
@@ -64,16 +75,37 @@ export class DhcpReservations {
       if (mac === this.draft.mac.trim()) this.vendorHint.set(v.vendor ?? (v.private ? 'Private (random) address: no maker' : 'Unknown maker'));
     } catch { this.vendorHint.set(''); } // only a hint: the form still works
   }
-  startEdit(r: DhcpReservation) { this.edit = { mac: r.mac, ip: r.ip, hostname: r.hostname ?? '', note: r.note ?? '' }; this.editing.set(r.id); }
+  startEdit(r: DhcpReservation) {
+    this.edit = { mac: r.mac, ip: r.ip, hostname: r.hostname ?? '', note: r.note ?? '' };
+    this.editErrs.set({});
+    this.editing.set(r.id);
+    focusSoon(`rv4-em-${r.id}`);
+  }
+  cancelEdit(r: DhcpReservation) { this.editing.set(null); focusSoon(`rv4-edit-${r.id}`); }
   save(r: DhcpReservation) {
-    return this.ui.run(async () => { await this.api.invoke(dhcpReservationsPartialUpdate, { id: r.id, body: this.edit }); this.editing.set(null); await this.load(); });
+    return this.ui.run(async () => {
+      this.editErrs.set({});
+      try { await this.api.invoke(dhcpReservationsPartialUpdate, { id: r.id, body: this.edit }); } catch (e) { this.editErrs.set(fieldErrors(e)); throw e; }
+      this.editing.set(null);
+      await this.load();
+      focusSoon(`rv4-edit-${r.id}`);
+    }, { ok: `Saved the reservation of ${this.edit.ip}` });
   }
   toggle(r: DhcpReservation) {
-    return this.ui.run(async () => { await this.api.invoke(dhcpReservationsPartialUpdate, { id: r.id, body: { enabled: r.enabled === false } }); await this.load(); });
+    return this.ui.run(async () => { await this.api.invoke(dhcpReservationsPartialUpdate, { id: r.id, body: { enabled: r.enabled === false } }); await this.load(); },
+      { ok: `${r.enabled === false ? 'Turned on' : 'Turned off'} the reservation of ${r.ip}` });
   }
+  /** Deleted at once, with Undo in the notice: it creates the same reservation again. */
   del(r: DhcpReservation) {
-    this.ui.ask(`Delete the reservation ${r.mac} → ${r.ip}?`, 'The client gets an address from the pool at its next renewal.', () =>
-      this.ui.run(async () => { await this.api.invoke(dhcpReservationsDestroy, { id: r.id }); await this.load(); }));
+    return this.ui.run(async () => {
+      await this.api.invoke(dhcpReservationsDestroy, { id: r.id });
+      await this.load();
+      focusSoon('rv4-mac');
+      this.ui.toast(`Deleted the reservation of ${r.ip}`, async () => {
+        await this.api.invoke(dhcpReservationsCreate, { body: { mac: r.mac, ip: r.ip, hostname: r.hostname, note: r.note, enabled: r.enabled } });
+        await this.load();
+      });
+    });
   }
 
   exportCsv() {
@@ -88,15 +120,18 @@ export class DhcpReservations {
   }
   runImport(dry_run: boolean) {
     return this.ui.run(async () => {
-      const grant = this.importReplace && !dry_run ? await this.stepUp.request('dhcp-replace') : ''; // replacing deletes every reservation first
+      const grant = this.importReplace && !dry_run ? await this.stepUp.request('dhcp-replace', 'Replace all IPv4 reservations', 'Replace reservations') : ''; // replacing deletes every reservation first
       if (grant === null) return;
       const r = await this.api.invoke(dhcpReservationsImportCreate, { body: { text: this.importText, replace: this.importReplace, dry_run }, 'X-MFA-Grant': grant || undefined });
       this.importResult.set(r);
-      if (!dry_run) { await this.load(); if (!r.errors.length) this.imp().nativeElement.close(); }
+      if (!dry_run) {
+        await this.load();
+        if (!r.errors.length) { this.imp().nativeElement.close(); this.ui.toast(`Imported: ${r.created} added, ${r.updated} updated, ${r.skipped} unchanged`); }
+      }
     });
   }
   confirmImport() {
     if (!this.importReplace) { this.runImport(false); return; }
-    this.ui.ask('Replace all reservations?', 'Every existing reservation is deleted before the import.', () => this.runImport(false));
+    this.ui.ask('Replace all reservations?', 'Every existing IPv4 reservation is deleted before the import.', () => this.runImport(false), 'Replace reservations');
   }
 }

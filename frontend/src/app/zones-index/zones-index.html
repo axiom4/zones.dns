@@ -1,4 +1,28 @@
-<div class="blank">
-    <p class="big-hint">Choose a zone</p>
-    <p class="soft">Pick it from the list of zones to view and edit its records.</p>
+@if (!store.loaded()) {
+  <p class="soft" role="status">Loading zones…</p>
+} @else if (!store.zones().length) {
+  <div class="blank">
+    <p class="big-hint">No zones yet</p>
+    <p class="soft">A zone holds the names of your network, for example <code>home.lan</code>: create one, then add a record for each device.</p>
+    <p class="blank-acts">
+      <button class="primary" (click)="shell?.openZone()">New zone</button>
+      <button class="ghost" (click)="shell?.openReverse()">New reverse zone</button>
+    </p>
   </div>
+} @else {
+  <header><div><h2>Zones</h2><p class="soft">Pick a zone to see and change its records.</p></div></header>
+  @for (g of store.groups(); track g.title) {
+    @if (g.zones.length) {
+      <h3 class="zlist-h" [id]="'zl-' + $index">{{ g.title }}</h3>
+      <ul class="records zlist" [attr.aria-labelledby]="'zl-' + $index">
+        @for (z of g.zones; track z.id) {
+          <li [class.off]="z.enabled === false">
+            <a [routerLink]="['/zones', z.id]" class="rname">{{ z.name }}</a>
+            @if (z.cidr) { <span class="rvalue">{{ z.cidr }}</span> } @else { <span class="grow"></span> }
+            <span class="soft">{{ z.enabled === false ? 'Off' : 'Served' }}</span>
+          </li>
+        }
+      </ul>
+    }
+  }
+}

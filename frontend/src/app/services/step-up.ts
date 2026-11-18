@@ -4,7 +4,7 @@ import { mfaRetrieve } from '../api/functions';
 import { MfaClient } from './mfa-client';
 import { passkeyError, passkeysSupported, usePasskey } from './webauthn';
 
-interface Pending { scope: string; totp: boolean; passkey: boolean; resolve: (grant: string | null) => void }
+interface Pending { scope: string; what: string; verb: string; totp: boolean; passkey: boolean; resolve: (grant: string | null) => void }
 
 /**
  * Asks the signed-in user for a second factor before a dangerous action (deleting, switching off or emptying a zone, purging the query log, opening the Django admin). No user name or password:
@@ -21,13 +21,14 @@ export class StepUp {
   dlg?: HTMLDialogElement; // registered by the shell
 
   /** The grant for `scope`; '' when the user has no second factor (nothing to ask); null when they cancel. */
-  async request(scope: string): Promise<string | null> {
+  /** what: the action in the user's words, shown as the dialog title ("Delete zone corp.lan"); verb: the button ("Delete zone"). */
+  async request(scope: string, what = '', verb = ''): Promise<string | null> {
     const s = await this.api.invoke(mfaRetrieve);
     if (!s.totp && !s.passkeys.length) return '';
     return new Promise(resolve => {
       this.pending()?.resolve(null); // a second request (double click) cancels the first instead of leaving it waiting forever
       this.error.set('');
-      this.pending.set({ scope, totp: s.totp, passkey: s.passkeys.length > 0 && passkeysSupported(), resolve });
+      this.pending.set({ scope, what, verb, totp: s.totp, passkey: s.passkeys.length > 0 && passkeysSupported(), resolve });
       this.dlg?.showModal();
     });
   }
