@@ -231,7 +231,7 @@ class Server6:
         if not self.cfg.stateful or cid is None or not (3 <= len(cid) <= 130) or kind in (ADVERTISE, REPLY, RECONFIGURE, LEASEQUERY_REPLY):
             return None
         duid = cid.hex()
-        self._peer, self._host = (None if relayed else peer_ip), fqdn_host(first(FQDN) or b'')  # who wrote, and the name it gave: kept with the lease
+        self._peer, self._host, self._pmac = (None if relayed else peer_ip), fqdn_host(first(FQDN) or b''), None  # who wrote, and the name it gave: kept with the lease
         reconf_adv = option(RECONF_ACCEPT, b'') if RECONF_ACCEPT in o else b''
         reconf_rep = (reconf_adv + option(AUTH, dhcp.auth_key_body(duid))) if RECONF_ACCEPT in o else b''
         if kind == SOLICIT:
@@ -277,24 +277,25 @@ class Server6:
         if cid is None or LQ_QUERY not in o:
             return None
         lq = o[LQ_QUERY][0]
+        reply = lambda body: bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + body
         if len(lq) < 17:
-            return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(MALFORMED_QUERY)
+            return reply(status(MALFORMED_QUERY))
         qtype = lq[0]
         try:
             link = ipaddress.IPv6Address(lq[1:17])
         except ValueError:
-            return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(MALFORMED_QUERY)
+            return reply(status(MALFORMED_QUERY))
         qopts = options(lq[17:])
         if qopts is None:
-            return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(MALFORMED_QUERY)
+            return reply(status(MALFORMED_QUERY))
         if link != ipaddress.IPv6Address(0) and self.cfg.prefix and link not in self.cfg.prefix:
-            return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(NOT_CONFIGURED)
+            return reply(status(NOT_CONFIGURED))
 
         rows = []
         if qtype == QUERY_BY_ADDRESS:
             iaaddrs = qopts.get(IAADDR, [])
             if not iaaddrs or len(iaaddrs[0]) < 16:
-                return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(MALFORMED_QUERY)
+                return reply(status(MALFORMED_QUERY))
             addr = str(ipaddress.IPv6Address(iaaddrs[0][:16]))
             row = Dhcp6Lease.objects.filter(value=addr, expires__gt=now).exclude(duid__startswith='declined').first()
             if row:
@@ -302,10 +303,10 @@ class Server6:
         elif qtype == QUERY_BY_CLIENTID:
             cids = qopts.get(CLIENTID, [])
             if not cids:
-                return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(MALFORMED_QUERY)
+                return reply(status(MALFORMED_QUERY))
             rows = list(Dhcp6Lease.objects.filter(duid=cids[0].hex(), expires__gt=now).order_by('kind', 'iaid'))
         else:
-            return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + status(UNKNOWN_QUERY_TYPE)
+            return reply(status(UNKNOWN_QUERY_TYPE))
 
         body = b''
         if rows:
@@ -321,7 +322,7 @@ class Server6:
                     net = ipaddress.IPv6Network(r.value)
                     cdata += option(IAPREFIX, struct.pack('!IIB', pref, rem, net.prefixlen) + net.network_address.packed)
             body = option(CLIENT_DATA, cdata)
-        return bytes([LEASEQUERY_REPLY]) + txid + option(SERVERID, self.duid) + option(CLIENTID, cid) + body + status(SUCCESS)
+        return reply(body + status(SUCCESS))
 
     def _msg(self, kind, txid, cid, oro, body):
         out = bytes([kind]) + txid + option(SERVERID, self.duid) + (option(CLIENTID, cid) if cid else b'') + body
@@ -411,10 +412,11 @@ class Server6:
         """The address or prefix (text) this IA holds now, allocating one unless only_existing; None when there is none."""
         c = self.cfg
         cur = Dhcp6Lease.objects.filter(duid=duid, iaid=iaid, kind=kind).first()
-        blocked = set()  # addresses reserved for other clients: never given out, never kept
+        blocked = set()  # addresses reserved for other clients: never given out, never kept (temporary addresses too)
+        if kind in ('na', 'ta'):
+            blocked = set(Dhcp6Reservation.objects.filter(enabled=True).exclude(duid=duid).values_list('ip', flat=True))
         if kind == 'na':
             mine = Dhcp6Reservation.objects.filter(enabled=True, duid=duid).values_list('ip', flat=True).first()
-            blocked = set(Dhcp6Reservation.objects.filter(enabled=True).exclude(duid=duid).values_list('ip', flat=True))
             if mine:  # the reserved address wins over the pool, and may lie outside it
                 if cur and cur.value == mine:
                     return self._store(kind, duid, iaid, mine, now, seconds, peer_ip=peer_ip)
@@ -481,11 +483,16 @@ class Server6:
         defaults = {'value': value, 'expires': expires}
         if kind != 'pd':
             known = Dhcp6Lease.objects.filter(duid=duid, iaid=iaid, kind=kind).values_list('mac', flat=True).first()
-            mac = known or duid_mac(duid) or (peer_mac(self._peer, self.cfg.interface) if getattr(self, '_peer', None) else '')
+            mac = known or duid_mac(duid)
+            if not mac and getattr(self, '_peer', None):
+                if getattr(self, '_pmac', None) is None:  # once per message: up to 16 IAs would each run `ip -6 neigh`
+                    self._pmac = peer_mac(self._peer, self.cfg.interface)
+                mac = self._pmac
             if mac:
                 defaults['mac'] = mac
-            if getattr(self, '_host', ''):
-                defaults['hostname'] = self._host
+            host = getattr(self, '_host', '')
+            if host and not dhcp.name_taken(host, now, mac=mac, duid=duid):  # like DHCPv4: no taking over the name of another client, no wpad
+                defaults['hostname'] = host
         Dhcp6Lease.objects.update_or_create(duid=duid, iaid=iaid, kind=kind, defaults=defaults)
         if kind == 'pd' and seconds > OFFER_HOLD:
             sync_pd_route(value, peer_ip=peer_ip, interface=self.cfg.interface, add=True, enabled=self.cfg.pd_routes)

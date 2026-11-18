@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from ..models import DataVersion, Dhcp6Reservation
 from ..serializers import Dhcp6ReservationImportSerializer, Dhcp6ReservationSerializer, DhcpReservationImportResultSerializer
 from ..serializers.dhcp6_reservation import check_row
-from .dhcp_reservation import TRUE
+from .dhcp_reservation import TRUE, csv_cell, csv_note
 from .zone import GRANT, need_grant
 
 COLUMNS = ['duid', 'ip', 'note', 'enabled']
@@ -48,7 +48,7 @@ def import_rows(text, replace, dry_run):
             d = {'duid': rest[0], 'ip': ip, 'note': rest[1], 'enabled': rest[2]}
         try:
             duid, ip = check_row(d.get('duid', ''), d.get('ip', ''))
-            rows.append((duid, ip, d.get('note', '')[:255], d.get('enabled', '').lower() in TRUE))
+            rows.append((duid, ip, csv_note(d.get('note', '')), d.get('enabled', '').lower() in TRUE))
         except ValueError as e:
             errors.append(f'line {n} ({d.get("duid", "")} {d.get("ip", "")}): {e}')
     seen_duid, seen_ip = {}, {}
@@ -97,7 +97,7 @@ class Dhcp6ReservationViewSet(viewsets.ModelViewSet):
         w = csv.writer(out, lineterminator='\n')
         w.writerow(COLUMNS)
         for r in Dhcp6Reservation.objects.all():
-            w.writerow([r.duid, r.ip, r.note, 'true' if r.enabled else 'false'])
+            w.writerow([r.duid, r.ip, csv_cell(r.note), 'true' if r.enabled else 'false'])
         res = HttpResponse(out.getvalue(), content_type='text/csv; charset=utf-8')
         res['Content-Disposition'] = 'attachment; filename="dhcp6-reservations.csv"'
         return res

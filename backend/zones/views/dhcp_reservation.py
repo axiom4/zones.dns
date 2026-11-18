@@ -22,6 +22,17 @@ HEADER_NAMES = set(NAMES)
 MAC_LIKE = re.compile(r'[0-9a-fA-F]{2}([:-]?[0-9a-fA-F]{2}){5}|[0-9a-fA-F]{4}(\.[0-9a-fA-F]{4}){2}')
 IP_LIKE = re.compile(r'\d{1,3}(\.\d{1,3}){3}')
 TRUE = ('1', 'true', 'yes', 'on', '')
+FORMULA = ('=', '+', '-', '@', '\t', '\r')  # a spreadsheet runs a cell that starts so (CSV injection)
+
+
+def csv_cell(v):
+    """A free-text value for the CSV export: a leading quote keeps a spreadsheet from reading it as a formula."""
+    return "'" + v if v.startswith(FORMULA) else v
+
+
+def csv_note(v):
+    """A note read back from the CSV: the quote csv_cell added is dropped."""
+    return (v[1:] if v[:1] == "'" and v[1:].startswith(FORMULA) else v)[:255]
 
 
 def import_rows(text, replace, dry_run):
@@ -45,7 +56,7 @@ def import_rows(text, replace, dry_run):
             d = {'mac': mac, 'ip': ip, 'hostname': rest[0], 'note': rest[1], 'enabled': rest[2]}
         try:
             mac, ip, host = check_row(d.get('mac', ''), d.get('ip', ''), d.get('hostname', '').split('.')[0])  # nas.lan -> nas
-            rows.append((mac, ip, host, d.get('note', '')[:255], d.get('enabled', '').lower() in TRUE))
+            rows.append((mac, ip, host, csv_note(d.get('note', '')), d.get('enabled', '').lower() in TRUE))
         except ValueError as e:
             errors.append(f'line {n} ({d.get("mac", "")} {d.get("ip", "")}): {e}')
     seen_mac, seen_ip = {}, {}
@@ -95,7 +106,7 @@ class DhcpReservationViewSet(viewsets.ModelViewSet):
         w = csv.writer(out, lineterminator='\n')
         w.writerow(COLUMNS)
         for r in DhcpReservation.objects.all():
-            w.writerow([r.mac, r.ip, r.hostname, r.note, 'true' if r.enabled else 'false'])
+            w.writerow([r.mac, r.ip, r.hostname, csv_cell(r.note), 'true' if r.enabled else 'false'])
         res = HttpResponse(out.getvalue(), content_type='text/csv; charset=utf-8')
         res['Content-Disposition'] = 'attachment; filename="dhcp-reservations.csv"'
         return res

@@ -20,7 +20,7 @@ from django.conf import settings
 from django.utils import timezone
 
 from ..dnsd import ddr
-from ..models import DataVersion, DhcpLease, DhcpReservation, Setting
+from ..models import DataVersion, Dhcp6Lease, DhcpLease, DhcpReservation, Setting
 from ..proxy import pac
 
 MAGIC = b'\x63\x82\x53\x63'
@@ -335,6 +335,22 @@ def ping(ip):
 RESERVED_NAMES = {'wpad', 'isatap', 'localhost', 'local', 'broadcasthost', 'ip6-localhost', 'ip6-loopback'}
 
 
+def name_taken(host, now, mac='', client=None, duid=None):
+    """Reserved, or the name of another client: a live DHCPv4 or DHCPv6 lease or an enabled reservation of another MAC (the first one keeps it: no taking over "nas")."""
+    if host in RESERVED_NAMES:
+        return True
+    v4 = DhcpLease.objects.filter(hostname=host, expires__gt=now)
+    v6 = Dhcp6Lease.objects.filter(hostname=host, expires__gt=now)
+    res = DhcpReservation.objects.filter(enabled=True, hostname=host)
+    if client is not None:
+        v4 = v4.exclude(client=client)
+    if duid is not None:
+        v6 = v6.exclude(duid=duid)
+    if mac:  # the same network card over the other family, or with another client identifier
+        v4, v6, res = v4.exclude(mac=mac), v6.exclude(mac=mac), res.exclude(mac=mac)
+    return v4.exists() or v6.exists() or res.exists()
+
+
 def clean_hostname(raw):
     """A client's host name as one DNS label: lower case letters, digits and "-" (it will be answered by the DNS server)."""
     return re.sub(r'[^a-z0-9-]', '', raw.decode(errors='ignore').lower().split('.')[0]).strip('-')[:63]
@@ -585,8 +601,8 @@ class Server:
         DhcpLease.objects.filter(ip=str(ip)).exclude(client=key).delete()  # an expired lease of someone else (_ok said it is free)
         cur = DhcpLease.objects.filter(client=key, ip=str(ip), expires__gt=now).first()
         expires = max(cur.expires, now + timedelta(seconds=seconds)) if cur else now + timedelta(seconds=seconds)
-        if host and (host in RESERVED_NAMES or DhcpLease.objects.filter(hostname=host, expires__gt=now).exclude(client=key).exists()):
-            host = ''  # reserved, or the name of another client with a live lease: the first one keeps it (no taking over "nas" from the LAN)
+        if host and name_taken(host, now, mac=mac, client=key):
+            host = ''  # reserved, or the name of another client: the first one keeps it (no taking over "nas" from the LAN)
         hostname = (cur.hostname if cur and seconds <= OFFER_HOLD and cur.expires > expires - timedelta(seconds=1) else host) or (cur.hostname if cur else '')
         DhcpLease.objects.update_or_create(client=key, defaults={'ip': str(ip), 'mac': mac, 'hostname': hostname, 'expires': expires})
 

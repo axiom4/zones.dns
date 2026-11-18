@@ -34,8 +34,9 @@ def check_row(mac, ip, hostname):
             cfgs = dhcp.scopes(s)
         except ValueError:
             cfgs = []  # settings in error: the server will not start anyway, do not block the table too
-        if cfgs and not any(addr in c.network and addr != c.server for c in cfgs):
-            raise ValueError(f'{addr} is not in a network served by DHCP ({", ".join(str(c.network) for c in cfgs)}) or is the address of the server.')
+        edge = lambda c: c.network.prefixlen < 31 and addr in (c.network.network_address, c.network.broadcast_address)
+        if cfgs and not any(addr in c.network and addr != c.server and not edge(c) for c in cfgs):
+            raise ValueError(f'{addr} is not in a network served by DHCP ({", ".join(str(c.network) for c in cfgs)}), or is the address of the server, of the network or its broadcast.')
     return mac, str(addr), hostname
 
 
