@@ -60,7 +60,7 @@
 </div>
 
 @if (live && busy()) {
-  <div class="livepill">
+  <div class="livepill" (pointerenter)="point(true, $event)" (pointerleave)="point(false, $event)">
     @if (fresh()) {
       <button class="ghost" (click)="showFresh()">{{ fresh() < 0 ? 'Show the latest activity' : fresh() >= PAGE ? 'Show ' + PAGE + '+ new queries' : 'Show ' + fresh() + (fresh() === 1 ? ' new query' : ' new queries') }}</button>
     } @else { <span class="soft">Live updates wait while you work in the list</span> }

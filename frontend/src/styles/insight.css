@@ -57,8 +57,8 @@ app-stats-page .row.answer .c { white-space: nowrap; }
 app-logs-page .records.logs li > .why { order: 99; flex: 1 1 100%; color: var(--muted); font-size: 13px; overflow-wrap: anywhere; padding-left: 8.5rem; margin-top: -.25rem; }
 app-logs-page .records.logs li.subrow > .why { padding-left: 8.5rem; }
 @media (max-width: 1100px) { app-logs-page .records.logs li > .why, app-logs-page .records.logs li.subrow > .why { padding-left: 0; margin-top: 0; order: 6; } }  /* above the actions */
-app-logs-page .livepill { position: sticky; top: .5rem; z-index: 5; display: flex; justify-content: center; margin: -.25rem 0 .6rem; pointer-events: none; }
-app-logs-page .livepill > * { pointer-events: auto; }
+app-logs-page .livepill { position: sticky; top: .5rem; z-index: 5; display: flex; justify-content: center; height: 0; margin: 0; pointer-events: none; }
+app-logs-page .livepill > * { pointer-events: auto; margin-top: -1.1rem; } /* zero height: showing the pill must not move the list under the cursor (it made the pill flicker) */
 app-logs-page .livepill button.ghost { background: var(--raised); border-color: var(--brand); color: var(--brand); border-radius: 999px; box-shadow: var(--shadow-pop); }
 app-logs-page .livepill .soft { background: var(--surface); border: 1px solid var(--line-soft); border-radius: 999px; padding: .2rem .8rem; font-size: 13px; }
 @media (max-width: 700px) { app-logs-page .livepill { top: auto; bottom: 5rem; position: sticky; } }
