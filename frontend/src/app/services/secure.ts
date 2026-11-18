@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { LoginKey } from './login-key';
-import { LoginError, seal } from '../lib/login-crypto';
+import { LoginError } from '../lib/login-crypto';
 
 /** Sends a request as one packet encrypted to the server's public key (fetched fresh each time) and reads the encrypted reply. */
 @Injectable({ providedIn: 'root' })
@@ -11,7 +11,8 @@ export class Secure {
   async exchange<T = Record<string, any>>(send: (packet: string) => Promise<{ p: string }>, fields: object, retry = true): Promise<T | null> {
     const key = await this.loginKey.fetch();
     if (!key) return null;
-    const { packet, open } = seal(key, fields);
+    const [{ seal }, { default: nacl }] = await Promise.all([import('../lib/login-crypto'), import('tweetnacl')]); // loaded when the first sign-in needs them, not with the first page
+    const { packet, open } = seal(nacl, key, fields);
     let reply: string;
     try {
       reply = (await send(packet)).p;

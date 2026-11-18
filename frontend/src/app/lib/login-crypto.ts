@@ -1,4 +1,4 @@
-import nacl from 'tweetnacl';
+import type nacl from 'tweetnacl'; // a type only: the library itself is handed in by the caller, loaded when the first sign-in needs it (see services/secure.ts)
 
 /** Shown to the user as-is. */
 export class LoginError extends Error {}
@@ -11,7 +11,8 @@ const unb64 = (s: string) => Uint8Array.from(atob(s), c => c.charCodeAt(0));
  * packet = ephemeral public key (32) | nonce (24) | box(JSON {...fields, t, n}); a fresh key pair is used for every login,
  * and the server answers with a box for that same ephemeral key, so only this call can read the reply.
  */
-export function seal(serverPublicKeyB64: string, fields: object) {
+export function seal(lib: typeof nacl, serverPublicKeyB64: string, fields: object) {
+  const nacl = lib;
   const serverPk = unb64(serverPublicKeyB64);
   const eph = nacl.box.keyPair();
   const nonce = nacl.randomBytes(24);

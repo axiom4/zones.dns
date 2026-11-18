@@ -37,7 +37,7 @@ test('flag and countryName: special codes', () => {
 
 test('seal: the server can read the packet and only the bound reply is accepted', () => {
   const server = nacl.box.keyPair();
-  const { packet, open } = seal(b64(server.publicKey), { u: 'admin', p: 'secret' });
+  const { packet, open } = seal(nacl, b64(server.publicKey), { u: 'admin', p: 'secret' });
   const raw = Buffer.from(packet, 'base64');
   const plain = nacl.box.open(raw.subarray(56), raw.subarray(32, 56), raw.subarray(0, 32), server.secretKey);
   const body = JSON.parse(new TextDecoder().decode(plain!));
@@ -48,7 +48,7 @@ test('seal: the server can read the packet and only the bound reply is accepted'
     const box = nacl.box(new TextEncoder().encode(JSON.stringify(fields)), nonce, raw.subarray(0, 32), server.secretKey);
     return b64(new Uint8Array([...nonce, ...box]));
   };
-  const other = seal(b64(server.publicKey), {});
+  const other = seal(nacl, b64(server.publicKey), {});
   assert.throws(() => other.open(reply({ token: 'x', n: body.n })), LoginError); // a reply for another request
   assert.deepEqual(open(reply({ token: 'x', n: body.n })), { token: 'x', n: body.n });
   assert.throws(() => open(reply({ token: 'x', n: body.n })), LoginError); // the key is wiped: a reply is read once
