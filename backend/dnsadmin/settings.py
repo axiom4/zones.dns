@@ -179,6 +179,9 @@ REST_FRAMEWORK = {
     'DEFAULT_PARSER_CLASSES': ['rest_framework.parsers.JSONParser'],
     'DEFAULT_RENDERER_CLASSES': ['rest_framework.renderers.JSONRenderer'],
     'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+    # per user: a runaway script or a stolen token cannot hammer the database; the GUI (live log, pulse) stays far below it
+    'DEFAULT_THROTTLE_CLASSES': ['rest_framework.throttling.UserRateThrottle'],
+    'DEFAULT_THROTTLE_RATES': {'user': os.environ.get('API_RATE', '1200/min')},
 }
 
 SPECTACULAR_SETTINGS = {

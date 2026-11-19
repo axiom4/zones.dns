@@ -572,7 +572,6 @@ Watch `SELECT count(*) FROM pg_stat_activity` against `max_connections`, and the
 
 - The MITM Root CA (`PROXY_HTTPS_MITM`) has no NameConstraints: whoever gets its key can impersonate any site to every device that enrolled it. Its key lives in the database, encrypted with a password derived from `SECRET_KEY`; rotating `SECRET_KEY` needs the CA to be created again (and re-enrolled on the devices).
 - `Record` has no database `UniqueConstraint` (an index over name and value is too long for MySQL/MariaDB): writers of one zone take its row lock, so concurrent writes make no duplicates; a write that bypasses the app (raw SQL, the Django shell with `bulk_create`) can.
-- No DRF throttling in the API (nginx limits only sign-in and second factor).
 - No pagination: the frontend expects plain arrays.
 - The nginx limits for DoH/DoT are estimates, not measured.
 

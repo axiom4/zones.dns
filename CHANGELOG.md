@@ -1,6 +1,8 @@
 # Changelog
 
 ## Unreleased
+- **Added**
+  - API throttling: `API_RATE` (default `1200/min`) per user, per address when not signed in; a client above it gets 429. The GUI uses far fewer requests.
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**
@@ -14,6 +16,7 @@
 
 ## 1.5.0 — 2026-11-18
 - **Upgrading from 1.1.0:** run `manage.py migrate` (0032 to 0040: new tables `DhcpReservation`, `Dhcp6Reservation`, `MacVendor` and `ProxyLog`; 0034 also copies the `DHCP*` settings of `.env` into the database, once; 0039 adds an index on `StatCount.hour`; 0040 adds the `timeout` outcome), then `manage.py update_oui` once to fill the vendor table (about 52,000 blocks). Restart `rundns`, `rundhcp`, `runproxy` and gunicorn and publish the new GUI build. Before restarting, check these behaviour changes (see Security): with `DNS_PROXY_PROTOCOL=true` every TCP connection from this machine to the daemon must start with a PROXY line; list sources must be `https://` on public addresses; `BEHIND_PROXY=true` believes `X-Real-IP` only from `TRUSTED_PROXIES` (default loopback); the proxy log window `hours=0` means 720; nested-quantifier regex rules are skipped. Copy `deploy/nginx/dns.example.lan` and `dns-dot.conf` again (new rate limits). `INSTALL.md` has a second way to run the daemons (systemd units with ambient capabilities instead of `setcap` on the Python, section 8), a Tuning section, and the cron jobs in one place.
+- **Added**
   - `deploy/cron/dns-postgres-maintenance` (`/etc/cron.d`): a weekly `vacuumdb --analyze` and a monthly `reindexdb --concurrently` of the blocklist table, as the `postgres` user, never together (`flock`), logged to the journal; documented in `INSTALL.md`.
   - systemd units (`deploy/systemd/`) tested on a live host with `systemd-analyze verify` and a real cut-over from supervisor: `Restart=always` (like supervisor's `autorestart`: also after a clean exit or a signal), `LimitNOFILE=65536`, a 20 s stop timeout for the DNS daemon, start after PostgreSQL / MariaDB / Redis, `dns-web` with 16 threads and its control socket in `/run/dns-web` (a read-only `/opt` would have broken it); the exposure score of `systemd-analyze security` is 3.4 to 3.6. `INSTALL.md` section 8 explains both ways to run the daemons side by side (systemd, recommended, and supervisor, which stays supported) with a comparison table, and has the steps to move an installation from supervisor and back.
   - `INSTALL.md`: a *Tuning* section (kernel buffers, open files, PostgreSQL, Redis, nginx, gunicorn, with sizes for a 4 core / 8 GB host and how to check them) with the files ready to copy in `deploy/tuning/`, and the Redis example uses `maxmemory-policy volatile-lru`: with `allkeys-lru` a lockout counter or the change counter could be evicted.
