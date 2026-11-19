@@ -60,12 +60,11 @@
           <li>
             <span class="new">NEW</span>
             <span class="dn mono">{{ f.g.name }}</span>
+            @if (f.g.blocked) { <span class="blk-tag">(blocked)</span> }
             <span class="soft">{{ f.g.count | number }}× · {{ f.g.last ? (f.g.last | date: 'short') : '' }}</span>
             @if (done().has(f.g.name)) { <span class="soft">Done</span> }
-            @else {
-              <button class="mini danger-o" (click)="block(f.g.name)">Block</button>
-              <button class="mini" (click)="allow(f.g.name)">Allow</button>
-            }
+            @else if (f.g.blocked) { <button class="mini" (click)="allow(f.g.name)">Allow</button> }
+            @else { <button class="mini danger-o" (click)="block(f.g.name)">Block</button> }
           </li>
         }
       </ul>

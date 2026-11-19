@@ -49,3 +49,4 @@ ul.plain li { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem .8
   .cell { height: 2.2rem; } .week .cell { height: 1.1rem; }
   .ribbon:not(.week) { grid-template-columns: repeat(12, minmax(0, 1fr)); }
 }
+.blk-tag { color: var(--danger); font-weight: 600; }
