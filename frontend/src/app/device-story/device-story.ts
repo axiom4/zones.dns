@@ -160,11 +160,11 @@ export class DeviceStoryPage implements OnDestroy {
     } catch (e) { if (g === this.gen) this.ribbon.set({ loading: false, error: fail(e), data: { cells, total: 0, shown: 0 } }); }
   }
 
-  /** The domains the filter stopped for this device in the period, most asked first (50 at most). */
+  /** The domains the filter stopped for this device in the period, alphabetical (the 50 most asked). */
   private async loadBlocked(g: number) {
     try {
       const r = await this.api.invoke(logsGroupedList, { client: this.ip(), hours: this.range(), by: 'domain', outcome: 'blocked', ordering: 'count', limit: 50 });
-      if (g === this.gen) this.blocked.set({ loading: false, error: '', data: r.results });
+      if (g === this.gen) this.blocked.set({ loading: false, error: '', data: [...r.results].sort((a, b) => a.name.localeCompare(b.name)) });
     } catch (e) { if (g === this.gen) this.blocked.set({ loading: false, error: fail(e), data: [] }); }
   }
 
@@ -207,7 +207,7 @@ export class DeviceStoryPage implements OnDestroy {
       if (g !== this.gen) return;
       const before = new Map(week.results.map(w => [w.name, w.count]));
       // a domain missing from the (capped) week list cannot be judged: not flagged
-      const data = day.results.filter(d => before.has(d.name) && before.get(d.name) === d.count).map(g => ({ g })).sort((a, b) => b.g.count - a.g.count);
+      const data = day.results.filter(d => before.has(d.name) && before.get(d.name) === d.count).map(g => ({ g })).sort((a, b) => a.g.name.localeCompare(b.g.name));
       this.fresh.set({ loading: false, error: '', data });
     } catch (e) { if (g === this.gen) this.fresh.set({ loading: false, error: fail(e), data: [] }); }
   }
