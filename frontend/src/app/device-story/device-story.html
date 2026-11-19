@@ -38,13 +38,13 @@
            (keydown)="key($event)" (mouseleave)="sel.set(-1)" (blur)="sel.set(-1)">
         @for (c of ribbon().data.cells; track c.start; let i = $index) {
           <button type="button" class="cell" tabindex="-1" [class.sel]="i === sel()" [class.zero]="!c.count" [attr.aria-label]="label(c)" [attr.title]="label(c)"
-                  [style.--a.%]="alpha(c)" [style.--b.%]="c.count ? c.blocked * 100 / c.count : 0" (mouseenter)="sel.set(i)" (focus)="sel.set(i)" (click)="sel.set(i)"></button>
+                  [style.--a.%]="alpha(c)" [style.--b.%]="c.count ? c.blocked * 100 / c.count : 0" (mouseenter)="sel.set(i)" (focus)="sel.set(i)" (click)="open(c)" [style.cursor]="c.count ? 'pointer' : 'default'"></button>
         }
       </div>
       <p class="readout" aria-live="polite">
         @if (selCell(); as c) { <b>{{ label(c) }}</b> }
         @else if (!ribbon().data.total) { No queries in this period. }
-        @else { <span>{{ ribbon().data.total | number }} queries{{ ribbon().data.shown < ribbon().data.total ? ' (the newest ' + (ribbon().data.shown | number) + ' are drawn)' : '' }}. Hover or focus an hour for details.</span> }
+        @else { <span>{{ ribbon().data.total | number }} queries{{ ribbon().data.shown < ribbon().data.total ? ' (the newest ' + (ribbon().data.shown | number) + ' are drawn)' : '' }}. Hover or focus an hour for details, click it to see its queries.</span> }
       </p>
     }
   </section>
@@ -61,6 +61,7 @@
             <span class="new">NEW</span>
             <span class="dn mono">{{ f.g.name }}@if (f.g.blocked) { <span class="blk-tag"> (blocked)</span> }</span>
             <span class="soft">{{ f.g.count | number }}× · {{ f.g.last ? (f.g.last | date: 'short') : '' }}</span>
+            <a class="mini" routerLink="/logs/dns" [queryParams]="logParams(f.g.name, false)" [attr.aria-label]="'Log of ' + f.g.name">Log</a>
             @if (done().has(f.g.name)) { <span class="soft">Done</span> }
             @else if (f.g.blocked) { <button class="mini" (click)="allow(f.g.name)">Allow</button> }
             @else { <button class="mini danger-o" (click)="block(f.g.name)">Block</button> }
@@ -81,6 +82,7 @@
           <li>
             <span class="dn mono">{{ b.name }}</span>
             <span class="soft">{{ b.count | number }}× · {{ b.last ? (b.last | date: 'short') : '' }}</span>
+            <a class="mini" routerLink="/logs/dns" [queryParams]="logParams(b.name, true)" [attr.aria-label]="'Log of ' + b.name">Log</a>
             @if (done().has(b.name)) { <span class="soft">Done</span> }
             @else { <button class="mini" (click)="allow(b.name)">Allow</button> }
           </li>

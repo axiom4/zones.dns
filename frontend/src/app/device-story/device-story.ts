@@ -11,7 +11,7 @@
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
 import { blockedCreate, dhcpLeasesList, geoIpsRetrieve, logsClientsList, logsGroupedList, logsHourlyList, logsResolvedList } from '../api/functions';
 import { DhcpLease, DhcpPingResult, QueryLogGroup } from '../api/models';
@@ -40,6 +40,7 @@ const isIp = (s: string) => /^[0-9.]+$/.test(s) || (s.includes(':') && /^[0-9a-f
 export class DeviceStoryPage implements OnDestroy {
   private api = inject(Api);
   private ping = inject(Ping);
+  private router = inject(Router);
   ui = inject(Ui);
   private gen = 0; // a newer load (route or range change, destroy) makes the older answers be dropped
   countryName = countryName; flag = flag;
@@ -224,6 +225,16 @@ export class DeviceStoryPage implements OnDestroy {
     const d = ({ ArrowRight: 1, ArrowLeft: -1, ArrowDown: w, ArrowUp: -w } as Record<string, number>)[e.key];
     if (d !== undefined) { e.preventDefault(); this.sel.set(Math.min(n - 1, Math.max(0, (s < 0 ? n - 1 : s + d)))); }
     else if (e.key === 'Escape') this.sel.set(-1);
+    else if (e.key === 'Enter' && this.selCell()) { e.preventDefault(); this.open(this.selCell()!); }
+  }
+  /** An hour with queries opens the DNS log of this device for that hour. */
+  open(c: Cell) {
+    if (!c.count) return;
+    this.router.navigate(['/logs/dns'], { queryParams: { client: this.ip(), since: new Date(c.start).toISOString(), until: new Date(c.start + HOUR).toISOString() } });
+  }
+  /** The DNS log of this device for a domain: the period of the list, and only the blocked queries when it is the blocked list. */
+  logParams(name: string, blocked: boolean) {
+    return { client: this.ip(), q: name, ...(blocked ? { outcome: 'blocked' } : {}), ...(this.range() === 168 ? { hours: 168 } : {}) };
   }
   alpha(c: Cell) { return c.count ? 12 + Math.round(88 * Math.sqrt(c.count / this.maxCount())) : 0; }
   label(c: Cell) {

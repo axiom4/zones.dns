@@ -3,6 +3,7 @@
 ## Unreleased
 - **Upgrading:** `GET /api/records/` answers `{count, next, previous, results}` (100 rows by default, `limit` up to 500, `offset`) instead of a plain array: scripts that read it must read `results` and follow `next`. It also takes `q` (words), `sort` and `desc`. Publish the new GUI build with the new backend.
 - **Added**
+  - *Device story*: a *Log* button on every domain of *Today vs usual* and *Blocked domains* opens the DNS log of the device filtered by that name (only the blocked queries from the blocked list). An hour of the *Activity* box that has queries is a link: it opens the log of the device for that hour (Enter does the same on the selected hour).
   - DNS log: `since` and `until` (ISO 8601 with offset) filter by time, in the API (`/api/logs/`, `grouped`, `hourly`) and in the page address; the page shows the range with a *Remove filter* button.
   - Zone page: the server searches, sorts and cuts the records into pages of 100, so a zone with tens of thousands of records opens at once; the search waits for a pause in the typing, and *Previous* / *Next* move between pages. A selection is of the page on screen. The command palette lists the first 500 records.
   - API throttling: `API_RATE` (default `1200/min`) per user, per address when not signed in; a client above it gets 429. The GUI uses far fewer requests.
