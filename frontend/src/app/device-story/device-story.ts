@@ -58,6 +58,7 @@ export class DeviceStoryPage implements OnDestroy {
   ribbon = signal<Part<{ cells: Cell[]; total: number; shown: number }>>(part({ cells: [], total: 0, shown: 0 }));
   tops = signal<Part<Dom[]>>(part([]));
   fresh = signal<Part<{ g: QueryLogGroup }[]>>(part([]));
+  blocked = signal<Part<QueryLogGroup[]>>(part([]));
   geo = signal<Part<Country[]>>(part([]));
   done = signal(new Set<string>()); // names blocked or allowed from this page
   sel = signal(-1);
@@ -133,8 +134,8 @@ export class DeviceStoryPage implements OnDestroy {
 
   /** Ribbon, top domains and countries follow the range. */
   private loadRange(g: number) {
-    this.ribbon.set(part({ cells: [], total: 0, shown: 0 })); this.tops.set(part([])); this.geo.set(part([]));
-    this.loadRibbon(g); this.loadTops(g);
+    this.ribbon.set(part({ cells: [], total: 0, shown: 0 })); this.tops.set(part([])); this.geo.set(part([])); this.blocked.set(part([]));
+    this.loadRibbon(g); this.loadTops(g); this.loadBlocked(g);
   }
 
   private async loadRibbon(g: number) {
@@ -157,6 +158,14 @@ export class DeviceStoryPage implements OnDestroy {
       }
       this.ribbon.set({ loading: false, error: '', data: { cells, total, shown } });
     } catch (e) { if (g === this.gen) this.ribbon.set({ loading: false, error: fail(e), data: { cells, total: 0, shown: 0 } }); }
+  }
+
+  /** The domains the filter stopped for this device in the period, most asked first (50 at most). */
+  private async loadBlocked(g: number) {
+    try {
+      const r = await this.api.invoke(logsGroupedList, { client: this.ip(), hours: this.range(), by: 'domain', outcome: 'blocked', ordering: 'count', limit: 50 });
+      if (g === this.gen) this.blocked.set({ loading: false, error: '', data: r.results });
+    } catch (e) { if (g === this.gen) this.blocked.set({ loading: false, error: fail(e), data: [] }); }
   }
 
   private async loadTops(g: number) {

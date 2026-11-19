@@ -72,6 +72,25 @@
     }
   </section>
 
+  <section class="panel" aria-labelledby="ds-blk">
+    <h3 id="ds-blk">Blocked domains <span class="legend">stopped for this device in the period</span></h3>
+    @if (blocked().error) { <p class="error" role="alert">{{ blocked().error }}</p> }
+    @else if (blocked().loading) { <div class="skel" aria-busy="true"><i></i><i></i></div> }
+    @else if (!blocked().data.length) { <p class="empty">Nothing was blocked for this device in this period.</p> }
+    @else {
+      <ul class="plain">
+        @for (b of blocked().data; track b.name) {
+          <li>
+            <span class="dn mono">{{ b.name }}</span>
+            <span class="soft">{{ b.count | number }}× · {{ b.last ? (b.last | date: 'short') : '' }}</span>
+            @if (done().has(b.name)) { <span class="soft">Done</span> }
+            @else { <button class="mini" (click)="allow(b.name)">Allow</button> }
+          </li>
+        }
+      </ul>
+    }
+  </section>
+
   <div class="two">
     <section class="panel" aria-labelledby="ds-top">
       <h3 id="ds-top">Top domains</h3>
