@@ -10,6 +10,7 @@
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**
+  - *Proxy*: a burst of requests to one HTTP/2 server (Instagram images, for example) failed with `502 Max outbound streams is 100, 100 open`; a request that finds the connection full now waits a moment and goes again.
   - *Statistics*: the caption "Queries per day" of the hidden table for screen readers showed under the chart; the table is now fully hidden.
   - *Device story*, Activity: the hours with queries were drawn transparent (the colour was computed with `calc(<percentage> * 1%)`, which the browser drops), so only the empty hours showed. The heat and the red blocked stripe are drawn again.
   - *Device story*, Activity: a busy device showed empty hours (only the newest 2000 queries were read, so the older hours stayed blank). The server now counts the queries per hour (`GET /api/logs/hourly/`, same filters as the log), so every hour of the period is drawn.

@@ -996,7 +996,7 @@ class Client:
                 finally:
                     await stream.aclose()
                 return
-            for attempt in (0, 1):
+            for attempt in range(4):
                 info.responded = False
                 try:
                     async with pool.stream(ex.method, url, headers=list(fwd.items()), content=req_body,
@@ -1004,6 +1004,11 @@ class Client:
                         info.responded = True
                         await self.relay(info, resp)
                     return
+                except httpcore.LocalProtocolError as e:
+                    # HTTP/2 connection with all its streams open (a burst): h2 refuses before sending a byte, so any request may wait a moment and go again
+                    if info.responded or attempt == 3 or 'Max outbound streams' not in str(e):
+                        raise
+                    await asyncio.sleep(0.1 * (attempt + 1))
                 except _RETRYABLE:
                     # a kept-alive connection the server had closed: once more on a new one, only for a request that may be sent twice
                     if info.responded or attempt or not idempotent:

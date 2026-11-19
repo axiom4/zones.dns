@@ -763,6 +763,46 @@ class NoPostRetryTests(TestCase):
         self.assertIn(b'502', resp.split(b'\r\n', 1)[0])
         self.assertEqual(posts, [b'abc'])  # once: a proxy must not repeat a POST (RFC 9110 9.2.2)
 
+    def test_a_full_http2_connection_makes_the_request_wait_not_fail(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+        from unittest import mock
+        import httpcore
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_POST(self):
+                body = self.rfile.read(int(self.headers['Content-Length']))
+                self.send_response(200)
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=False, PROXY_BLOCK_POPUPS=False, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=None,
+        )
+        real, calls = httpcore.AsyncConnectionPool.stream, []
+
+        def full_twice(self, *a, **k):
+            calls.append(1)
+            if len(calls) < 3:
+                raise httpcore.LocalProtocolError('Max outbound streams is 100, 100 open')  # h2 refuses before sending anything
+            return real(self, *a, **k)
+
+        with mock.patch.object(httpcore.AsyncConnectionPool, 'stream', full_twice):
+            resp = _run_proxy_session(f'POST http://127.0.0.1:{srv.server_port}/x HTTP/1.1\r\nHost: x\r\nContent-Length: 3\r\nConnection: close\r\n\r\nabc'.encode(), ns)
+        self.assertIn(b'200', resp.split(b'\r\n', 1)[0])
+        self.assertEqual(len(calls), 3)
+
     def test_a_real_html_page_is_filtered_and_framed(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         page = b'<html><head><title>t</title></head><body>' + b'x' * 5000 + b'</body></html>'
