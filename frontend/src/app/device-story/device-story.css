@@ -14,13 +14,14 @@
 .lede { font-size: 1.05rem; line-height: 1.6; max-width: 70ch; }
 .empty { color: var(--muted); border: 2px dashed var(--line); border-radius: var(--radius-s); padding: 1rem; text-align: center; }
 
-/* ribbon: heat = queries, red foot = blocked share (height and stripe, not colour alone) */
+/* ribbon: --a and --b are percentages already ([style.--a.%]); calc(<percentage> * 1%) is invalid and left the cells transparent.
+   heat = queries, red foot = blocked share (height and stripe, not colour alone) */
 .ribbon { display: grid; grid-template-columns: repeat(24, minmax(0, 1fr)); gap: 3px; border-radius: var(--radius-s); }
 .ribbon:focus-visible { outline: 2px solid var(--focus); outline-offset: 4px; }
 .cell { position: relative; height: 3rem; padding: 0; border: 0; border-radius: 4px; overflow: hidden; cursor: crosshair;
-  background: color-mix(in srgb, var(--brand) calc(var(--a) * 1%), var(--sunk)); }
+  background: color-mix(in srgb, var(--brand) var(--a), var(--sunk)); }
 .week .cell { height: 1.5rem; }
-.cell::after { content: ''; position: absolute; inset: auto 0 0 0; height: calc(var(--b) * 1%); background: repeating-linear-gradient(135deg, var(--danger) 0 3px, color-mix(in srgb, var(--danger) 55%, transparent) 3px 5px); }
+.cell::after { content: ''; position: absolute; inset: auto 0 0 0; height: var(--b); background: repeating-linear-gradient(135deg, var(--danger) 0 3px, color-mix(in srgb, var(--danger) 55%, transparent) 3px 5px); }
 .cell.zero { background: var(--sunk); opacity: .6; }
 .cell.sel { outline: 2px solid var(--ink); outline-offset: 1px; z-index: 1; }
 .readout { min-height: 2.2rem; margin: .8rem 0 0; padding-top: .6rem; border-top: 1px solid var(--line-soft); font-size: 14px; }
