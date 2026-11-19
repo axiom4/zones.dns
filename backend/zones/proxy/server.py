@@ -1353,8 +1353,9 @@ def serve_connection(sock, client_address, server):
 class ProxyServer:
     """The listening proxy: `await start()`, then it serves on the running loop until `close()`."""
 
-    def __init__(self, server_address, settings_getter=None, allow_loopback=False, upstream_ssl_context=None, log=None):
+    def __init__(self, server_address, settings_getter=None, allow_loopback=False, upstream_ssl_context=None, log=None, reuse_port=False):
         self.server_address = server_address
+        self.reuse_port = reuse_port  # several worker processes listen on one port (SO_REUSEPORT): the kernel spreads the connections
         self.settings_getter = settings_getter or cached_proxy_settings
         self.allow_loopback = allow_loopback
         self.upstream_ssl_context = upstream_ssl_context
@@ -1365,7 +1366,7 @@ class ProxyServer:
 
     async def start(self):
         host, port = self.server_address
-        self._srv = await asyncio.start_server(self._accept, host, port, backlog=1024, reuse_address=True, limit=65536)
+        self._srv = await asyncio.start_server(self._accept, host, port, backlog=1024, reuse_address=True, reuse_port=self.reuse_port or None, limit=65536)
         return self
 
     async def _accept(self, reader, writer):

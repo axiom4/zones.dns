@@ -374,6 +374,8 @@ Settings that send the clients' traffic elsewhere ask for the second factor when
   - **HTTPS modes:** With `PROXY_HTTPS_MITM=false` (default), HTTPS connections use standard `CONNECT` and block ad/popup domains without needing any certificate on clients. With `PROXY_HTTPS_MITM=true`, the proxy intercepts HTTPS traffic using a local Proxy Root CA (downloadable from **DHCP > Proxy** or `http://<server>:8080/ca.crt` / `/proxy-ca.crt`) to filter HTML and block popups inside HTTPS pages as well.
   - **External ad-block lists:** in *Proxy > Settings* add lists as `name=https://…` (e.g. `easylist=https://easylist.to/easylist/easylist.txt`). `manage.py import_blocklist` downloads them together with the blacklists (cron), `runproxy` also every day, and *Sync now* does it at once. Only domain rules, exceptions and element-hiding rules are applied; the rules live in the database, so a list that cannot be downloaded keeps its last good copy.
 
+`runproxy` starts `PROXY_WORKERS` processes (default: the number of cores, at most 4) that share the port, so a busy proxy uses more than one core; a connection stays on one process. The first one also does the hourly work and the heartbeat. `PROXY_WORKERS=1` runs a single process. Each process keeps 3 database connections, and the limit of connections per client (`PER_CLIENT_MAX`) is counted per process.
+
 systemd: `sudo systemctl enable --now dns-proxy` (set `PROXY_ADDRESS=<LAN IP>` in `.env`, or add `--address <LAN IP>` to `ExecStart` in the unit). Supervisor: add to `/etc/supervisor/conf.d/dns.conf`:
 
 ```ini

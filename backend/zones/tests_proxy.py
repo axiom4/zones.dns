@@ -735,6 +735,48 @@ class RfcAndSecurityTests(TestCase):
             self.assertEqual(self.client.get('/wpad.dat', HTTP_HOST='wpad.example').status_code, 200)  # OS WPAD clients: plain http
 
 
+class ProxyWorkersTests(TestCase):
+    def test_workers_listen_on_one_port(self):
+        import asyncio
+        from .proxy.server import ProxyServer
+
+        async def run():
+            a = await ProxyServer(('127.0.0.1', 0), reuse_port=True).start()
+            port = a._srv.sockets[0].getsockname()[1]
+            b = await ProxyServer(('127.0.0.1', port), reuse_port=True).start()  # the second worker binds the same port
+            a.close()
+            b.close()
+        asyncio.run(run())
+
+    def test_the_supervisor_starts_a_crashed_worker_again_and_stops_with_the_first_clean_exit(self):
+        from unittest import mock
+        from .management.commands import runproxy
+
+        class Proc:
+            def __init__(self, rcs):
+                self.rcs, self.terminated = list(rcs), False
+
+            def poll(self):
+                return self.rcs.pop(0) if len(self.rcs) > 1 else self.rcs[0]
+
+            def terminate(self):
+                self.terminated = True
+
+            def wait(self, timeout=None):
+                pass
+        procs = [Proc([None]), Proc([1]), Proc([None, 0]), Proc([None])]  # worker 1 crashes, comes back, and then exits with 0
+        cmd = runproxy.Command()
+        with mock.patch.object(runproxy.subprocess, 'Popen', side_effect=procs) as popen, \
+                mock.patch.object(runproxy.signal, 'signal'), mock.patch.object(runproxy.time, 'sleep'), \
+                mock.patch.object(runproxy.sys, 'argv', ['manage.py', 'runproxy']):
+            with self.assertRaises(SystemExit) as stop:
+                cmd.supervise(2)
+        self.assertEqual(stop.exception.code, 0)
+        self.assertEqual(popen.call_count, 3)  # two workers and one start again
+        self.assertEqual(popen.call_args_list[1].args[0][-2:], ['--worker', '1'])
+        self.assertTrue(procs[0].terminated)  # the others stop with it
+
+
 class NoPostRetryTests(TestCase):
     def test_a_post_is_never_sent_twice(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer

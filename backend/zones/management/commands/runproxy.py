@@ -1,7 +1,10 @@
+import argparse
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 import os
+import signal
+import subprocess
 import sys
 import threading
 import time
@@ -31,8 +34,9 @@ class Command(BaseCommand):
     def add_arguments(self, p):
         p.add_argument('--address', default='', help='bind to this address (default: PROXY_ADDRESS or 0.0.0.0)')
         p.add_argument('--port', type=int, default=0, help='bind to this TCP port (default: PROXY_PORT or 8080)')
+        p.add_argument('--worker', type=int, default=None, help=argparse.SUPPRESS)  # set by the supervisor on the processes it starts
 
-    def handle(self, *a, address, port, **o):
+    def handle(self, *a, address, port, worker, **o):
         stamp_output(self)
         s = cached_proxy_settings(settings, force=True)
         if not s.PROXY:
@@ -47,31 +51,73 @@ class Command(BaseCommand):
         if not 1 <= bind_port <= 65535:
             raise CommandError(f'Invalid proxy port {bind_port} (must be 1-65535).')
         if s.PROXY_HTTPS_MITM:
-            pfilter.run_on_db_pool(ca.ensure_ca)
+            pfilter.run_on_db_pool(ca.ensure_ca)  # before the workers start: two of them must not each make a Root CA
+        if worker is None and settings.PROXY_WORKERS > 1:
+            connections.close_all()
+            return self.supervise(settings.PROXY_WORKERS)
         writer = ProxyLogWriter()
         writer.start()
         try:
-            asyncio.run(self.serve(bind_addr, bind_port, s, writer))
+            asyncio.run(self.serve(bind_addr, bind_port, s, writer, shared=worker is not None, primary=not worker))
         finally:
             writer.stop()
 
-    async def serve(self, bind_addr, bind_port, s, writer):
+    def supervise(self, n):
+        """Start `n` worker processes (this command with --worker i) and keep them running. No database, no sockets here: only the processes.
+        A worker that exits with 0 was told by the settings to stop (the proxy is off): the others stop too."""
+        stopping = []
+        signal.signal(signal.SIGTERM, lambda *_: stopping.append(1))
+        signal.signal(signal.SIGINT, lambda *_: stopping.append(1))
+
+        def spawn(i):
+            return subprocess.Popen([sys.executable, *sys.argv, '--worker', str(i)])
+        procs = {i: spawn(i) for i in range(n)}
+        started = {i: time.monotonic() for i in procs}
+        self.stdout.write(f'Proxy: {n} worker processes share the port (PROXY_WORKERS).')
+        self.stdout.flush()
+        while not stopping:
+            time.sleep(0.5)
+            for i, p in procs.items():
+                rc = p.poll()
+                if rc is None:
+                    continue
+                if rc == 0:
+                    stopping.append(1)
+                    break
+                self.stderr.write(f'Proxy: worker {i} exited with {rc}: starting it again.')
+                if time.monotonic() - started[i] < 5:
+                    time.sleep(2)  # a worker that dies at once (port in use, bad config) must not spin
+                procs[i], started[i] = spawn(i), time.monotonic()
+        for p in procs.values():
+            if p.poll() is None:
+                p.terminate()
+        for p in procs.values():
+            try:
+                p.wait(10)
+            except subprocess.TimeoutExpired:
+                p.kill()
+        raise SystemExit(0)
+
+    async def serve(self, bind_addr, bind_port, s, writer, shared=False, primary=True):
+        """`shared`: one of several workers on the port. `primary`: the one that also does the hourly work (rule lists, log purge) and the heartbeat."""
         loop = asyncio.get_running_loop()
         loop.set_default_executor(ThreadPoolExecutor(max_workers=8, thread_name_prefix='proxy-misc'))
         try:
-            srv = await ProxyServer((bind_addr, bind_port), settings_getter=cached_proxy_settings, log=writer).start()
+            srv = await ProxyServer((bind_addr, bind_port), settings_getter=cached_proxy_settings, log=writer, reuse_port=shared).start()
         except OSError as e:
             raise CommandError(f'Cannot bind TCP {bind_addr}:{bind_port} ({e}).')
         await asyncio.to_thread(pfilter.run_on_db_pool, resolver._snapshot)
         self.snap = {k: getattr(s, k) for k in BIND_KEYS}
         self.seen = await asyncio.to_thread(DataVersion.version)
         await asyncio.to_thread(connections.close_all)
-        heartbeat.start('proxy', run=pfilter.run_on_db_pool)  # the GUI's status line; on the pool: no database connection of its own
+        if primary:
+            heartbeat.start('proxy', run=pfilter.run_on_db_pool)  # the GUI's status line; on the pool: no database connection of its own
         self.stdout.write(
             f'Proxy listening on {bind_addr}:{bind_port} '
             f'(ads={"on" if s.PROXY_BLOCK_ADS else "off"}, '
             f'popups={"on" if s.PROXY_BLOCK_POPUPS else "off"}, '
-            f'https={"MITM" if s.PROXY_HTTPS_MITM else "CONNECT"}, asyncio, HTTP/2)'
+            f'https={"MITM" if s.PROXY_HTTPS_MITM else "CONNECT"}, asyncio, HTTP/2'
+            f'{", one of several workers" if shared else ""})'
         )
         self.stdout.flush()
         last_purge = 0.0
@@ -93,7 +139,7 @@ class Command(BaseCommand):
                 await asyncio.to_thread(connections.close_all)  # Django refuses database calls on the event loop's thread
                 os.execv(sys.executable, [sys.executable] + sys.argv)
             now = time.monotonic()
-            if now - last_purge >= 3600.0:
+            if primary and now - last_purge >= 3600.0:  # once for all the workers
                 last_purge = now
                 threading.Thread(target=self.sync_rules, daemon=True).start()  # a download takes seconds: not on the event loop
                 try:

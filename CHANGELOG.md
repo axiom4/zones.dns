@@ -7,6 +7,7 @@
   - DNS log: `since` and `until` (ISO 8601 with offset) filter by time, in the API (`/api/logs/`, `grouped`, `hourly`) and in the page address; the page shows the range with a *Remove filter* button.
   - Zone page: the server searches, sorts and cuts the records into pages of 100, so a zone with tens of thousands of records opens at once; the search waits for a pause in the typing, and *Previous* / *Next* move between pages. A selection is of the page on screen. The command palette lists the first 500 records.
   - API throttling: `API_RATE` (default `1200/min`) per user, per address when not signed in; a client above it gets 429. The GUI uses far fewer requests.
+  - *Proxy*: `PROXY_WORKERS` processes (default: the number of cores, at most 4) share the proxy port with `SO_REUSEPORT`, so a busy proxy is no longer limited to one core (a Cortex-A72 handled about 7 MB/s per process). `runproxy` starts and supervises them; `PROXY_WORKERS=1` keeps a single process.
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**

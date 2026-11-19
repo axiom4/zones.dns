@@ -339,6 +339,7 @@ DHCP_WPAD_URL = ''  # custom PAC URL for DHCP option 252; empty = http://<DHCP_S
 PROXY = False  # HTTP/HTTPS ad-blocking and popup-blocking proxy server (manage.py runproxy)
 PROXY_PORT = 8080  # TCP port of the proxy server
 PROXY_ADDRESS = ''  # bind address of the proxy server; empty = 0.0.0.0
+PROXY_WORKERS = max(1, int(os.environ.get('PROXY_WORKERS', min(4, os.cpu_count() or 1))))  # processes sharing the proxy port (one asyncio loop each, so one core each); 1 = a single process
 PROXY_BLOCK_ADS = True  # block ad/tracker domains (from Blacklist), ad URLs, and strip ad elements/CSS in HTML pages
 PROXY_BLOCK_POPUPS = True  # block popup/popunder scripts and inject window.open / overlay popup protection in HTML pages
 PROXY_HTTPS_MITM = False  # intercept HTTPS traffic with the local Proxy Root CA to filter HTML and block popups inside HTTPS pages
