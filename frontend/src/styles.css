@@ -585,6 +585,7 @@ pre.whois { margin: 0; padding: .7rem .9rem; background: var(--bg); border-radiu
 /* leases: a whole IPv6 address and the expiry date fit on one line each (the generic .rname cuts at 170px, .ttlv at 60px) */
 .records.leases .rname { width: 21rem; flex: none; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .records.leases .ttlv { width: auto; white-space: nowrap; }
+.records.leases li > .mini { flex: none; width: 5.5rem; }  /* the same width for Ping, Story, Live, Reserve and Reserved: the columns line up from row to row (a phone has its own rule below) */
 @media (max-width: 1100px) { .records.leases .rname { width: auto; flex: 1 1 14rem; } }
 /* neighbours: one row per host, its addresses stacked */
 .records.nbr li { align-items: flex-start; }
