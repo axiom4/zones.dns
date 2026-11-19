@@ -146,3 +146,30 @@ class RecordDuplicateTests(TestCase):
         other = self.c.post('/api/records/', {**body, 'value': '192.0.2.2'}, format='json').data['id']
         self.assertEqual(self.c.patch(f'/api/records/{other}/', {'value': '192.0.2.1'}, format='json').status_code, 400)
 
+
+class RecordPagesTests(TestCase):
+    def setUp(self):
+        from .models import Record, Zone
+        self.z = Zone.objects.create(name='pg.lan')
+        for i in (10, 9, 100, 2):
+            Record.objects.create(zone=self.z, name=f'h{i}', type='A', value=f'10.0.0.{i}')
+        Record.objects.create(zone=self.z, name='mail', type='MX', value='10 h2.pg.lan.', note='the relay')
+        self.c = APIClient()
+        self.c.force_authenticate(User.objects.create_user('pg', is_staff=True))
+
+    def get(self, **q):
+        return self.c.get('/api/records/', {'zone': self.z.id, **q}).data
+
+    def test_default_order_is_by_ip_and_pages_slice_it(self):
+        d = self.get()
+        self.assertEqual(d['count'], 5)
+        self.assertEqual([r['value'] for r in d['results'][:4]], ['10.0.0.2', '10.0.0.9', '10.0.0.10', '10.0.0.100'])  # numbers, not text
+        self.assertEqual(d['results'][4]['type'], 'MX')  # not an IPv4 address: after them
+        d = self.get(limit=2, offset=2)
+        self.assertEqual([r['value'] for r in d['results']], ['10.0.0.10', '10.0.0.100'])
+        self.assertEqual(d['count'], 5)
+
+    def test_search_by_words_and_reverse_sort(self):
+        self.assertEqual([r['name'] for r in self.get(q='relay mx')['results']], ['mail'])
+        self.assertEqual(self.get(q='nothing')['count'], 0)
+        self.assertEqual(self.get(sort='name', desc=1)['results'][0]['name'], 'mail')

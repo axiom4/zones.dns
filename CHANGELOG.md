@@ -1,7 +1,9 @@
 # Changelog
 
 ## Unreleased
+- **Upgrading:** `GET /api/records/` answers `{count, next, previous, results}` (100 rows by default, `limit` up to 500, `offset`) instead of a plain array: scripts that read it must read `results` and follow `next`. It also takes `q` (words), `sort` and `desc`. Publish the new GUI build with the new backend.
 - **Added**
+  - Zone page: the server searches, sorts and cuts the records into pages of 100, so a zone with tens of thousands of records opens at once; the search waits for a pause in the typing, and *Previous* / *Next* move between pages. A selection is of the page on screen. The command palette lists the first 500 records.
   - API throttling: `API_RATE` (default `1200/min`) per user, per address when not signed in; a client above it gets 429. The GUI uses far fewer requests.
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.

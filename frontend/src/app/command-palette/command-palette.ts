@@ -254,11 +254,11 @@ export class CommandPalette {
     if (this.state() === 'loading' || (!force && this.state() === 'ready' && Date.now() - this.loadedAt < TTL)) return;
     this.state.set('loading');
     const [zones, recs, hosts, leases, blocked] = await Promise.allSettled([
-      this.api.invoke(zonesList), this.api.invoke(recordsList, {}), this.api.invoke(hostsList), this.api.invoke(dhcpLeasesList, {}), this.api.invoke(blockedSuggestionsList, {}),
+      this.api.invoke(zonesList), this.api.invoke(recordsList, { limit: 500 }), this.api.invoke(hostsList), this.api.invoke(dhcpLeasesList, {}), this.api.invoke(blockedSuggestionsList, {}),
     ]);
     const items: PaletteItem[] = [], zname = new Map<number, string>();
     if (zones.status === 'fulfilled') for (const z of zones.value) { zname.set(z.id, z.name); items.push({ id: 'z:' + z.id, kind: 'zone', title: z.name, sub: z.reverse ? 'Reverse zone' : 'Zone', act: { nav: ['/zones', z.id] } }); }
-    if (recs.status === 'fulfilled') for (const r of recs.value) {
+    if (recs.status === 'fulfilled') for (const r of recs.value.results) { // shortcut: the first 500 records; search the zone page for more
       const z = zname.get(r.zone) ?? '', n = r.name && r.name !== '@' ? `${r.name}.${z}` : z;
       items.push({ id: 'r:' + r.id, kind: 'record', title: n, sub: `${r.type} ${r.value}`, act: { nav: ['/zones', r.zone] } });
     }

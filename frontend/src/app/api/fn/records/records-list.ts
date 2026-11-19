@@ -7,9 +7,34 @@ import { filter, map } from 'rxjs/operators';
 import { StrictHttpResponse } from '../../strict-http-response';
 import { RequestBuilder } from '../../request-builder';
 
-import { Record } from '../../models/record';
+import { PaginatedRecordList } from '../../models/paginated-record-list';
 
 export interface RecordsList$Params {
+
+/**
+ * Reverse the order
+ */
+  desc?: boolean;
+
+/**
+ * Number of results to return per page.
+ */
+  limit?: number;
+
+/**
+ * The initial index from which to return the results.
+ */
+  offset?: number;
+
+/**
+ * Words that must each appear in the name, type, value or note
+ */
+  q?: string;
+
+/**
+ * Order (default: by IP: the value, or the address of a reverse zone name)
+ */
+  sort?: '' | 'name' | 'ttl' | 'type' | 'value';
 
 /**
  * Filter by zone id
@@ -17,9 +42,14 @@ export interface RecordsList$Params {
   zone?: number;
 }
 
-export function recordsList(http: HttpClient, rootUrl: string, params?: RecordsList$Params, context?: HttpContext): Observable<StrictHttpResponse<Array<Record>>> {
+export function recordsList(http: HttpClient, rootUrl: string, params?: RecordsList$Params, context?: HttpContext): Observable<StrictHttpResponse<PaginatedRecordList>> {
   const rb = new RequestBuilder(rootUrl, recordsList.PATH, 'get');
   if (params) {
+    rb.query('desc', params.desc, {});
+    rb.query('limit', params.limit, {});
+    rb.query('offset', params.offset, {});
+    rb.query('q', params.q, {});
+    rb.query('sort', params.sort, {});
     rb.query('zone', params.zone, {});
   }
 
@@ -28,7 +58,7 @@ export function recordsList(http: HttpClient, rootUrl: string, params?: RecordsL
   ).pipe(
     filter((r: any): r is HttpResponse<any> => r instanceof HttpResponse),
     map((r: HttpResponse<any>) => {
-      return r as StrictHttpResponse<Array<Record>>;
+      return r as StrictHttpResponse<PaginatedRecordList>;
     })
   );
 }

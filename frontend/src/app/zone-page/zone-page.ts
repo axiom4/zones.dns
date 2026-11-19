@@ -10,6 +10,8 @@ import { StepUp } from '../services/step-up';
 import { Ui, saveFile } from '../services/ui';
 import { ZonesStore } from '../services/zones-store';
 
+const PAGE = 100;
+
 @Component({
   selector: 'app-zone-page',
   imports: [FormsModule, RecordForm],
@@ -39,37 +41,30 @@ export class ZonePage {
   sortBy = signal<'' | 'type' | 'name' | 'value' | 'ttl'>('');
   desc = signal(false);
 
-  shown = computed(() => {
-    const f = this.filter().trim().toLowerCase();
-    const list = f ? this.records().filter(r => `${r.name} ${r.type} ${r.value} ${r.note}`.toLowerCase().includes(f)) : this.records();
-    const by = this.sortBy() || (this.zone()?.reverse ? 'name' : 'value'); // default: by IP
-    const dir = this.desc() ? -1 : 1;
-    const text = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true });
-    const ip4 = (v: string) => /^\d+\.\d+\.\d+\.\d+$/.test(v) ? v.split('.').reduce((n, o) => n * 256 + +o, 0) : null;
-    // reverse zone: the record name is only the tail of the address, so host sort uses the full IP
-    const addr = (an: string, ai: string | null, bn: string, bi: string | null) => {
-      const x = ai ? ip4(ai) : null, y = bi ? ip4(bi) : null;
-      return x !== null && y !== null ? x - y : text(ai ?? an, bi ?? bn);
-    };
-    const cmp = (a: Record, b: Record) => {
-      if (by === 'ttl') return (a.ttl ?? 0) - (b.ttl ?? 0);
-      if (by === 'value') {
-        const x = ip4(a.value), y = ip4(b.value);
-        if (x !== null && y !== null) return x - y; // IPv4 by number, so .9 comes before .10
-        if ((x === null) !== (y === null)) return x === null ? 1 : -1; // IPv4 first
-        return text(a.value, b.value);
-      }
-      if (by === 'type') return text(a.type, b.type);
-      return addr(a.name ?? '', this.ipOf(a), b.name ?? '', this.ipOf(b));
-    };
-    // ties fall back to type then name so the order is stable
-    return [...list].sort((a, b) => dir * cmp(a, b) || text(a.type, b.type) || addr(a.name ?? '', this.ipOf(a), b.name ?? '', this.ipOf(b)));
-  });
+  // the server searches, sorts and cuts the pages (GET /api/records/): this is the page on screen
+  readonly PAGE = PAGE;
+  shown = computed(() => this.records());
+  total = signal(0); // records of the zone, whatever the search
+  count = signal(0); // records that match the search: the pages are cut from these
+  page = signal(0);
+  private timer?: ReturnType<typeof setTimeout>;
   allSelected = computed(() => this.shown().length > 0 && this.shown().every(r => this.selected().has(r.id)));
 
   constructor() {
     // Reload whenever the route param changes (zone -> zone keeps this component alive).
-    effect(() => { this.id(); untracked(() => { this.filter.set(''); this.records.set([]); this.loading.set(true); this.selected.set(this.empty); this.load(); }); });
+    effect(() => { this.id(); untracked(() => { this.filter.set(''); this.records.set([]); this.total.set(0); this.loading.set(true); }); });
+    // a new zone, search or order starts again from the first page (the search waits for a pause in the typing)
+    let first = true;
+    effect(() => {
+      this.id(); this.filter(); this.sortBy(); this.desc();
+      untracked(() => {
+        clearTimeout(this.timer);
+        this.selected.set(this.empty);
+        this.page.set(0);
+        this.timer = setTimeout(() => this.load(), first ? 0 : 250);
+        first = false;
+      });
+    });
     // the tab title names the zone (the route only knows "Zone"; a title strategy may add the app name after it)
     const title = inject(Title);
     effect(() => { const n = this.zone()?.name; if (n) setTimeout(() => title.setTitle(title.getTitle().replace(/^[^–]*?(?=\s–|$)/, n))); });
@@ -78,12 +73,28 @@ export class ZonePage {
   /** "www (A)": how a record is named in labels, toasts and questions */
   label = (r: Record) => `${r.name || '@'} (${r.type})`;
 
-  async load() {
-    await this.ui.run(async () => this.records.set(await this.api.invoke(recordsList, { zone: +this.id() })));
+  async load(): Promise<void> {
+    const f = this.filter().trim();
+    let again = false;
+    await this.ui.run(async () => {
+      const r = await this.api.invoke(recordsList, { zone: +this.id(), q: f || undefined, sort: this.sortBy() || undefined, desc: this.desc() || undefined, limit: PAGE, offset: this.page() * PAGE });
+      if (!r.results.length && this.page() > 0) { // the last record of the last page went: back to the page before
+        this.page.set(Math.ceil(r.count / PAGE) - 1);
+        again = true;
+        return;
+      }
+      this.records.set(r.results);
+      this.count.set(r.count);
+      if (!f) this.total.set(r.count);
+    });
+    if (again) return this.load();
     this.loading.set(false);
-    // drop selections of records that no longer exist
-    const ids = new Set(this.records().map(r => r.id));
-    this.selected.update(s => new Set([...s].filter(i => ids.has(i))));
+  }
+
+  go(delta: number) {
+    this.page.update(p => p + delta);
+    this.selected.set(this.empty); // a selection is of the page on screen
+    return this.load();
   }
 
   toggleZone(z: Zone) {
@@ -116,6 +127,7 @@ export class ZonePage {
   del(r: Record) {
     return this.ui.run(async () => {
       await this.api.invoke(recordsDestroy, { id: r.id });
+      this.selected.update(s => { const n = new Set(s); n.delete(r.id); return n; });
       await this.load();
       this.ui.toast(`Deleted ${this.label(r)}`, () => this.restore([r]));
     });
@@ -137,7 +149,7 @@ export class ZonePage {
     return this.ui.run(async () => {
       // deleting or switching off all the records of the zone, or most of them (10 or more and over half), is confirmed with a second
       // factor, like deleting the zone. The same rule as the server (views/record.py, BULK_MIN).
-      const total = this.records().length;
+      const total = this.total();
       const all = (action === 'delete' || action === 'disable') && (ids.length >= total || (ids.length >= 10 && ids.length * 2 > total));
       const n = ids.length, what = n === 1 ? this.label(this.records().find(r => r.id === ids[0])!) : `${n} records`;
       const verb = action === 'delete' ? 'Delete' : 'Turn off';

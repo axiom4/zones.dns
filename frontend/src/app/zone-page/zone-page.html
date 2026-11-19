@@ -7,7 +7,7 @@
         <span class="soft" aria-hidden="true">{{ z.enabled === false ? 'Off' : 'Served' }}</span>
       </div>
       <p class="soft">
-        @if (loading()) { Loading records… } @else { {{ records().length }} {{ records().length === 1 ? 'record' : 'records' }} }
+        @if (loading()) { Loading records… } @else { {{ total() }} {{ total() === 1 ? 'record' : 'records' }} }
         @if (z.enabled === false) { <br>Off: this zone is not served, so its names go to your upstream DNS. Turn it on to change its records. }
       </p>
     </div>
@@ -30,7 +30,7 @@
 
   <app-record-form #form [zoneId]="z.id" [zoneName]="z.name" [reverse]="z.reverse" [records]="records()" (saved)="onSaved($event)" />
 
-  @if (records().length) {
+  @if (total()) {
     <div class="ztools">
       <input class="search" type="search" [(ngModel)]="filter" name="f" placeholder="Search name, type, value or note" aria-label="Search records" autocomplete="off">
       <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event)" name="sb" aria-label="Sort records">
@@ -43,7 +43,7 @@
       <button class="ghost" (click)="desc.set(!desc())" [attr.aria-pressed]="desc()" title="Reverse order">
         <span aria-hidden="true">{{ desc() ? '↓' : '↑' }}</span><span class="sr-only">Reverse order</span>
       </button>
-      <p class="sr-only" role="status">{{ filter().trim() ? shown().length + ' of ' + records().length + ' records shown' : '' }}</p>
+      <p class="sr-only" role="status">{{ filter().trim() ? count() + ' of ' + total() + ' records match' : '' }}</p>
     </div>
   }
 
@@ -78,7 +78,7 @@
           <button class="icon" (click)="del(r)" [disabled]="off()" [attr.aria-label]="'Delete ' + label(r)" [title]="'Delete ' + label(r)">✕</button>
         </li>
       } @empty {
-        @if (records().length) {
+        @if (total()) {
           <li class="empty">No record matches “{{ filter().trim() }}”. <button class="link" (click)="filter.set('')">Clear the search</button></li>
         } @else {
           <li class="empty zempty">
@@ -92,6 +92,13 @@
         }
       }
     </ul>
+    @if (count() > PAGE) {
+      <nav class="pager" aria-label="Pages of records">
+        <button class="ghost" type="button" (click)="go(-1)" [disabled]="page() === 0">Previous</button>
+        <span class="soft" role="status">{{ page() * PAGE + 1 }}–{{ page() * PAGE + shown().length }} of {{ count() }}</span>
+        <button class="ghost" type="button" (click)="go(1)" [disabled]="(page() + 1) * PAGE >= count()">Next</button>
+      </nav>
+    }
   }
 
   <dialog #imp class="confirm wide" aria-labelledby="imp-t" (cancel)="importBusy() && $event.preventDefault()">

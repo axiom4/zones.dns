@@ -68,6 +68,7 @@ export type { Mx } from './models/mx';
 export type { Nameserver } from './models/nameserver';
 export type { PaginatedQueryLogGroupList } from './models/paginated-query-log-group-list';
 export type { PaginatedQueryLogList } from './models/paginated-query-log-list';
+export type { PaginatedRecordList } from './models/paginated-record-list';
 export type { PasskeyInfo } from './models/passkey-info';
 export type { PatchedBlockedDomainRequest } from './models/patched-blocked-domain-request';
 export type { PatchedBlocklistSourcesRequest } from './models/patched-blocklist-sources-request';

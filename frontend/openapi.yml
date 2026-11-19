@@ -2259,6 +2259,40 @@ paths:
       operationId: records_list
       parameters:
       - in: query
+        name: desc
+        schema:
+          type: boolean
+        description: Reverse the order
+      - name: limit
+        required: false
+        in: query
+        description: Number of results to return per page.
+        schema:
+          type: integer
+      - name: offset
+        required: false
+        in: query
+        description: The initial index from which to return the results.
+        schema:
+          type: integer
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Words that must each appear in the name, type, value or note
+      - in: query
+        name: sort
+        schema:
+          type: string
+          enum:
+          - ''
+          - name
+          - ttl
+          - type
+          - value
+        description: 'Order (default: by IP: the value, or the address of a reverse
+          zone name)'
+      - in: query
         name: zone
         schema:
           type: integer
@@ -2273,9 +2307,7 @@ paths:
           content:
             application/json:
               schema:
-                type: array
-                items:
-                  $ref: '#/components/schemas/Record'
+                $ref: '#/components/schemas/PaginatedRecordList'
           description: ''
     post:
       operationId: records_create
@@ -4320,6 +4352,29 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/QueryLog'
+    PaginatedRecordList:
+      type: object
+      required:
+      - count
+      - results
+      properties:
+        count:
+          type: integer
+          example: 123
+        next:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=400&limit=100
+        previous:
+          type: string
+          nullable: true
+          format: uri
+          example: http://api.example.org/accounts/?offset=200&limit=100
+        results:
+          type: array
+          items:
+            $ref: '#/components/schemas/Record'
     PasskeyInfo:
       type: object
       properties:

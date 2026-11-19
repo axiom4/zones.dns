@@ -572,7 +572,7 @@ Watch `SELECT count(*) FROM pg_stat_activity` against `max_connections`, and the
 
 - The MITM Root CA (`PROXY_HTTPS_MITM`) has no NameConstraints: whoever gets its key can impersonate any site to every device that enrolled it. Its key lives in the database, encrypted with a password derived from `SECRET_KEY`; rotating `SECRET_KEY` needs the CA to be created again (and re-enrolled on the devices).
 - `Record` has no database `UniqueConstraint` (an index over name and value is too long for MySQL/MariaDB): writers of one zone take its row lock, so concurrent writes make no duplicates; a write that bypasses the app (raw SQL, the Django shell with `bulk_create`) can.
-- No pagination: the frontend expects plain arrays.
+- Only the records, the query log, the proxy log and the imported blocklist are paged. Zones, static hosts, personal blocks and reservations are lists made by hand and come as one array; DHCP leases are cut at 1000.
 - The nginx limits for DoH/DoT are estimates, not measured.
 
 **Behaviour changes worth knowing.** Blocklist and rule-list sources must be `https://` on public addresses (no `http://`, no LAN hosts; the list keeps its old copy and the status shows the error). Custom `/regex/` rules and DNS regex entries with nested quantifiers such as `(a+)+` or `(\w+\.)*x` are skipped for safety. The proxy log window "Last 30 days" is the longest one.
