@@ -6,6 +6,7 @@
   - Sign-in page: on a screen wider than 1600px the card sat to the left (the page is a `<main>` and got the 1600px limit of the app); it is centred again.
 - **Changed** (GUI)
   - *Proxy*, What to block: *Your own rules* is a list (what each rule does, a Remove button) with an Add row (hide a page part, block an address, never filter a site) instead of a text box. The setting is stored as before.
+  - *Proxy*, Ad-block lists: EasyList, EasyPrivacy and uBlock filters are switches; a list set in the server settings that is none of these shows below them with Remove, instead of a text box. Each list shows its last sync under its name. The setting is stored as before.
   - *Network pulse* has a radar icon in the menu (it shared the pin of the Traffic map).
 
 ## 1.5.0 — 2026-11-18

@@ -188,17 +188,28 @@
     <fieldset class="group">
       <legend>Ad-block lists</legend>
       <p class="help">Lists in Adblock Plus / EasyList format. The proxy uses their domain rules, exceptions and hide rules; rules only a browser understands are skipped. Ad filtering must be on.</p>
-      <app-settings-fields prefix="px" [fields]="lists" [model]="cfg()" [errs]="errs()" />
-      @if (rules().length) {
-        <ul class="records">
-          @for (r of rules(); track r.name) {
-            <li>
-              <span class="rname">{{ r.name }}<small class="note-t">{{ r.url }}</small></span>
-              <span class="rvalue">{{ r.blocks }} domains, {{ r.allow }} exceptions, {{ r.cosmetic }} hide rules<small class="note-t">{{ r.updated ? 'Updated ' + when(r.updated) + ' ' + whenTime(r.updated) : 'Not downloaded yet' }}</small>@if (r.error) {<small class="note-t bad">Download failed: {{ r.error }}</small>}</span>
-            </li>
-          }
-        </ul>
-      }
+      <ul class="records">
+        @for (l of suggested; track l.name) {
+          <li>
+            <button class="switch" type="button" role="switch" [attr.aria-checked]="listOn(l.url)" [attr.aria-label]="'Use ' + l.label" (click)="toggleList(l)"><i></i></button>
+            <span class="rname">{{ l.label }}<small class="note-t">{{ l.what }}</small></span>
+            <span class="rvalue">@if (listOn(l.url)) { <ng-container *ngTemplateOutlet="stat; context: { $implicit: l.name }" /> }</span>
+          </li>
+        }
+        @for (l of customLists(); track l.url) {
+          <li>
+            <span class="rname">{{ l.name }}<small class="note-t">{{ l.url }}</small></span>
+            <span class="rvalue"><ng-container *ngTemplateOutlet="stat; context: { $implicit: l.name }" /></span>
+            <button class="mini ghost del" type="button" (click)="removeList(l.url)" [attr.aria-label]="'Remove list ' + l.name">Remove</button>
+          </li>
+        }
+      </ul>
+      <ng-template #stat let-name>
+        @if (listStat(name); as r) {
+          {{ r.blocks }} domains, {{ r.allow }} exceptions, {{ r.cosmetic }} hide rules<small class="note-t">{{ r.updated ? 'Updated ' + when(r.updated) + ' ' + whenTime(r.updated) : 'Not downloaded yet' }}</small>@if (r.error) {<small class="note-t bad">Download failed: {{ r.error }}</small>}
+        } @else { <small class="note-t">Not downloaded yet: choose Save lists and sync.</small> }
+      </ng-template>
+      @if (errs()['PROXY_RULE_LISTS']) { <small class="bad" role="alert">{{ errs()['PROXY_RULE_LISTS'] }}</small> }
       <div class="actions"><button class="ghost" type="button" (click)="syncRules()" [disabled]="syncing()">{{ syncing() ? 'Syncing…' : listsDirty() ? 'Save lists and sync' : 'Sync lists now' }}</button></div>
     </fieldset>
 

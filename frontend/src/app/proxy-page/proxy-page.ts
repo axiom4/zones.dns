@@ -45,9 +45,10 @@ const BLOCKING: SettingField[] = [
   { key: 'PROXY_BLOCK_POPUPS', kind: 'check', label: 'Block popups', help: 'Stops pages from opening windows by themselves and from invisible click-catching layers.' },
   { key: 'PROXY_HTTPS_MITM', kind: 'check', label: 'Inspect HTTPS pages', term: 'HTTPS inspection', help: 'Off: secure sites are blocked or let through whole. On: their pages are filtered too; each device must trust the Root CA.' },
 ];
-const LISTS: SettingField[] = [
-  { key: 'PROXY_RULE_LISTS', kind: 'textarea', label: 'Ad-block lists', term: 'EasyList format', ph: 'easylist=https://easylist.to/easylist/easylist.txt\neasyprivacy=https://easylist.to/easylist/easyprivacy.txt',
-    help: 'One name=https://… per line, downloaded every day. A list that fails keeps its last good rules.' },
+const SUGGESTED = [
+  { name: 'easylist', label: 'EasyList', what: 'Ads and banners on web pages.', url: 'https://easylist.to/easylist/easylist.txt' },
+  { name: 'easyprivacy', label: 'EasyPrivacy', what: 'Trackers and other privacy intrusions.', url: 'https://easylist.to/easylist/easyprivacy.txt' },
+  { name: 'ublock-filters', label: 'uBlock filters', what: 'More ads and annoyances, kept up to date by the uBlock Origin project.', url: 'https://ublockorigin.github.io/uAssets/filters/filters.min.txt' },
 ];
 
 @Component({
@@ -72,7 +73,23 @@ export class ProxyPage implements OnDestroy {
   syncing = signal(false);
   readonly server = SERVER;
   readonly blocking = BLOCKING;
-  readonly lists = LISTS;
+  readonly suggested = SUGGESTED;
+  // the ad-block lists: kept as name=https://… words in PROXY_RULE_LISTS (what the server reads), shown as switches and a list
+  private listEntries() {
+    return (this.cfg().PROXY_RULE_LISTS || '').split(/[\s,]+/).filter(Boolean).map(w => {
+      const [n, ...u] = w.split('=');
+      return u.length ? { name: n, url: u.join('=') } : { name: w.split('?')[0].replace(/\/$/, '').split('/').pop()!.toLowerCase().replace(/[^a-z0-9._-]/g, '-').slice(0, 40) || 'list', url: w };
+    });
+  }
+  private writeLists(e: { name: string; url: string }[]) { this.cfg.update(c => ({ ...c, PROXY_RULE_LISTS: e.map(x => `${x.name}=${x.url}`).join('\n') })); }
+  customLists = computed(() => { this.cfg(); return this.listEntries().filter(e => !SUGGESTED.some(s => s.url === e.url)); });
+  listOn(url: string) { return this.listEntries().some(e => e.url === url); }
+  toggleList(s: { name: string; url: string }) {
+    const e = this.listEntries();
+    this.writeLists(this.listOn(s.url) ? e.filter(x => x.url !== s.url) : [...e.filter(x => x.name !== s.name), { name: s.name, url: s.url }]);
+  }
+  removeList(url: string) { this.writeLists(this.listEntries().filter(e => e.url !== url)); }
+  listStat(name: string) { return this.rules().find(r => r.name === name); }
   rules = signal<ProxyRuleList[]>([]);
   testUrl = '';
   testResult = signal<ProxyTestResult | null>(null);
