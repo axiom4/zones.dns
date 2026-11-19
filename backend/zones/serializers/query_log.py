@@ -53,6 +53,12 @@ class QueryLogClientSerializer(serializers.Serializer):
     count = serializers.IntegerField(help_text='Queries from this client')
 
 
+class QueryLogHourSerializer(serializers.Serializer):
+    hour = serializers.DateTimeField(help_text='Start of the hour (UTC)')
+    count = serializers.IntegerField(help_text='Queries in this hour')
+    blocked = serializers.IntegerField(help_text='Of them, blocked')
+
+
 class PurgeRequestSerializer(serializers.Serializer):
     older_than_hours = serializers.IntegerField(min_value=0, help_text='Delete queries older than this many hours; 0 = everything')
     dry_run = serializers.BooleanField(default=False, help_text='Only count what would be deleted')

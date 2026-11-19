@@ -5,7 +5,7 @@
  * LINK (e.g. an extra cell in the leases / clients table; `l.address` or any client IP, or a name of the default zone):
  *   <a class="mini" [routerLink]="['/device', l.address]">Story</a>      // add RouterLink to the component's imports
  *
- * Uses only existing endpoints: logs (client filter, paged by id), logs/grouped, logs/clients, logs/resolved, geo/ips,
+ * Uses only existing endpoints: logs/hourly (the activity ribbon), logs/grouped, logs/clients, logs/resolved, geo/ips,
  * dhcp/leases, dhcp/ping, blocked (create). Stats and geo/destinations have no client filter, so they are not used.
  */
 import { DatePipe, DecimalPipe } from '@angular/common';
@@ -13,8 +13,8 @@ import { Component, OnDestroy, computed, inject, signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, RouterLink } from '@angular/router';
 import { Api } from '../api/api';
-import { blockedCreate, dhcpLeasesList, geoIpsRetrieve, logsClientsList, logsGroupedList, logsList, logsResolvedList } from '../api/functions';
-import { DhcpLease, DhcpPingResult, QueryLog, QueryLogGroup } from '../api/models';
+import { blockedCreate, dhcpLeasesList, geoIpsRetrieve, logsClientsList, logsGroupedList, logsHourlyList, logsResolvedList } from '../api/functions';
+import { DhcpLease, DhcpPingResult, QueryLogGroup } from '../api/models';
 import { countryName, flag } from '../lib/geo-util';
 import { Ping } from '../services/ping';
 import { Period } from '../services/period';
@@ -26,7 +26,6 @@ interface Part<T> { loading: boolean; error: string; data: T }
 interface Dom { g: QueryLogGroup; subs: QueryLogGroup[] | null; open: boolean; busy: boolean }
 interface Country { code: string; queries: number }
 
-const PAGE = 500, MAX_PAGES = 4; // ribbon: at most 2000 newest rows
 const HOUR = 3600_000;
 const part = <T>(data: T): Part<T> => ({ loading: true, error: '', data });
 const fail = (e: any) => e?.error?.detail ?? `Could not load (HTTP ${e?.status ?? 'no answer'}).`;
@@ -139,24 +138,20 @@ export class DeviceStoryPage implements OnDestroy {
   }
 
   private async loadRibbon(g: number) {
-    const hours = this.range(), ip = this.ip(), now = Date.now();
+    const hours = this.range(), now = Date.now();
     const first = Math.floor(now / HOUR) * HOUR - (hours - 1) * HOUR;
     const cells: Cell[] = Array.from({ length: hours }, (_, i) => ({ start: first + i * HOUR, count: 0, blocked: 0 }));
-    let before: number | undefined, shown = 0, total = 0;
     try {
-      for (let i = 0; i < MAX_PAGES; i++) {
-        const r = await this.api.invoke(logsList, { client: ip, hours, limit: PAGE, before });
-        if (g !== this.gen) return;
-        total = r.count;
-        for (const q of r.results as QueryLog[]) {
-          const c = cells[Math.floor((Date.parse(q.time) - first) / HOUR)];
-          if (c) { c.count++; if (q.outcome === 'blocked') c.blocked++; }
-        }
-        shown += r.results.length;
-        if (!r.results.length || shown >= total) break;
-        before = r.results[r.results.length - 1].id;
+      // the server counts per hour: every query of the period, however many (the list of raw rows is cut at a few thousand)
+      const rows = await this.api.invoke(logsHourlyList, { client: this.ip(), hours });
+      if (g !== this.gen) return;
+      let total = 0;
+      for (const r of rows) {
+        const c = cells[Math.floor((Date.parse(r.hour) - first) / HOUR)];
+        if (c) { c.count += r.count; c.blocked += r.blocked; }
+        total += r.count;
       }
-      this.ribbon.set({ loading: false, error: '', data: { cells, total, shown } });
+      this.ribbon.set({ loading: false, error: '', data: { cells, total, shown: total } });
     } catch (e) { if (g === this.gen) this.ribbon.set({ loading: false, error: fail(e), data: { cells, total: 0, shown: 0 } }); }
   }
 

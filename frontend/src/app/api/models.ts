@@ -105,6 +105,7 @@ export type { QueryLog } from './models/query-log';
 export type { QueryLogAnswers } from './models/query-log-answers';
 export type { QueryLogClient } from './models/query-log-client';
 export type { QueryLogGroup } from './models/query-log-group';
+export type { QueryLogHour } from './models/query-log-hour';
 export type { QueryLogOutcomeEnum } from './models/query-log-outcome-enum';
 export type { Record } from './models/record';
 export type { RecordRequest } from './models/record-request';

@@ -1466,6 +1466,88 @@ paths:
               schema:
                 $ref: '#/components/schemas/PaginatedQueryLogGroupList'
           description: ''
+  /api/logs/hourly/:
+    get:
+      operationId: logs_hourly_list
+      description: Queries and blocked queries per hour, with the filters of the list
+        (the device story draws its activity from it). The hours without queries are
+        missing.
+      parameters:
+      - in: query
+        name: answer
+        schema:
+          type: string
+        description: Text contained in the answer records, e.g. an IP address
+      - in: query
+        name: asn
+        schema:
+          type: string
+        description: Only domains whose answers point to this network (AS number as
+          shown in the geolocation page) in the period (24 hours if hours is not given)
+      - in: query
+        name: client
+        schema:
+          type: string
+        description: Exact client IP
+      - in: query
+        name: country
+        schema:
+          type: string
+        description: Only domains whose answers point to this country (ISO code, PRIV
+          or ??) in the period (24 hours if hours is not given)
+      - in: query
+        name: domain
+        schema:
+          type: string
+        description: Exact registrable domain, e.g. example.com
+      - in: query
+        name: hours
+        schema:
+          type: integer
+        description: Only the last N hours
+      - in: query
+        name: name
+        schema:
+          type: string
+        description: Exact name
+      - in: query
+        name: outcome
+        schema:
+          type: string
+          enum:
+          - blocked
+          - error
+          - forwarded
+          - local
+      - in: query
+        name: q
+        schema:
+          type: string
+        description: Name contains (case-insensitive)
+      - in: query
+        name: rcode
+        schema:
+          type: string
+        description: Response code, e.g. NXDOMAIN
+      - in: query
+        name: type
+        schema:
+          type: string
+        description: Exact query type, e.g. A
+      tags:
+      - logs
+      security:
+      - tokenAuth: []
+      - tokenAuth: []
+      responses:
+        '200':
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/QueryLogHour'
+          description: ''
   /api/logs/purge/:
     post:
       operationId: logs_purge_create
@@ -5185,6 +5267,23 @@ components:
       - local
       - name
       - names
+    QueryLogHour:
+      type: object
+      properties:
+        hour:
+          type: string
+          format: date-time
+          description: Start of the hour (UTC)
+        count:
+          type: integer
+          description: Queries in this hour
+        blocked:
+          type: integer
+          description: Of them, blocked
+      required:
+      - blocked
+      - count
+      - hour
     QueryLogOutcomeEnum:
       enum:
       - local

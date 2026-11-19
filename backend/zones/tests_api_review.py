@@ -173,3 +173,23 @@ class RecordPagesTests(TestCase):
         self.assertEqual([r['name'] for r in self.get(q='relay mx')['results']], ['mail'])
         self.assertEqual(self.get(q='nothing')['count'], 0)
         self.assertEqual(self.get(sort='name', desc=1)['results'][0]['name'], 'mail')
+
+
+class QueryLogHourlyTests(TestCase):
+    def test_counts_every_hour_of_a_busy_client_not_only_the_newest_rows(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import QueryLog
+        now = timezone.now()
+        QueryLog.objects.bulk_create(
+            [QueryLog(time=now - timedelta(hours=20), name='a.example', domain='example', type='A', outcome='blocked', client='10.0.0.5', ms=1)] * 2
+            + [QueryLog(time=now - timedelta(minutes=5), name='b.example', domain='example', type='A', outcome='forwarded', client='10.0.0.5', ms=1)] * 600
+            + [QueryLog(time=now - timedelta(hours=20), name='c.example', domain='example', type='A', outcome='forwarded', client='10.0.0.6', ms=1)])
+        c = APIClient()
+        c.force_authenticate(User.objects.create_user('hr', is_staff=True))
+        rows = c.get('/api/logs/hourly/', {'client': '10.0.0.5', 'hours': 24}).data
+        self.assertEqual(sum(r['count'] for r in rows), 602)
+        old = [r for r in rows if r['blocked']]
+        self.assertEqual((len(old), old[0]['count'], old[0]['blocked']), (1, 2, 2))

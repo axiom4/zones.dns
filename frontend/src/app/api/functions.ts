@@ -117,6 +117,8 @@ export type { LogsClientsList$Params as LogsClientsList$Params } from './fn/logs
 export { logsClientsList as logsClientsList } from './fn/logs/logs-clients-list';
 export type { LogsGroupedList$Params as LogsGroupedList$Params } from './fn/logs/logs-grouped-list';
 export { logsGroupedList as logsGroupedList } from './fn/logs/logs-grouped-list';
+export type { LogsHourlyList$Params as LogsHourlyList$Params } from './fn/logs/logs-hourly-list';
+export { logsHourlyList as logsHourlyList } from './fn/logs/logs-hourly-list';
 export type { LogsPurgeCreate$Params as LogsPurgeCreate$Params } from './fn/logs/logs-purge-create';
 export { logsPurgeCreate as logsPurgeCreate } from './fn/logs/logs-purge-create';
 export type { LogsResolvedList$Params as LogsResolvedList$Params } from './fn/logs/logs-resolved-list';

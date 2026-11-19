@@ -1,10 +1,10 @@
 import hashlib
-from datetime import timedelta
+from datetime import timedelta, timezone as dt_timezone
 
 from django.conf import settings
 from django.core.cache import cache
 from django.db.models import Avg, Count, Max, Q, Sum, TextField
-from django.db.models.functions import Cast
+from django.db.models.functions import Cast, TruncHour
 from django.utils import timezone
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import viewsets
@@ -14,7 +14,7 @@ from rest_framework.response import Response
 from ..stats import geo, rollup
 from ..models import DomainStat, LogTotal, QueryLog, Record, StatCount
 from ..stats.rollup import floor_hour
-from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
+from ..serializers import GroupResolvedSerializer, QueryLogClientSerializer, QueryLogHourSerializer, PurgeRequestSerializer, QueryLogAnswersSerializer, PurgeResultSerializer, QueryLogGroupSerializer, QueryLogSerializer
 from rest_framework.pagination import LimitOffsetPagination
 
 from .zone import GRANT, need_grant
@@ -230,6 +230,14 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
                 r['name'] = r[key] or '.'  # the root name is empty in the log: an empty group name could not be asked for again
                 page.append(r)
         return self.get_paginated_response(QueryLogGroupSerializer(page, many=True).data)
+
+    @extend_schema(parameters=FILTERS, responses=QueryLogHourSerializer(many=True))
+    @action(detail=False, methods=['get'], pagination_class=None)
+    def hourly(self, request):
+        """Queries and blocked queries per hour, with the filters of the list (the device story draws its activity from it). The hours without queries are missing."""
+        rows = (self.get_queryset().order_by().annotate(hour=TruncHour('time', tzinfo=dt_timezone.utc)).values('hour')
+                .annotate(count=Count('id'), blocked=Count('id', filter=Q(outcome='blocked'))).order_by('hour'))
+        return Response(QueryLogHourSerializer(rows, many=True).data)
 
     @extend_schema(parameters=[OpenApiParameter('hours', int, description='Only the last N hours (whole hours); 0 or missing = all')], responses=QueryLogClientSerializer(many=True))
     @action(detail=False, methods=['get'], pagination_class=None)
