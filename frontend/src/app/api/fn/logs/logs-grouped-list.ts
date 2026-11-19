@@ -78,9 +78,19 @@ export interface LogsGroupedList$Params {
   rcode?: string;
 
 /**
+ * Only queries at or after this time (ISO 8601, with its offset)
+ */
+  since?: string;
+
+/**
  * Exact query type, e.g. A
  */
   type?: string;
+
+/**
+ * Only queries before this time (ISO 8601, with its offset)
+ */
+  until?: string;
 }
 
 export function logsGroupedList(http: HttpClient, rootUrl: string, params?: LogsGroupedList$Params, context?: HttpContext): Observable<StrictHttpResponse<PaginatedQueryLogGroupList>> {
@@ -100,7 +110,9 @@ export function logsGroupedList(http: HttpClient, rootUrl: string, params?: Logs
     rb.query('outcome', params.outcome, {});
     rb.query('q', params.q, {});
     rb.query('rcode', params.rcode, {});
+    rb.query('since', params.since, {});
     rb.query('type', params.type, {});
+    rb.query('until', params.until, {});
   }
 
   return http.request(

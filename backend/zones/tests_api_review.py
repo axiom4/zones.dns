@@ -193,3 +193,21 @@ class QueryLogHourlyTests(TestCase):
         self.assertEqual(sum(r['count'] for r in rows), 602)
         old = [r for r in rows if r['blocked']]
         self.assertEqual((len(old), old[0]['count'], old[0]['blocked']), (1, 2, 2))
+
+
+class QueryLogTimeRangeTests(TestCase):
+    def test_since_and_until_cut_the_list_and_the_groups(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from .models import QueryLog
+        h = timezone.now().replace(minute=0, second=0, microsecond=0) - timedelta(hours=5)
+        QueryLog.objects.bulk_create([
+            QueryLog(time=h + timedelta(minutes=m), name='a.example', domain='example', type='A', outcome='forwarded', client='10.0.0.5', ms=1) for m in (5, 20, 70)])
+        c = APIClient()
+        c.force_authenticate(User.objects.create_user('tr', is_staff=True))
+        q = {'client': '10.0.0.5', 'since': h.isoformat(), 'until': (h + timedelta(hours=1)).isoformat()}
+        self.assertEqual(c.get('/api/logs/', q).data['count'], 2)
+        self.assertEqual(c.get('/api/logs/grouped/', {**q, 'by': 'domain'}).data['results'][0]['count'], 2)
+        self.assertEqual(c.get('/api/logs/', {**q, 'since': 'yesterday'}).status_code, 400)

@@ -6,8 +6,10 @@ from django.core.cache import cache
 from django.db.models import Avg, Count, Max, Q, Sum, TextField
 from django.db.models.functions import Cast, TruncHour
 from django.utils import timezone
+from django.utils.dateparse import parse_datetime
 from drf_spectacular.utils import OpenApiParameter, extend_schema, extend_schema_view
 from rest_framework import viewsets
+from rest_framework.exceptions import ValidationError
 from rest_framework.decorators import action
 from rest_framework.response import Response
 
@@ -79,7 +81,7 @@ def stat_count(p):
     """The number of rows read from the hourly counters (a few thousand rows at most, never the log) when the filters allow it:
     none, or one of outcome / type / client, plus the period. The hours at the two ends of the period are not whole, so the first one is
     counted in the log (one hour of rows through the time index). None = this filter needs the log itself."""
-    other = [f for f in ('q', 'name', 'domain', 'rcode', 'answer', 'country', 'asn') if p.get(f)]
+    other = [f for f in ('q', 'name', 'domain', 'rcode', 'answer', 'country', 'asn', 'since', 'until') if p.get(f)]
     one = [f for f in ('outcome', 'type', 'client') if p.get(f)]
     if other or len(one) > 1:
         return None
@@ -112,6 +114,8 @@ FILTERS = [
     OpenApiParameter('rcode', str, description='Response code, e.g. NXDOMAIN'),
     OpenApiParameter('answer', str, description='Text contained in the answer records, e.g. an IP address'),
     OpenApiParameter('hours', int, description='Only the last N hours'),
+    OpenApiParameter('since', str, description='Only queries at or after this time (ISO 8601, with its offset)'),
+    OpenApiParameter('until', str, description='Only queries before this time (ISO 8601, with its offset)'),
     OpenApiParameter('asn', str, description='Only domains whose answers point to this network (AS number as shown in the geolocation page) in the period (24 hours if hours is not given)'),
     OpenApiParameter('country', str, description='Only domains whose answers point to this country (ISO code, PRIV or ??) in the period (24 hours if hours is not given)'),
 ]
@@ -141,6 +145,12 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
             qs = qs.annotate(answers_text=Cast('answers', TextField())).filter(answers_text__icontains=p['answer'].strip())
         if hours_of(p):
             qs = qs.filter(time__gte=timezone.now() - timedelta(hours=hours_of(p)))
+        for f, op in (('since', 'time__gte'), ('until', 'time__lt')):
+            if p.get(f):
+                t = parse_datetime(p[f].strip())
+                if t is None or timezone.is_naive(t):
+                    raise ValidationError({f: 'Use an ISO 8601 time with its offset, e.g. 2026-11-19T07:00:00+01:00.'})
+                qs = qs.filter(**{op: t})
         if p.get('country'):
             hours = hours_of(p) or 24  # the counters have no 'all time': 24 h is the page default
             qs = qs.filter(domain__in=geo.country_domains(p['country'].strip().upper(), min(hours, 720)))
@@ -163,7 +173,7 @@ class QueryLogViewSet(viewsets.ReadOnlyModelViewSet):
         base = self.get_queryset().order_by()
         ranked = None
         stat_totals = {}
-        if key == 'domain' and not any(p.get(f) for f in ('q', 'name', 'type', 'client', 'rcode', 'answer')):
+        if key == 'domain' and not any(p.get(f) for f in ('q', 'name', 'type', 'client', 'rcode', 'answer', 'since', 'until')):
             d_qs = DomainStat.objects.all()
             if p.get('domain'):
                 val = p['domain'].strip()

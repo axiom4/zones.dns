@@ -13,6 +13,10 @@
     <button class="ghost" (click)="openPurge()">Purge log…</button>
   </div>
 </header>
+@if (since) {
+  <p class="notice" role="status">Only the queries of <b>{{ rangeText() }}</b>.
+    <button class="mini" (click)="clearRange()">Remove filter</button></p>
+}
 @if (asn) {
   <p class="notice" role="status">Only domains whose answers point to the network <b>{{ asn }}</b> ({{ hours > 24 ? 'last ' + hours / 24 + ' days' : hours === 1 ? 'last hour' : 'last 24 hours' }}).
     <button class="mini" (click)="clearCountry()">Remove filter</button></p>

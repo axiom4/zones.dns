@@ -52,6 +52,7 @@ export class LogsPage implements OnDestroy {
   q = ''; outcome = ''; type = ''; client = ''; rcode = ''; answer = ''; hours = 24; live = true;
   country = ''; // set by the link from the geolocation page
   asn = ''; // same, from the networks table
+  since = ''; until = ''; // a time range (ISO 8601), set by the link from the device story's activity
 
   grouped = false; ordering: 'last' | 'count' = 'last';
   purgeHours = 168;
@@ -81,12 +82,17 @@ export class LogsPage implements OnDestroy {
   }
   countryName = countryName;
   clearCountry() { this.country = ''; this.asn = ''; this.changed(); }
+  clearRange() { this.since = this.until = ''; this.hours = this.periodStore.pick([0, 1, 24, 168, 720]); this.changed(); }
+  rangeText() {
+    const a = new Date(this.since), b = this.until ? new Date(this.until) : null, d = { dateStyle: 'medium', timeStyle: 'short' } as const;
+    return b ? `${a.toLocaleString([], d)} – ${b.toLocaleTimeString([], { timeStyle: 'short' })}` : `from ${a.toLocaleString([], d)}`;
+  }
 
   /** The filters as query parameters: only what differs from the defaults. */
   private params() {
     const p: { [k: string]: string } = {};
     for (const k of ['q', 'outcome', 'type', 'client', 'rcode', 'answer', 'country', 'asn'] as const) if (this[k]) p[k] = this[k];
-    if (this.hours !== 24) p['hours'] = String(this.hours);
+    if (this.since) { p['since'] = this.since; if (this.until) p['until'] = this.until; } else if (this.hours !== 24) p['hours'] = String(this.hours);
     if (this.grouped) p['group'] = '1';
     if (this.grouped && this.ordering !== 'last') p['order'] = this.ordering;
     return p;
@@ -99,7 +105,9 @@ export class LogsPage implements OnDestroy {
     this.outcome = ['local', 'forwarded', 'blocked', 'error'].includes(s('outcome')) ? s('outcome') : '';
     this.rcode = ['NOERROR', 'NXDOMAIN', 'SERVFAIL', 'REFUSED'].includes(s('rcode')) ? s('rcode') : '';
     this.country = s('country').toUpperCase(); this.asn = s('asn').toUpperCase();
-    this.hours = p.has('hours') && [0, 1, 24, 168, 720].includes(Number(s('hours'))) ? Number(s('hours')) : this.periodStore.pick([0, 1, 24, 168, 720]);
+    const iso = (k: string) => { const v = s(k), t = Date.parse(v); return v && !Number.isNaN(t) ? new Date(t).toISOString() : ''; };
+    this.since = iso('since'); this.until = this.since ? iso('until') : '';
+    this.hours = this.since ? 0 : p.has('hours') && [0, 1, 24, 168, 720].includes(Number(s('hours'))) ? Number(s('hours')) : this.periodStore.pick([0, 1, 24, 168, 720]);
     this.grouped = s('group') === '1'; this.ordering = s('order') === 'count' ? 'count' : 'last';
     const key = JSON.stringify(this.params());
     if (key === this.shown) return;
@@ -108,7 +116,7 @@ export class LogsPage implements OnDestroy {
 
   /** A filter was changed on the page: write it to the URL (replacing the entry, so Back leaves the log) and reload. */
   changed() {
-    this.periodStore.remember(this.hours);
+    if (!this.since) this.periodStore.remember(this.hours); // a time range is not a period to remember
     clearTimeout(this.timer);
     this.shown = JSON.stringify(this.params());
     this.router.navigate([], { queryParams: this.params(), replaceUrl: true });
@@ -183,7 +191,7 @@ export class LogsPage implements OnDestroy {
   search() { clearTimeout(this.timer); this.timer = setTimeout(() => this.changed(), 250); }
 
   private filters() {
-    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined, country: this.country || undefined, asn: this.asn || undefined };
+    return { q: this.q || undefined, outcome: (this.outcome || undefined) as any, type: this.type || undefined, client: this.clientIp() || undefined, rcode: this.rcode || undefined, answer: this.answer || undefined, hours: this.hours || undefined, since: this.since || undefined, until: this.until || undefined, country: this.country || undefined, asn: this.asn || undefined };
   }
 
   /** Reload from the start. While live, keep as many rows as were already loaded so the list doesn't jump. */

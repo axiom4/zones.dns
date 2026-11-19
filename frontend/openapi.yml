@@ -1271,10 +1271,20 @@ paths:
           type: string
         description: Response code, e.g. NXDOMAIN
       - in: query
+        name: since
+        schema:
+          type: string
+        description: Only queries at or after this time (ISO 8601, with its offset)
+      - in: query
         name: type
         schema:
           type: string
         description: Exact query type, e.g. A
+      - in: query
+        name: until
+        schema:
+          type: string
+        description: Only queries before this time (ISO 8601, with its offset)
       tags:
       - logs
       security:
@@ -1450,10 +1460,20 @@ paths:
           type: string
         description: Response code, e.g. NXDOMAIN
       - in: query
+        name: since
+        schema:
+          type: string
+        description: Only queries at or after this time (ISO 8601, with its offset)
+      - in: query
         name: type
         schema:
           type: string
         description: Exact query type, e.g. A
+      - in: query
+        name: until
+        schema:
+          type: string
+        description: Only queries before this time (ISO 8601, with its offset)
       tags:
       - logs
       security:
@@ -1530,10 +1550,20 @@ paths:
           type: string
         description: Response code, e.g. NXDOMAIN
       - in: query
+        name: since
+        schema:
+          type: string
+        description: Only queries at or after this time (ISO 8601, with its offset)
+      - in: query
         name: type
         schema:
           type: string
         description: Exact query type, e.g. A
+      - in: query
+        name: until
+        schema:
+          type: string
+        description: Only queries before this time (ISO 8601, with its offset)
       tags:
       - logs
       security:
