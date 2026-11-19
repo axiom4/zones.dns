@@ -30,6 +30,12 @@ def cname_conflict(zone, name, rtype, exclude_pk=None):
     return (others.exclude(type='CNAME') if rtype == 'CNAME' else others.filter(type='CNAME')).exists()
 
 
+def lock_zone(zone):
+    """Take the row lock of the zone until the transaction ends (call inside transaction.atomic): the writers of its records go one at a time, so a
+    check-then-write cannot make a duplicate. On SQLite the lock is a no-op (one writer at a time anyway)."""
+    return Zone.objects.select_for_update().get(pk=zone.pk)
+
+
 CNAME_ALONE = 'A CNAME cannot share its name with other records: remove them (or the CNAME) first.'
 
 

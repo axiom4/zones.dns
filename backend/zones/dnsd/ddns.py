@@ -11,7 +11,7 @@ from django.conf import settings
 from django.db import transaction
 from dnslib import QTYPE, RCODE
 
-from ..models import RECORD_TYPES, DataVersion, Record, Zone, build_rr, cname_conflict
+from ..models import RECORD_TYPES, DataVersion, Record, Zone, build_rr, cname_conflict, lock_zone
 from . import tsig
 
 CLASS_IN, CLASS_NONE, CLASS_ANY = 1, 254, 255
@@ -109,6 +109,7 @@ def handle_update(request, client_ip, wire=None):
         if not zone or (key in tsig.scopes() and zname not in tsig.scopes()[key]):
             raise _Abort(RCODE.NOTAUTH)  # a key limited to some zones: the others look like zones we do not serve
         with transaction.atomic():
+            lock_zone(zone)
             _apply(request, zone)
         reply.header.rcode = RCODE.NOERROR
     except _Abort as e:

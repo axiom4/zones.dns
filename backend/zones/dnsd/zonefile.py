@@ -81,9 +81,12 @@ def parse_zone(zone_name, text):
 def import_zone(zone, text, replace=False, dry_run=False):
     from django.db import transaction
 
+    from ..models import lock_zone
+
     records, errors = parse_zone(zone.name, text)
     created = skipped = 0
     with transaction.atomic():
+        lock_zone(zone)
         if replace and not dry_run:
             zone.records.all().delete()
         seen = set() if replace else set(zone.records.values_list('name', 'type', 'value'))

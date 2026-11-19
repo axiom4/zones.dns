@@ -130,3 +130,19 @@ class ReviewFixesTests(TestCase):
         c.force_authenticate(get_user_model().objects.create_user('u', password='x', is_staff=True))
         self.assertEqual(c.patch(f'/api/zones/{z.pk}/', {'name': 'A.LAN'}, format='json').status_code, 400)
         self.assertEqual(c.patch(f'/api/zones/{z.pk}/', {'name': 'c.lan'}, format='json').status_code, 200)
+
+
+class RecordDuplicateTests(TestCase):
+    def setUp(self):
+        from .models import Zone
+        self.z = Zone.objects.create(name='dup.lan')
+        self.c = APIClient()
+        self.c.force_authenticate(User.objects.create_user('dup', is_staff=True))
+
+    def test_second_identical_record_and_an_edit_into_one_are_refused(self):
+        body = {'zone': self.z.id, 'name': 'www', 'type': 'A', 'value': '192.0.2.1', 'ttl': 300}
+        self.assertEqual(self.c.post('/api/records/', body, format='json').status_code, 201)
+        self.assertEqual(self.c.post('/api/records/', body, format='json').status_code, 400)
+        other = self.c.post('/api/records/', {**body, 'value': '192.0.2.2'}, format='json').data['id']
+        self.assertEqual(self.c.patch(f'/api/records/{other}/', {'value': '192.0.2.1'}, format='json').status_code, 400)
+

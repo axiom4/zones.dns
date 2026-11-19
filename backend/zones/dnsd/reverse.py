@@ -1,9 +1,10 @@
 """Reverse (PTR) zone helpers: CIDR <-> zone name, and PTR generation from A/AAAA records."""
 import ipaddress
 
+from django.db import transaction
 from rest_framework import serializers
 
-from ..models import Record, Zone, cname_conflict
+from ..models import Record, Zone, cname_conflict, lock_zone
 
 
 def cidr_to_zone(cidr):
@@ -63,6 +64,8 @@ def sync_ptrs(zone):
             skipped += 1
             continue
         value = f'{r.fqdn}.'
-        _, new = Record.objects.get_or_create(zone=zone, name=name, type='PTR', value=value, defaults={'ttl': r.ttl})
+        with transaction.atomic():
+            lock_zone(zone)
+            _, new = Record.objects.get_or_create(zone=zone, name=name, type='PTR', value=value, defaults={'ttl': r.ttl})
         created, skipped = created + new, skipped + (not new)
     return {'created': created, 'skipped': skipped}
