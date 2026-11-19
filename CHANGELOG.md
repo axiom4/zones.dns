@@ -15,7 +15,7 @@
   - Sign-in page: on a screen wider than 1600px the card sat to the left (the page is a `<main>` and got the 1600px limit of the app); it is centred again.
 - **Changed** (GUI)
   - *Device story*, Today vs usual: a domain the filter blocks is marked (blocked) in red next to its name and has only an *Allow* button; the others have only *Block*. The list is alphabetical.
-  - *Devices*, leases: the buttons of a row (Ping, Story, Live, Reserve) have the same width, so they line up from row to row.
+  - *Devices*, leases: *Reserve* and *Reserved* have the same width, so the buttons before them do not move from row to row.
   - *Device story*: a *Blocked domains* list shows the domains the filter stopped for the device in the chosen period (alphabetical, with count and last time, and an *Allow* button).
   - *Proxy*, What to block: *Your own rules* is a list (what each rule does, a Remove button) with an Add row (hide a page part, block an address, never filter a site) instead of a text box. The setting is stored as before.
   - *Proxy*, Ad-block lists: EasyList, EasyPrivacy and uBlock filters are switches; a list set in the server settings that is none of these shows below them with Remove, instead of a text box. Each list shows its last sync under its name. The setting is stored as before.
