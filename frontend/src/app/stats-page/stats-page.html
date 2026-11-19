@@ -71,7 +71,7 @@
           }
         </p>
       }
-      <table class="sr-only">
+      <div class="sr-only"><table>
         <caption>Queries per {{ grain().name }}</caption>
         <thead><tr><th>Start</th><th>All</th><th>DNS</th><th>Blocked by DNS</th><th>Proxy</th><th>Blocked by the proxy</th></tr></thead>
         <tbody>
@@ -79,7 +79,7 @@
             <tr><th>{{ p.full }}</th><td>{{ p.count }}</td><td>{{ p.count - p.pcount - p.blocked }}</td><td>{{ p.blocked }}</td><td>{{ p.pcount - p.proxy }}</td><td>{{ p.proxy }}</td></tr>
           }
         </tbody>
-      </table>
+      </table></div>
     } @else { <p class="soft">No queries in this period. Pick a longer period, or check that clients use this server for DNS.</p> }
   </section>
 

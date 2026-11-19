@@ -10,6 +10,7 @@
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**
+  - *Statistics*: the caption "Queries per day" of the hidden table for screen readers showed under the chart; the table is now fully hidden.
   - *Device story*, Activity: the hours with queries were drawn transparent (the colour was computed with `calc(<percentage> * 1%)`, which the browser drops), so only the empty hours showed. The heat and the red blocked stripe are drawn again.
   - *Device story*, Activity: a busy device showed empty hours (only the newest 2000 queries were read, so the older hours stayed blank). The server now counts the queries per hour (`GET /api/logs/hourly/`, same filters as the log), so every hour of the period is drawn.
   - Records: two writers on the same zone (API, dynamic updates, import, automatic PTR) can no longer create the same record twice; the second waits for the first. Editing a record into an existing one is refused like creating a duplicate.
