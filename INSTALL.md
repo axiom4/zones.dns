@@ -21,7 +21,7 @@ Complete guide for a server install: PostgreSQL or MySQL/MariaDB, Redis, nginx, 
 - the **IP address** the DNS daemon will listen on, and which networks may query it;
 - the **upstream resolvers** (`UPSTREAM_DNS`, default `1.1.1.1`): list at least two, comma separated, so the network keeps resolving when one is down.
 
-Both gunicorn and `rundns` are single instances: the sign-in key lives in the memory of one process (see "Encrypted sign-in" in the README), and `rundns` also purges the old log once an hour.
+Both gunicorn and `rundns` are single instances: the sign-in key lives in the memory of one process (see "Encrypted sign-in" in [docs/REFERENCE.md](docs/REFERENCE.md)), and `rundns` also purges the old log once an hour.
 
 Paths below: code in `/opt/dns/app`, virtualenv `/opt/dns/.venv`, user `dns`, host `dns.example.com`, server IP `192.0.2.10`.
 
@@ -445,7 +445,7 @@ Restarting `dns-api` makes a new sign-in key: the GUI downloads it again by itse
 | `import_blocklist` | nightly 04:00 | the public blocklists and the ad-block lists of the proxy | public lists or `PROXY_RULE_LISTS` are used |
 | `/etc/cron.d/dns-postgres-maintenance` | Sunday 05:15, 1st of the month 06:00 | PostgreSQL `vacuumdb --analyze` and `reindexdb --concurrently` of the blocklist table | PostgreSQL (`deploy/cron/`, see section 14) |
 
-Not recurring: `rebuild_stats` (only if the statistics look wrong), `partition_querylog` (once), `scan_trackers` (by hand, README), `mfa_reset` (lost second factor). Keep the PostgreSQL job after the blocklist import (it is: 05:15 against 04:00).
+Not recurring: `rebuild_stats` (only if the statistics look wrong), `partition_querylog` (once), `scan_trackers` (by hand, docs/REFERENCE.md), `mfa_reset` (lost second factor). Keep the PostgreSQL job after the blocklist import (it is: 05:15 against 04:00).
 
 The `.gitignore` excludes `.env`, the GeoIP databases, `staticfiles/` and the build folders.
 
@@ -455,7 +455,7 @@ Nothing uses the server until clients ask it. Options: set the DNS server in you
 
 ## 13. Optional: geolocation databases
 
-For cities and a map that work offline, download the `.mmdb` files into `/opt/dns/app/backend/geoip-data` as shown in the README, owned by `dns`, and set `GEOIP_CITY_DB`, `GEOIP_ASN_DB` in `.env` (absolute paths). They are re-read by themselves when replaced: schedule the download monthly in cron. Without them the API uses DNS lookups (Team Cymru) for country and network.
+For cities and a map that work offline, download the `.mmdb` files into `/opt/dns/app/backend/geoip-data` as shown in docs/REFERENCE.md, owned by `dns`, and set `GEOIP_CITY_DB`, `GEOIP_ASN_DB` in `.env` (absolute paths). They are re-read by themselves when replaced: schedule the download monthly in cron. Without them the API uses DNS lookups (Team Cymru) for country and network.
 
 ## 14. Logs, backup, maintenance
 
@@ -484,7 +484,7 @@ For cities and a map that work offline, download the `.mmdb` files into `/opt/dn
 
 | Symptom | Cause and fix |
 |---|---|
-| The API will not start: weak `SECRET_KEY` | With `DEBUG=false` the key must have at least 50 characters. Generate a new one (README, "Configuration"). |
+| The API will not start: weak `SECRET_KEY` | With `DEBUG=false` the key must have at least 50 characters. Generate a new one (docs/REFERENCE.md, "Configuration"). |
 | `DisallowedHost: Invalid HTTP_HOST header: '192.168.1.23'` | The browser used an address that is not in `ALLOWED_HOSTS`. Use the configured host name, or add the address: `ALLOWED_HOSTS=dns.example.com,192.168.1.23` (and `CSRF_TRUSTED_ORIGINS=https://dns.example.com,https://192.168.1.23`, and the IP in the certificate SAN). Passkeys never work on an IP address: sign in through the host name. |
 | `502 Bad Gateway` from nginx | gunicorn is down or not on `127.0.0.1:8000`: `systemctl status dns-web`, `journalctl -u dns-web` (supervisor: `supervisorctl status`, `/var/log/supervisor/dns-api.err.log`). |
 | `403` "CSRF verification failed" | `CSRF_TRUSTED_ORIGINS` is missing the exact `https://host` used in the browser, or `BEHIND_PROXY` is not `true`. |

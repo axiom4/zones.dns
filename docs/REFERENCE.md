@@ -1,4 +1,6 @@
-# Zones.dns
+# Zones.dns: reference
+
+Every feature and setting in detail. The short overview is the [README](../README.md).
 
 DNS daemon (Python/dnslib) + API (Django 6.1.3 / DRF 3.18.3) + GUI (Angular 22).
 Zones and records live in the database; the daemon keeps a copy in memory and reloads it when the data changes, so changes made in the GUI take effect at once (within a second without Redis).
@@ -216,7 +218,7 @@ python manage.py rundhcp    # off by default: turn DHCP (and optional DHCPv6, Ro
 
 ## Production deployment
 
-The full, step-by-step guide is in **[INSTALL.md](INSTALL.md)**: prerequisites, TLS, PostgreSQL or MySQL/MariaDB, Redis, nginx (HTTP/3), supervisor, port 53 without root, firewall, verification, client setup, backup, hardening, updates and troubleshooting.
+The full, step-by-step guide is in **[INSTALL.md](../INSTALL.md)**: prerequisites, TLS, PostgreSQL or MySQL/MariaDB, Redis, nginx (HTTP/3), supervisor, port 53 without root, firewall, verification, client setup, backup, hardening, updates and troubleshooting.
 
 Summary: gunicorn (**one worker only**, the sign-in key lives in process memory) behind nginx, `manage.py rundns` as a second supervisor program, `DEBUG=false`, a long `SECRET_KEY`, `BEHIND_PROXY=true`, `DATABASE_URL` and `REDIS_URL` set, then `migrate` and `collectstatic`. The virtual host is `deploy/nginx/dns.example.lan`.
 
@@ -226,4 +228,4 @@ Run `python manage.py test zones` and `ruff check .` in `backend/`, `npm test` i
 
 ## Licence
 
-Code released under the **BSD 3-Clause** licence (see [LICENSE](LICENSE)). The libraries used keep their own licences. The DB-IP GeoIP databases, downloaded separately, are under CC BY 4.0 (credit "IP Geolocation by DB-IP") and are not part of the repository.
+Code released under the **BSD 3-Clause** licence (see [LICENSE](../LICENSE)). The libraries used keep their own licences. The DB-IP GeoIP databases, downloaded separately, are under CC BY 4.0 (credit "IP Geolocation by DB-IP") and are not part of the repository.
