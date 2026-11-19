@@ -75,10 +75,17 @@
           @if (row.reason) { <small class="note-t">{{ row.reason }}</small> }
         </span>
         <span class="pl-meta"><span class="pl-client">{{ row.client }}</span><span>{{ row.ms }} ms</span><time [attr.datetime]="row.time">{{ whenLog(row.time) }}</time></span>
-        <button class="mini" type="button" (click)="allowHost(row)" [disabled]="isHostAllowed(row.host)"
-                [attr.aria-label]="isHostAllowed(row.host) ? row.host + ' is already allowed' : 'Allow ' + row.host + ' where it is blocked'">
-          {{ isHostAllowed(row.host) ? 'Allowed' : 'Allow' }}
-        </button>
+        @if (row.outcome === 'allowed') {
+          <button class="mini" type="button" (click)="blockHost(row)" [disabled]="blockedNow().has(row.host)"
+                  [attr.aria-label]="blockedNow().has(row.host) ? row.host + ' is already blocked' : 'Block ' + row.host">
+            {{ blockedNow().has(row.host) ? 'Blocked' : 'Block' }}
+          </button>
+        } @else {
+          <button class="mini" type="button" (click)="allowHost(row)" [disabled]="isHostAllowed(row.host)"
+                  [attr.aria-label]="isHostAllowed(row.host) ? row.host + ' is already allowed' : 'Allow ' + row.host + ' where it is blocked'">
+            {{ isHostAllowed(row.host) ? 'Allowed' : 'Allow' }}
+          </button>
+        }
       </li>
   </ng-template>
 

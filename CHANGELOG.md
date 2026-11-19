@@ -17,6 +17,7 @@
   - Sign-in page: the card is exactly in the middle of the screen (it was centred together with the line under it, so it sat a little above the middle); on a short screen, such as a phone held sideways, it starts at the top.
   - Sign-in page: on a screen wider than 1600px the card sat to the left (the page is a `<main>` and got the 1600px limit of the app); it is centred again.
 - **Changed** (GUI)
+  - *Proxy*, requests: an allowed request has a *Block* button (it blocks the host in DNS and in the proxy, after a confirmation); the blocked and filtered ones keep *Allow*.
   - *Device story*, Today vs usual: a domain the filter blocks is marked (blocked) in red next to its name and has only an *Allow* button; the others have only *Block*. The list is alphabetical.
   - *Devices*, leases: *Reserve* and *Reserved* have the same width, so the buttons before them do not move from row to row.
   - *Device story*: a *Blocked domains* list shows the domains the filter stopped for the device in the chosen period (alphabetical, with count and last time, and an *Allow* button).

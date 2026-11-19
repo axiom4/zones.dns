@@ -20,6 +20,7 @@ import {
   proxySettingsPartialUpdate,
   proxySettingsRetrieve,
   statusRetrieve,
+  blockedCreate,
 } from '../api/functions';
 import { ProxyAllow, ProxyLogGroup, ProxyRuleList, QueryLogClient, ProxySettings, ProxyInfo, ProxyLog, ProxyLogsResponse, ProxyTestResult, Status } from '../api/models';
 import { Autocomplete } from '../lib/autocomplete';
@@ -94,6 +95,7 @@ export class ProxyPage implements OnDestroy {
   testUrl = '';
   testResult = signal<ProxyTestResult | null>(null);
   status = signal<Status | null>(null); // is runproxy running (its heartbeat)
+  blockedNow = signal<ReadonlySet<string>>(new Set()); // hosts blocked from this log
   allowedNow = signal<ReadonlySet<string>>(new Set()); // hosts allowed in DNS from this log (an @@ rule shows in the settings)
   copied = signal('');
   readonly blockLayer = blockLayer;
@@ -358,6 +360,14 @@ export class ProxyPage implements OnDestroy {
       } catch (e) { dlg.showModal(); throw e; }
       await this.loadLogs();
     }, { ok: `Deleted ${this.purgeCount()} proxy requests` });
+  }
+
+  /** Blocks the host in DNS (a personal block: the proxy honours it too). */
+  blockHost(row: ProxyLog) {
+    const host = (row.host || '').trim().toLowerCase();
+    if (!host || this.blockedNow().has(host)) return;
+    this.ui.ask(`Block ${host}?`, 'The domain and its subdomains are blocked in DNS and in the proxy. Undo it in Blocklist > Personal blocks.', () =>
+      this.ui.run(async () => { await this.api.invoke(blockedCreate, { body: { name: host } }); this.blockedNow.update(s => new Set(s).add(host)); }, { ok: `Blocked ${host}` }), 'Block domain');
   }
 
   isHostAllowed(host: string) {
