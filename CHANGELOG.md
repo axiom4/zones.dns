@@ -5,6 +5,7 @@
   - Sign-in page: the card is exactly in the middle of the screen (it was centred together with the line under it, so it sat a little above the middle); on a short screen, such as a phone held sideways, it starts at the top.
   - Sign-in page: on a screen wider than 1600px the card sat to the left (the page is a `<main>` and got the 1600px limit of the app); it is centred again.
 - **Changed** (GUI)
+  - *Proxy*, What to block: *Your own rules* is a list (what each rule does, a Remove button) with an Add row (hide a page part, block an address, never filter a site) instead of a text box. The setting is stored as before.
   - *Network pulse* has a radar icon in the menu (it shared the pin of the Traffic map).
 
 ## 1.5.0 — 2026-11-18

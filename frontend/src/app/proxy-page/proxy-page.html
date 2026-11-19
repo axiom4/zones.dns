@@ -155,6 +155,35 @@
     <fieldset class="group">
       <legend>What to block</legend>
       <app-settings-fields prefix="px" [fields]="blocking" [model]="cfg()" [errs]="errs()" />
+      <h3 class="sub" id="px-rules-h">Your own rules</h3>
+      <p class="help">Hide a part of a page, block an address, or exempt a site. They apply when you save.</p>
+      @if (customRules().length) {
+        <ul class="records" aria-labelledby="px-rules-h">
+          @for (r of customRules(); track r.line) {
+            <li>
+              <span class="rname">{{ r.kind }}<small class="note-t">{{ r.kind === 'Hide' ? 'on ' + r.where : r.kind === 'Never filter' ? 'no filtering, no inspection' : 'addresses containing this text, or /regex/' }}</small></span>
+              <span class="rvalue"><code>{{ r.what }}</code></span>
+              <button class="mini danger" type="button" (click)="removeRule(r.line)" [attr.aria-label]="'Remove rule ' + r.line">Remove</button>
+            </li>
+          }
+        </ul>
+      } @else {
+        <p class="soft">No rules of your own yet.</p>
+      }
+      <div class="composer" role="group" aria-label="Add a rule" (keydown.enter)="$event.preventDefault(); addRule()">
+        <select name="newKind" aria-label="Kind of rule" [(ngModel)]="newKind" [ngModelOptions]="{ standalone: true }">
+          <option value="hide">Hide a page part</option>
+          <option value="block">Block an address</option>
+          <option value="allow">Never filter a site</option>
+        </select>
+        @if (newKind === 'hide') {
+          <input name="newSite" aria-label="Site (empty: every site)" [(ngModel)]="newSite" [ngModelOptions]="{ standalone: true }" placeholder="site, empty: all" autocomplete="off" spellcheck="false">
+        }
+        <input class="grow" name="newValue" aria-label="Rule" [(ngModel)]="newValue" [ngModelOptions]="{ standalone: true }" autocomplete="off" spellcheck="false"
+               [placeholder]="newKind === 'hide' ? '.sponsored-box' : newKind === 'block' ? 'custom-ad-banner or /regex/' : 'bank.example.com'">
+        <button class="primary" type="button" (click)="addRule()" [disabled]="!newValue.trim()">Add</button>
+      </div>
+      @if (errs()['PROXY_CUSTOM_RULES']) { <small class="bad" role="alert">{{ errs()['PROXY_CUSTOM_RULES'] }}</small> }
     </fieldset>
     <fieldset class="group">
       <legend>Ad-block lists</legend>

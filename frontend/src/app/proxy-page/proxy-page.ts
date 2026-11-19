@@ -44,8 +44,6 @@ const BLOCKING: SettingField[] = [
   { key: 'PROXY_BLOCK_ADS', kind: 'check', label: 'Block ads, banners and trackers', help: 'Blocks the Blocklist domains and ad addresses, and hides ad slots in pages.' },
   { key: 'PROXY_BLOCK_POPUPS', kind: 'check', label: 'Block popups', help: 'Stops pages from opening windows by themselves and from invisible click-catching layers.' },
   { key: 'PROXY_HTTPS_MITM', kind: 'check', label: 'Inspect HTTPS pages', term: 'HTTPS inspection', help: 'Off: secure sites are blocked or let through whole. On: their pages are filtered too; each device must trust the Root CA.' },
-  { key: 'PROXY_CUSTOM_RULES', kind: 'textarea', label: 'Your own rules', ph: '##.sponsored-box\nexample.com##.promo-modal\n/custom-ad-banner/\n@@bank.example.com',
-    help: 'One per line. ##selector hides page parts (example.com##selector: on one site only); text or /regex/ blocks addresses; @@site.com never filters nor inspects that site.' },
 ];
 const LISTS: SettingField[] = [
   { key: 'PROXY_RULE_LISTS', kind: 'textarea', label: 'Ad-block lists', term: 'EasyList format', ph: 'easylist=https://easylist.to/easylist/easylist.txt\neasyprivacy=https://easylist.to/easylist/easyprivacy.txt',
@@ -119,6 +117,28 @@ export class ProxyPage implements OnDestroy {
   live = true;
   private pollTimer?: ReturnType<typeof setInterval>;
   private searchTimer?: ReturnType<typeof setTimeout>;
+
+  // Your own rules: kept as one line each in PROXY_CUSTOM_RULES (what the proxy reads), shown and edited as a list
+  customRules = computed(() => (this.cfg().PROXY_CUSTOM_RULES || '').split(/\r?\n/).map(l => l.trim()).filter(Boolean).map(line => {
+    if (line.startsWith('@@')) return { line, kind: 'Never filter', what: line.slice(2), where: '' };
+    const i = line.indexOf('##');
+    if (i >= 0) return { line, kind: 'Hide', what: line.slice(i + 2), where: line.slice(0, i) || 'every site' };
+    return { line, kind: 'Block', what: line, where: '' };
+  }));
+  newKind: 'hide' | 'block' | 'allow' = 'hide';
+  newSite = '';
+  newValue = '';
+  addRule() {
+    const v = this.newValue.trim().replace(/^(@@|##)/, '');
+    if (!v) return;
+    const line = this.newKind === 'allow' ? '@@' + v : this.newKind === 'block' ? v : this.newSite.trim() + '##' + v;
+    const old = this.cfg().PROXY_CUSTOM_RULES || '';
+    if (!old.split(/\r?\n/).some(l => l.trim() === line)) this.cfg.update(c => ({ ...c, PROXY_CUSTOM_RULES: old.trim() ? old.replace(/\s+$/, '') + '\n' + line : line }));
+    this.newValue = '';
+  }
+  removeRule(line: string) {
+    this.cfg.update(c => ({ ...c, PROXY_CUSTOM_RULES: (c.PROXY_CUSTOM_RULES || '').split(/\r?\n/).filter(l => l.trim() !== line).join('\n') }));
+  }
 
   allowedDomains = computed(() => {
     const raw = this.cfg().PROXY_CUSTOM_RULES || '';
