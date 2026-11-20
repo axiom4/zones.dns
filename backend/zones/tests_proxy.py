@@ -805,6 +805,40 @@ class NoPostRetryTests(TestCase):
         self.assertIn(b'502', resp.split(b'\r\n', 1)[0])
         self.assertEqual(posts, [b'abc'])  # once: a proxy must not repeat a POST (RFC 9110 9.2.2)
 
+    def test_a_stream_that_breaks_says_who_it_was_waiting_for(self):
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        class H(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.1'
+
+            def do_GET(self):
+                self.send_response(200)
+                self.send_header('Content-Type', 'image/jpeg')
+                self.send_header('Content-Length', '100000')
+                self.end_headers()
+                self.wfile.write(b'x' * 1000)
+                self.wfile.flush()
+                self.close_connection = True  # the server goes away in the middle of the body
+
+            def log_message(self, *a):
+                pass
+
+        srv = ThreadingHTTPServer(('127.0.0.1', 0), H)
+        srv.daemon_threads = True
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        entries = []
+        ns = SimpleNamespace(
+            settings_getter=lambda: SimpleNamespace(PROXY_BLOCK_ADS=False, PROXY_BLOCK_POPUPS=False, PROXY_HTTPS_MITM=False, PROXY_CUSTOM_RULES='', DHCP_SERVER='', DHCP_WPAD=False),
+            allow_loopback=True, upstream_ssl_context=None, log=SimpleNamespace(add=entries.append),
+        )
+        _run_proxy_session(f'GET http://127.0.0.1:{srv.server_port}/p.jpg HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n'.encode(), ns)
+        failed = [e for e in entries if e.outcome == 'error']
+        self.assertEqual(len(failed), 1)
+        self.assertIn('Upstream failed while streaming', failed[0].reason)
+        self.assertIn('(after 1000 bytes, waiting for the server)', failed[0].reason)
+
     def test_a_full_http2_connection_makes_the_request_wait_not_fail(self):
         from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
         from unittest import mock

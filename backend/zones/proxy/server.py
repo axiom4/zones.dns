@@ -1020,7 +1020,8 @@ class Client:
             pass  # HTTP/2: the client reset the stream
         except Exception as e:
             if ex.started:
-                self.log(log_method, host, full_url, 'timeout' if _timed_out(e) else 'error', info.status, f'Upstream failed while streaming: {_why(e)}', t0)
+                where = f' (after {info.sent} bytes, waiting for {info.waiting})' if hasattr(info, 'waiting') else ''
+                self.log(log_method, host, full_url, 'timeout' if _timed_out(e) else 'error', info.status, f'Upstream failed while streaming: {_why(e)}{where}', t0)
                 await self.abort(ex)
             else:
                 self.log(log_method, host, full_url, *_gateway(e), f'Bad Gateway: {_why(e)}', t0)
@@ -1126,10 +1127,14 @@ class Client:
             self.log(info.log_method, info.host, info.full_url, 'allowed', status, ctype.partition(';')[0] or 'stream', info.t0)
             return
         try:
+            info.sent, info.waiting = len(prefix), 'the server'  # where a stalled stream stood: in the log reason of a failure
             if prefix:
                 await ex.send(prefix)
             async for chunk in chunks:
+                info.waiting = 'the client'
                 await ex.send(chunk)
+                info.sent += len(chunk)
+                info.waiting = 'the server'
             await ex.finish()
         except (OSError, StreamGone, h11.LocalProtocolError) as e:
             if isinstance(e, h11.LocalProtocolError):
