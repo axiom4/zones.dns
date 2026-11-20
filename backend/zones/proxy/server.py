@@ -9,6 +9,7 @@ import asyncio
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache, partial
+import hashlib
 from http import HTTPStatus
 import ipaddress
 import queue
@@ -615,6 +616,44 @@ def _tls_sni(data):
         return None
 
 
+def _tls_fingerprint(data):
+    """What a TLS ClientHello says about the program that sent it: 'alpn=h2,http/1.1 ciphers=17 ja3=<12 hex>' (JA3 cut to 12 characters), '' if it cannot be read.
+    A client that names no server (an IP address) still tells its family this way."""
+    try:
+        if data[0] != 0x16 or data[5] != 1:
+            return ''
+        grease = lambda v: v & 0x0f0f == 0x0a0a  # RFC 8701 values change at every connection: JA3 leaves them out
+        word = lambda at: int.from_bytes(data[at:at + 2], 'big')
+        version, i = word(9), 9 + 2 + 32
+        i += 1 + data[i]
+        n = word(i)
+        ciphers = [word(j) for j in range(i + 2, i + 2 + n, 2)]
+        i += 2 + n
+        i += 1 + data[i]
+        end = i + 2 + word(i)
+        i += 2
+        exts, groups, formats, alpn = [], [], [], []
+        while i + 4 <= end:
+            kind, n = word(i), word(i + 2)
+            body = data[i + 4:i + 4 + n]
+            exts.append(kind)
+            if kind == 10:
+                groups = [int.from_bytes(body[j:j + 2], 'big') for j in range(2, 2 + int.from_bytes(body[:2], 'big'), 2)]
+            elif kind == 11:
+                formats = list(body[1:1 + body[0]])
+            elif kind == 16:
+                j = 2
+                while j < len(body):
+                    alpn.append(body[j + 1:j + 1 + body[j]].decode('ascii', 'replace'))
+                    j += 1 + body[j]
+            i += 4 + n
+        join = lambda items: '-'.join(str(v) for v in items if not grease(v))
+        ja3 = ','.join([str(version), join(ciphers), join(exts), join(groups), '-'.join(map(str, formats))])
+        return f'alpn={",".join(alpn) or "-"} ciphers={len(ciphers)} ja3={hashlib.md5(ja3.encode(), usedforsecurity=False).hexdigest()[:12]}'
+    except IndexError:
+        return ''
+
+
 class H1Connection:
     def __init__(self, client, stream, mitm=None):
         self.client = client
@@ -653,7 +692,7 @@ class H1Connection:
                     if not self.handled and not self.mitm and (sni := _tls_sni(self.first or b'')) is not None:
                         # TLS to the plain port: an https:// link to the proxy, or a client set to use it as an HTTPS (TLS) proxy
                         self.client.log('TLS', sni[:253], '', 'error', 400, 'TLS sent to the plain proxy port (https:// to the proxy, or an HTTPS proxy setting): '
-                                        'use the proxy as an HTTP proxy, with CONNECT for https sites', None)
+                                        'use the proxy as an HTTP proxy, with CONNECT for https sites' f' [{_tls_fingerprint(self.first)}]', None)
                         return  # a TLS client cannot read an HTTP answer
                     self.client.log('', '', '', 'error', status, f'Bad request: {e}'[:255], None)
                     body = f'{_phrase(status)}\n'.encode()

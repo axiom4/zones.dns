@@ -203,6 +203,25 @@ class TlsOnPlainPortTests(TestCase):
         self.assertIsNone(ps._tls_sni(b'GET / HTTP/1.1\r\n'))
         self.assertIsNone(ps._tls_sni(hello[:20]))  # cut short
 
+    def test_the_fingerprint_of_a_client_hello_names_its_family_without_a_server_name(self):
+        import ssl
+        import re
+
+        def hello(name):
+            ctx = ssl.create_default_context()
+            ctx.set_alpn_protocols(['h2', 'http/1.1'])
+            inc, out = ssl.MemoryBIO(), ssl.MemoryBIO()
+            tls = ctx.wrap_bio(inc, out, server_hostname=name)
+            with self.assertRaises(ssl.SSLWantReadError):
+                tls.do_handshake()
+            return out.read()
+        a, b = ps._tls_fingerprint(hello('www.example.org')), ps._tls_fingerprint(hello('192.168.1.23'))
+        self.assertRegex(a, r'^alpn=h2,http/1\.1 ciphers=\d+ ja3=[0-9a-f]{12}$')
+        self.assertEqual(re.sub(r'ja3=\w+', '', a), re.sub(r'ja3=\w+', '', b))
+        self.assertEqual(ps._tls_fingerprint(hello('www.example.org')), a)  # the random and the session do not count
+        self.assertEqual(ps._tls_fingerprint(b'GET / HTTP/1.1\r\n'), '')
+        self.assertEqual(ps._tls_fingerprint(hello('x.example')[:50]), '')  # cut short
+
 
 class FilterLinearTests(TestCase):
     def test_unclosed_tags_are_filtered_in_linear_time(self):

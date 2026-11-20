@@ -9,6 +9,7 @@
   - API throttling: `API_RATE` (default `1200/min`) per user, per address when not signed in; a client above it gets 429. The GUI uses far fewer requests.
   - *Proxy*: `PROXY_WORKERS` processes (default: the number of cores, at most 4) share the proxy port with `SO_REUSEPORT`, so a busy proxy is no longer limited to one core (a Cortex-A72 handled about 7 MB/s per process). `runproxy` starts and supervises them; `PROXY_WORKERS=1` keeps a single process.
   - Proxy log: a response that breaks halfway says in the reason how many bytes had gone out and whom the proxy was waiting for (`waiting for the server` or `waiting for the client`).
+  - Proxy log: *TLS sent to the plain proxy port* adds the ClientHello's ALPN, number of ciphers and a short JA3 hash, so a client that names no server (an IP address) can still be told apart (Chrome, Electron, Apple...).
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**
