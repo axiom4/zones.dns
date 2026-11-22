@@ -1041,7 +1041,10 @@ class Client:
                     async with pool.stream(ex.method, url, headers=list(fwd.items()), content=req_body,
                                            extensions={'timeout': UPSTREAM_TIMEOUTS}) as resp:
                         info.responded = True
-                        await self.relay(info, resp)
+                        try:
+                            await self.relay(info, resp)
+                        finally:
+                            await asyncio.shield(upstream.cancel_open_stream(resp))  # a no-op for a stream that ended
                     return
                 except httpcore.LocalProtocolError as e:
                     # HTTP/2 connection with all its streams open (a burst): h2 refuses before sending a byte, so any request may wait a moment and go again

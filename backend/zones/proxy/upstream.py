@@ -9,6 +9,7 @@ import contextvars
 import socket
 import ssl
 
+import h2.errors
 import httpcore
 
 from . import revocation
@@ -69,6 +70,22 @@ class _Backend(httpcore.AsyncNetworkBackend):
 
     async def sleep(self, seconds):
         await asyncio.sleep(seconds)
+
+
+async def cancel_open_stream(resp):
+    """Tell the server to stop an HTTP/2 response the proxy gives up on (the client went away, the stream broke). httpcore frees its own
+    slot but never resets the stream: it stays open in h2 and counts against the server's 100, the server keeps sending data nobody
+    reads, and enough of them fill the connection ('Max outbound streams is 100, 100 open', bodies that stall). Relies on httpcore's
+    private HTTP2ConnectionByteStream (_connection, _stream_id, _request): anything else is left alone."""
+    body = resp.stream
+    conn, sid, request = (getattr(body, name, None) for name in ('_connection', '_stream_id', '_request'))
+    try:
+        stream = conn._h2_state.streams.get(sid)
+        if stream is not None and stream.open:
+            conn._h2_state.reset_stream(sid, h2.errors.ErrorCodes.CANCEL)
+            await conn._write_outgoing_data(request)
+    except Exception:  # not an HTTP/2 stream, or the connection is already gone
+        pass
 
 
 def pool_for(server, resolve, executor):

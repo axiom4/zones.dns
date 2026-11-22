@@ -1,4 +1,5 @@
 """Tests for the HTTP/HTTPS ad-blocking & popup-blocking proxy, DHCP WPAD (option 252 + DNS wpad.<domain>), PAC generation, and HTTPS MITM."""
+import asyncio
 import gzip
 import socket
 import ssl
@@ -1404,3 +1405,27 @@ class LingerTests(TestCase):
             await stream.aclose()
             b.close()
         asyncio.run(main())
+
+
+class CancelOpenStreamTests(TestCase):
+    def test_a_response_given_up_resets_its_http2_stream_so_it_stops_counting(self):
+        import h2.config, h2.connection
+        from types import SimpleNamespace
+        from .proxy import upstream
+        h2c = h2.connection.H2Connection(h2.config.H2Configuration(client_side=True))
+        h2c.initiate_connection()
+        h2c.send_headers(1, [(':method', 'GET'), (':scheme', 'https'), (':authority', 'x'), (':path', '/')], end_stream=True)
+        h2c.data_to_send()
+        sent = []
+
+        async def write(request):
+            sent.append(h2c.data_to_send())
+        conn = SimpleNamespace(_h2_state=h2c, _write_outgoing_data=write)
+        resp = SimpleNamespace(stream=SimpleNamespace(_connection=conn, _stream_id=1, _request=None))
+        self.assertTrue(h2c.streams[1].open)
+        asyncio.run(upstream.cancel_open_stream(resp))
+        self.assertFalse(h2c.streams[1].open)
+        self.assertEqual(h2c.open_outbound_streams, 0)
+        self.assertTrue(sent and sent[0])  # the RST_STREAM went out
+        asyncio.run(upstream.cancel_open_stream(resp))  # again, or not HTTP/2 at all: nothing happens
+        asyncio.run(upstream.cancel_open_stream(SimpleNamespace(stream=object())))
