@@ -10,6 +10,7 @@
   - *Proxy*: `PROXY_WORKERS` processes (default: the number of cores, at most 4) share the proxy port with `SO_REUSEPORT`, so a busy proxy is no longer limited to one core (a Cortex-A72 handled about 7 MB/s per process). `runproxy` starts and supervises them; `PROXY_WORKERS=1` keeps a single process.
   - Proxy log: a response that breaks halfway says in the reason how many bytes had gone out and whom the proxy was waiting for (`waiting for the server` or `waiting for the client`).
   - Proxy log: *TLS sent to the plain proxy port* adds the ClientHello's ALPN, number of ciphers and a short JA3 hash, so a client that names no server (an IP address) can still be told apart (Chrome, Electron, Apple...).
+  - Proxy log: a blocked row has a *Bypass* button next to *Allow*: it adds only an `@@host` rule, so the proxy neither blocks nor inspects the site while DNS keeps blocking it (`bypass` in `POST /api/proxy/allow/`; *Undo* removes the rule). *Allow* on a site of the DNS blacklist only makes a DNS exception and the proxy still inspects it, which broke Photoshop: its crash reporter got the proxy's stand-in JSON from `crs.cr.adobe.com` and aborted at launch.
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**

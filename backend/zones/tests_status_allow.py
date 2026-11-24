@@ -46,6 +46,19 @@ class AllowTests(TestCase):
         self.assertFalse(BlockedDomain.objects.filter(pk=done['dns_id']).exists())
         self.assertEqual(resolver.blocked_entry('ads.tracker.example'), ('tracker.example', 'easylist'))
 
+    def test_bypass_adds_only_the_proxy_exception_and_leaves_dns_blocked(self):
+        BlockedDomain.objects.create(name='cr.example', source='list', list_name='hagezi')
+        resolver._data = None
+        r = self.api.post('/api/proxy/allow/', {'host': 'crs.cr.example', 'url': 'https://crs.cr.example/p', 'bypass': True}, format='json')
+        self.assertEqual(r.status_code, 200, r.content)
+        done = r.json()
+        self.assertEqual((done['dns_id'], done['dns_block'], done['proxy_rule']), (None, '', '@@crs.cr.example'))
+        self.assertEqual(_rules(), '@@crs.cr.example')
+        resolver._data = None
+        self.assertEqual(resolver.blocked_entry('crs.cr.example'), ('cr.example', 'hagezi'))
+        self.undo(done)
+        self.assertEqual(_rules(), '')
+
     def test_proxy_rule_gets_an_exception_and_undo_removes_only_it(self):
         Setting.objects.create(key=RULES_KEY, value='##.promo\n/banner-x/')
         done = self.allow('cdn.example', 'https://cdn.example/banner-x/a.png')

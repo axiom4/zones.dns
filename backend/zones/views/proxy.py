@@ -164,14 +164,15 @@ def _forget_counts():
         pass
 
 
-def allow_host(host, url=''):
+def allow_host(host, url='', bypass=False):
     """Lets `host` (and its subdomains) through whichever layer blocks it now, and returns what was done (ProxyAllowSerializer), which undo_allow() reverses.
     DNS blacklist (personal block, public list, pattern): a personal allow entry, which fixes DNS and the proxy at once. A proxy rule (ad or popup address,
     your own rules, an ad-block list): an @@host exception in the proxy's own rules, which also keeps the site out of HTTPS inspection. Neither: the
-    @@host exception too, as the proxy log's Allow always did (no page filtering, no inspection for the site)."""
+    @@host exception too, as the proxy log's Allow always did (no page filtering, no inspection for the site).
+    bypass: only the @@host exception, whatever blocks it: the proxy tunnels the site untouched (it outranks the DNS blacklist there), DNS stays as it is."""
     s = dhcp.dhcp_settings()
     out = {'host': host, 'dns_block': '', 'dns_id': None, 'dns_prev': None, 'dns_list': '', 'proxy_block': '', 'proxy_rule': '', 'note': ''}
-    if hit := resolver.blocked_entry(host):
+    if not bypass and (hit := resolver.blocked_entry(host)):
         out['dns_block'] = f'{hit[0]} ({hit[1]})'
         row = BlockedDomain.objects.select_for_update().filter(name=host).first()
         if row and row.source == 'manual':
@@ -236,7 +237,7 @@ class ProxyAllowView(APIView):
         ser = ProxyAllowRequestSerializer(data=request.data)
         ser.is_valid(raise_exception=True)
         with transaction.atomic():
-            out = allow_host(_host(ser.validated_data['host']), ser.validated_data.get('url', '').strip())
+            out = allow_host(_host(ser.validated_data['host']), ser.validated_data.get('url', '').strip(), ser.validated_data.get('bypass', False))
         return Response(ProxyAllowSerializer(out).data)
 
 

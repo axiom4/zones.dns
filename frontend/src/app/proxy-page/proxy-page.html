@@ -85,6 +85,10 @@
                   [attr.aria-label]="isHostAllowed(row.host) ? row.host + ' is already allowed' : 'Allow ' + row.host + ' where it is blocked'">
             {{ isHostAllowed(row.host) ? 'Allowed' : 'Allow' }}
           </button>
+          @if (row.outcome === 'blocked' && !isHostBypassed(row.host)) {
+            <button class="mini" type="button" (click)="bypassHost(row)" title="Let the proxy pass this site untouched: no blocking, no HTTPS inspection"
+                    [attr.aria-label]="'Bypass the proxy for ' + row.host">Bypass</button>
+          }
         }
       </li>
   </ng-template>

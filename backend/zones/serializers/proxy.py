@@ -95,6 +95,7 @@ class ProxyRuleListSerializer(serializers.Serializer):
 class ProxyAllowRequestSerializer(serializers.Serializer):
     host = serializers.CharField(max_length=253)
     url = serializers.CharField(required=False, allow_blank=True, max_length=2000, help_text='The address that was blocked (the proxy log row), for the address rules')
+    bypass = serializers.BooleanField(required=False, default=False, help_text='Only an @@host rule: the proxy neither blocks nor inspects the site; DNS is left as it is')
 
 
 class ProxyAllowPrevSerializer(serializers.Serializer):

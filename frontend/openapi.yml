@@ -4862,6 +4862,11 @@ components:
           description: The address that was blocked (the proxy log row), for the address
             rules
           maxLength: 2000
+        bypass:
+          type: boolean
+          default: false
+          description: 'Only an @@host rule: the proxy neither blocks nor inspects
+            the site; DNS is left as it is'
       required:
       - host
     ProxyAllowUndoRequest:

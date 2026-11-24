@@ -371,8 +371,11 @@ export class ProxyPage implements OnDestroy {
   }
 
   isHostAllowed(host: string) {
+    return this.allowedNow().has((host || '').toLowerCase()) || this.isHostBypassed(host);
+  }
+  /** An @@ rule covers the host (or a parent domain): the proxy tunnels it without blocking or inspecting it. */
+  isHostBypassed(host: string) {
     const h = (host || '').toLowerCase();
-    if (this.allowedNow().has(h)) return true;
     const allowed = this.allowedDomains();
     const parts = h.split('.');
     for (let i = 0; i < parts.length; i++) {
@@ -405,6 +408,20 @@ export class ProxyPage implements OnDestroy {
       const where = done.dns_id ? 'in DNS and the proxy' : done.proxy_rule ? 'through the proxy' : ''; // a DNS exception lets the proxy through too
       if (!where) { this.ui.toast(`${host} is already allowed`); return; }
       this.ui.toast(`Allowed ${host} ${where}${done.note ? '. ' + done.note : ''}`, async () => {
+        await this.api.invoke(proxyAllowUndoCreate, { body: done });
+        await this.allowed(done, false);
+      });
+    });
+  }
+  /** Bypass: only an @@host rule, whatever blocks the site; the proxy tunnels it untouched and DNS stays as it is. Undo removes the rule. */
+  bypassHost(row: ProxyLog) {
+    const host = (row.host || '').trim().toLowerCase();
+    if (!host || this.isHostBypassed(host)) return;
+    return this.ui.run(async () => {
+      const done = await this.api.invoke(proxyAllowCreate, { body: { host, url: row.url || undefined, bypass: true } });
+      await this.allowed(done, true);
+      if (!done.proxy_rule) { this.ui.toast(`${host} already bypasses the proxy`); return; }
+      this.ui.toast(`${host} bypasses the proxy (no blocking, no inspection)`, async () => {
         await this.api.invoke(proxyAllowUndoCreate, { body: done });
         await this.allowed(done, false);
       });
