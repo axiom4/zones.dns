@@ -14,6 +14,7 @@
 - **Changed** (docs)
   - The README is a short presentation with screenshots (`docs/screenshots/`); the full text moved to `docs/REFERENCE.md`.
 - **Fixed**
+  - *Proxy settings*, *Your own rules*: the *Remove* button of a rule had a solid red background (`button.danger`); it now looks like the *Remove* of the ad-block lists (red text, red border on hover).
   - *Proxy*: a response the proxy gives up on (the browser cancelled a video, a stream broke) now resets its HTTP/2 stream towards the server. Before, httpcore left it open: the abandoned streams piled up to the server's limit of 100 (`502 Max outbound streams is 100, 100 open` for a whole minute, 265 requests on Instagram) and kept the server sending data nobody read.
   - *Proxy*: a burst of requests to one HTTP/2 server (Instagram images, for example) failed with `502 Max outbound streams is 100, 100 open`; a request that finds the connection full now waits a moment and goes again.
   - *Statistics*: the caption "Queries per day" of the hidden table for screen readers showed under the chart; the table is now fully hidden.

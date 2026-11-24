@@ -174,7 +174,7 @@
             <li>
               <span class="rname">{{ r.kind }}<small class="note-t">{{ r.kind === 'Hide' ? 'on ' + r.where : r.kind === 'Never filter' ? 'no filtering, no inspection' : 'addresses containing this text, or /regex/' }}</small></span>
               <span class="rvalue"><code>{{ r.what }}</code></span>
-              <button class="mini danger" type="button" (click)="removeRule(r.line)" [attr.aria-label]="'Remove rule ' + r.line">Remove</button>
+              <button class="mini ghost del" type="button" (click)="removeRule(r.line)" [attr.aria-label]="'Remove rule ' + r.line">Remove</button>
             </li>
           }
         </ul>
