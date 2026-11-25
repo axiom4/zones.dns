@@ -2,7 +2,8 @@
 
 Kept: `||domain^` (the domain and its subdomains are blocked), `@@||domain^` (never filtered), `##selector` and `domain##selector` (hide page elements).
 Dropped: URL fragments, regular expressions and rules with options that need a browser (`$domain=`, `~third-party`...): they would be one regex per
-request for tens of thousands of rules. shortcut: domain and cosmetic rules only, add path rules when a real list needs them.
+request for tens of thousands of rules. A block limited to some kinds of request (`$subdocument`, `$image`, `$ping`...) is dropped too: the proxy
+cannot tell the kind, and blocking the whole host broke sites (`||s1.wp.com^$subdocument,third-party` took the pictures and styles of wordpress.com). shortcut: domain and cosmetic rules only, add path rules when a real list needs them.
 """
 import http.client
 import json
@@ -21,7 +22,8 @@ RULES = 'prl:'   # prl:<name> = the reduced rules, prm:<name> = what the last sy
 META = 'prm:'
 MAX_BYTES = 50_000_000
 MAX_GLOBAL_CSS = 5000  # generic selectors go into every page: a cap keeps the pages small
-SAFE_OPTIONS = {'third-party', '3p', 'script', 'image', 'stylesheet', 'subdocument', 'xmlhttprequest', 'xhr', 'media', 'font', 'ping', 'other', 'popup', 'important'}
+SAFE_OPTIONS = {'third-party', '3p', 'popup', 'important'}  # popup: the host is an ad domain, blocking all of it is what the list means
+ALLOW_OPTIONS = SAFE_OPTIONS | {'script', 'image', 'stylesheet', 'subdocument', 'xmlhttprequest', 'xhr', 'media', 'font', 'ping', 'other'}  # a wider exception only blocks less
 DOMAIN_RX = re.compile(r'^[a-z0-9]([a-z0-9._-]*[a-z0-9])?$')
 REFRESH_SECONDS = 86400
 
@@ -54,10 +56,10 @@ def css_ok(sel):
     return '</style' not in low and '{' not in sel and '}' not in sel and '/*' not in sel
 
 
-def _network(rule):
+def _network(rule, allow=False):
     """The domain of a `||domain^` rule (without the @@), or None when the proxy cannot apply it."""
     body, _, opts = rule.partition('$')
-    if opts and not set(opts.split(',')) <= SAFE_OPTIONS:
+    if opts and not set(opts.split(',')) <= (ALLOW_OPTIONS if allow else SAFE_OPTIONS):
         return None
     m = re.match(r'^\|\|([^/^*|:?]+)\^?$', body)
     d = m[1].lower().strip('.') if m else ''
@@ -74,7 +76,7 @@ def reduce(text):
         if '#@#' in line or '#?#' in line or '#$#' in line or '#%#' in line:
             continue
         if line.startswith('@@'):
-            if (d := _network(line[2:])):
+            if (d := _network(line[2:], allow=True)):
                 keep.append(f'@@||{d}^')
                 allow += 1
         elif '##' in line:

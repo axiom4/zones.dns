@@ -407,7 +407,8 @@ class ProxyAndWpadTests(TestCase):
 class RuleListTests(TestCase):
     """External ad-block lists: reduced to domain and cosmetic rules, stored, applied by the filter."""
     LIST = '\n'.join([
-        '[Adblock Plus 2.0]', '! comment', '||ads.example^', '||tracker.example^$third-party', '||only.example^$domain=a.com', '||x.example/path^',
+        '[Adblock Plus 2.0]', '! comment', '||ads.example^', '||tracker.example^$third-party', '||only.example^$domain=a.com', '||cdn.example^$subdocument,third-party',
+        '||pop.example^$popup', '@@||lib.example^$script', '||x.example/path^',
         '/banner/ad-*.gif', '@@||good.ads.example^', '##.ad-box', 'news.example##.promo', 'a.example#@#.ad-box', '##+js(abort)',
     ])
 
@@ -419,8 +420,8 @@ class RuleListTests(TestCase):
 
     def test_reduce_keeps_only_what_the_proxy_applies(self):
         text, counts = self.rules.reduce(self.LIST)
-        self.assertEqual(text.splitlines(), ['||ads.example^', '||tracker.example^', '@@||good.ads.example^', '##.ad-box', 'news.example##.promo'])
-        self.assertEqual(counts, {'blocks': 2, 'allow': 1, 'cosmetic': 2})
+        self.assertEqual(text.splitlines(), ['||ads.example^', '||tracker.example^', '||pop.example^', '@@||lib.example^', '@@||good.ads.example^', '##.ad-box', 'news.example##.promo'])
+        self.assertEqual(counts, {'blocks': 3, 'allow': 2, 'cosmetic': 2})  # cdn.example: only its frames, which the proxy cannot tell apart
 
     def test_sync_stores_and_filter_applies(self):
         self.rules.sync_all('easy=https://lists.example/easy.txt', fetcher=lambda url: self.LIST)
