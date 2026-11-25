@@ -107,9 +107,32 @@ def _ocsp(url, leaf, issuer):
     return None, FAIL_TTL
 
 
+def _shared_cache():
+    """The Django cache when it is Redis (REDIS_URL): one CRL or OCSP answer serves every worker process of the proxy. None otherwise."""
+    if not settings.REDIS_URL:
+        return None
+    from django.core.cache import cache
+    return cache
+
+
 def lookup(leaf, issuer):
-    """Fetch the revocation state of `leaf` and remember it. Returns True (revoked), False (good) or None (unknown)."""
+    """Fetch the revocation state of `leaf` and remember it. Returns True (revoked), False (good) or None (unknown).
+    With Redis another worker's answer is taken first; a new one is stored there for the others (the CRLs themselves stay in this process)."""
     key = _key(leaf, issuer)
+    rkey = f'pxrev:{key[0]}:{key[1]}'
+    shared = _shared_cache()
+    if shared is not None:
+        try:
+            hit = shared.get(rkey)
+        except Exception:
+            hit = None
+        if hit and hit[0] > time.time():
+            with _lock:
+                _status[key] = (time.monotonic() + (hit[0] - time.time()), hit[1])
+                while len(_status) > _MAX_ENTRIES:
+                    _status.popitem(last=False)
+                _inflight.discard(key)
+            return hit[1]
     revoked, ttl = None, FAIL_TTL
     try:
         crl_urls = _urls(leaf, ExtensionOID.CRL_DISTRIBUTION_POINTS)
@@ -128,6 +151,11 @@ def lookup(leaf, issuer):
             while len(_status) > _MAX_ENTRIES:
                 _status.popitem(last=False)
             _inflight.discard(key)
+        if shared is not None:
+            try:
+                shared.set(rkey, (time.time() + ttl, revoked), int(ttl))
+            except Exception:
+                pass
     return revoked
 
 

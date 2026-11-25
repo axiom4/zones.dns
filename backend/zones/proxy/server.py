@@ -98,29 +98,58 @@ _MITM_FAIL_TTL = 1800.0
 _MITM_FAIL_MAX = 8192
 
 
+def _shared_cache():
+    """The Django cache when it is Redis (REDIS_URL): shared by the proxy's worker processes, so what one learns the others use. None otherwise."""
+    if not settings.REDIS_URL:
+        return None
+    from django.core.cache import cache
+    return cache
+
+
+def _mitm_key(client_ip, host):
+    return f'pxmitm:{_cfg_version}:{client_ip}:{host}'  # the settings version: a settings change forgets every fallback, as the in-process clear does
+
+
 def is_mitm_failed(client_ip, host):
-    """True when `(client_ip, host)` recently failed a MITM TLS handshake (e.g. certificate pinning or missing CA on client)."""
+    """True when `(client_ip, host)` recently failed a MITM TLS handshake (e.g. certificate pinning or missing CA on client).
+    With Redis it also asks the other worker processes' answers; it may then wait on the network, so the event loop calls it through _run()."""
     key = (client_ip, host)
     now = time.monotonic()
     with _mitm_lock:
         exp = _mitm_failed.get(key)
-        if exp is None:
-            return False
-        if exp > now:
+        if exp is not None and exp > now:
             _mitm_failed.move_to_end(key)
             return True
-        del _mitm_failed[key]
+        if exp is not None:
+            del _mitm_failed[key]
+    if (shared := _shared_cache()) is None:
         return False
+    try:
+        until = shared.get(_mitm_key(client_ip, host))
+    except Exception:
+        return False  # Redis away: what this process learned is all there is
+    if not until or until <= time.time():
+        return False
+    with _mitm_lock:
+        _mitm_failed[key] = now + (until - time.time())
+        if len(_mitm_failed) > _MITM_FAIL_MAX:
+            _mitm_failed.popitem(last=False)
+    return True
 
 
 def record_mitm_failure(client_ip, host):
-    """Remember that `(client_ip, host)` rejected the MITM certificate so subsequent connections use direct CONNECT passthrough."""
+    """Remember that `(client_ip, host)` rejected the MITM certificate so subsequent connections use direct CONNECT passthrough (every worker, with Redis)."""
     key = (client_ip, host)
     with _mitm_lock:
         _mitm_strikes.pop(key, None)
         _mitm_failed[key] = time.monotonic() + _MITM_FAIL_TTL
         if len(_mitm_failed) > _MITM_FAIL_MAX:
             _mitm_failed.popitem(last=False)
+    if (shared := _shared_cache()) is not None:
+        try:
+            shared.set(_mitm_key(client_ip, host), time.time() + _MITM_FAIL_TTL, _MITM_FAIL_TTL)
+        except Exception:
+            pass
 
 
 _mitm_strikes = OrderedDict()  # (client_ip, host) -> (count, first_at): TLS sessions that ended without a request
@@ -129,19 +158,35 @@ _MITM_STRIKE_WINDOW = 600.0
 
 def note_empty_mitm_session(client_ip, host):
     """A MITM TLS session closed before any request. An app that pins its certificate does this, but so does a browser preconnect
-    that is never used: only the second one within 10 minutes switches the host to a plain tunnel."""
+    that is never used: only the second one within 10 minutes switches the host to a plain tunnel. With Redis the sessions are counted
+    across the worker processes (an app that opens one connection per launch lands on a different worker each time)."""
     key = (client_ip, host)
-    now = time.monotonic()
-    with _mitm_lock:
-        n, since = _mitm_strikes.get(key, (0, now))
-        if now - since > _MITM_STRIKE_WINDOW:
-            n, since = 0, now
-        _mitm_strikes[key] = (n + 1, since)
-        _mitm_strikes.move_to_end(key)
-        if len(_mitm_strikes) > _MITM_FAIL_MAX:
-            _mitm_strikes.popitem(last=False)
-    if n + 1 >= 2:
+    n = None
+    if (shared := _shared_cache()) is not None:
+        rkey = f'pxstrike:{client_ip}:{host}'
+        try:
+            shared.add(rkey, 0, int(_MITM_STRIKE_WINDOW))  # the window starts at the first session, as in-process
+            n = shared.incr(rkey)
+        except Exception:
+            n = None  # Redis away: count in this process
+    if n is None:
+        now = time.monotonic()
+        with _mitm_lock:
+            c, since = _mitm_strikes.get(key, (0, now))
+            if now - since > _MITM_STRIKE_WINDOW:
+                c, since = 0, now
+            n = c + 1
+            _mitm_strikes[key] = (n, since)
+            _mitm_strikes.move_to_end(key)
+            if len(_mitm_strikes) > _MITM_FAIL_MAX:
+                _mitm_strikes.popitem(last=False)
+    if n >= 2:
         record_mitm_failure(client_ip, host)
+        if shared is not None:
+            try:
+                shared.delete(f'pxstrike:{client_ip}:{host}')
+            except Exception:
+                pass
         return True
     return False
 
@@ -1237,7 +1282,7 @@ class Client:
             self.log('CONNECT', host, target_url, 'error', 403, f'Port {port} is not allowed for CONNECT (PROXY_CONNECT_PORTS)', t0)
             return await self.text(ex, 403, 'Forbidden port')
         allow_domains, _, _, _ = pfilter.parse_custom_rules(getattr(s, 'PROXY_CUSTOM_RULES', ''))
-        bypassed = is_mitm_failed(self.client_ip, host)
+        bypassed = await _run(_WORK, is_mitm_failed, self.client_ip, host)
         if bool(getattr(s, 'PROXY_HTTPS_MITM', False)) and not pfilter.is_domain_allowed(host, allow_domains) and not bypassed:
             # accepted locally without contacting the server yet: blocked trackers inside the tunnel get a stealth surrogate from blocked()
             # instead of a CONNECT 403 network error that triggers "Ad Blocker Detected" walls
@@ -1295,7 +1340,7 @@ class Client:
         try:
             await tls.handshake()
         except (ssl.SSLError, OSError, TimeoutError) as e:
-            record_mitm_failure(self.client_ip, host)
+            await _run(_WORK, record_mitm_failure, self.client_ip, host)
             self.log('MITM', host, target_url, 'allowed', 200, f'TLS pin/CA fallback -> CONNECT ({_why(e)})', t0)
             return
         try:
@@ -1304,7 +1349,7 @@ class Client:
             else:
                 conn = H1Connection(self, tls, mitm=(host, port))
             await conn.run()
-            if conn.handled == 0 and note_empty_mitm_session(self.client_ip, host):
+            if conn.handled == 0 and await _run(_WORK, note_empty_mitm_session, self.client_ip, host):
                 self.log('MITM', host, target_url, 'allowed', 200, 'TLS sessions without requests (pinning?) -> CONNECT', t0)
         except Exception as e:
             _warn(f'MITM {host}: {_why(e)}')

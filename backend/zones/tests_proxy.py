@@ -703,6 +703,22 @@ class RfcAndSecurityTests(TestCase):
         self.assertTrue(is_mitm_failed('10.0.0.5', 'app.example'))
         _mitm_failed.clear()
 
+    @override_settings(REDIS_URL='redis://unused')
+    def test_with_redis_the_worker_processes_share_the_tunnel_fallback(self):
+        from django.core.cache import cache
+        from .proxy import server as ps
+        cache.clear()
+        ps._mitm_strikes.clear()
+        _mitm_failed.clear()
+        self.assertFalse(ps.note_empty_mitm_session('10.0.0.6', 'citrix.example'))  # one launch, on one worker
+        ps._mitm_strikes.clear()  # the next launch lands on another worker: nothing of the first in its memory
+        self.assertTrue(ps.note_empty_mitm_session('10.0.0.6', 'citrix.example'))
+        _mitm_failed.clear()  # a third worker
+        self.assertTrue(is_mitm_failed('10.0.0.6', 'citrix.example'))
+        self.assertFalse(is_mitm_failed('10.0.0.7', 'citrix.example'))  # per device
+        _mitm_failed.clear()
+        cache.clear()
+
     def test_the_ca_key_is_stored_encrypted_and_never_shown(self):
         from cryptography.hazmat.primitives import serialization
         ca.ensure_ca(regenerate=True)
@@ -966,6 +982,19 @@ class RevocationAndProfileTests(TestCase):
             self.assertFalse(self.rv.is_revoked(chain))  # the first connection does not wait
             self.assertTrue(self.rv.is_revoked(chain))
             self.assertEqual(f.call_count, 1)  # the CRL is kept until its nextUpdate
+
+    @override_settings(REDIS_URL='redis://unused')
+    def test_with_redis_one_answer_serves_every_worker(self):
+        from unittest import mock
+        from django.core.cache import cache
+        cache.clear()
+        self.addCleanup(cache.clear)
+        ca_key, ca_cert, leaf = self._pki(crl_url='http://crl.test/ca.crl')
+        with mock.patch.object(self.rv, 'fetch', return_value=self._crl(ca_key, ca_cert, [4242])) as f:
+            self.assertTrue(self.rv.lookup(leaf, ca_cert))
+            self.rv.reset()  # another worker process: no CRL and no answer in its memory
+            self.assertTrue(self.rv.lookup(leaf, ca_cert))
+            self.assertEqual(f.call_count, 1)
 
     def test_a_good_certificate_and_a_crl_signed_by_someone_else(self):
         from unittest import mock
