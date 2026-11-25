@@ -1470,3 +1470,40 @@ class CancelOpenStreamTests(TestCase):
         self.assertTrue(sent and sent[0])  # the RST_STREAM went out
         asyncio.run(upstream.cancel_open_stream(resp))  # again, or not HTTP/2 at all: nothing happens
         asyncio.run(upstream.cancel_open_stream(SimpleNamespace(stream=object())))
+
+    def test_unread_data_of_a_given_up_response_goes_back_to_the_connection_window(self):
+        import h2.config, h2.connection, h2.events
+        from types import SimpleNamespace
+        from .proxy import upstream
+        cli = h2.connection.H2Connection(h2.config.H2Configuration(client_side=True))
+        srv = h2.connection.H2Connection(h2.config.H2Configuration(client_side=False))
+        cli.initiate_connection()
+        srv.initiate_connection()
+        got = []
+
+        def pump():
+            for _ in range(4):
+                if a := cli.data_to_send():
+                    srv.receive_data(a)
+                if b := srv.data_to_send():
+                    got.extend(cli.receive_data(b))
+        pump()
+        for sid in (1, 3):  # 3: the server already ended it, nobody read it
+            cli.send_headers(sid, [(':method', 'GET'), (':scheme', 'https'), (':authority', 'x'), (':path', '/')], end_stream=True)
+        pump()
+        srv.send_headers(1, [(':status', '200')])
+        srv.send_headers(3, [(':status', '200')])
+        srv.send_data(1, b'v' * 16000)
+        srv.send_data(1, b'v' * 16000)
+        srv.send_data(3, b'i' * 16000, end_stream=True)
+        pump()
+        self.assertEqual(srv.outbound_flow_control_window, 65535 - 48000)
+        events = {sid: [e for e in got if getattr(e, 'stream_id', None) == sid] for sid in (1, 3)}
+
+        async def write(request):
+            srv.receive_data(cli.data_to_send())
+        conn = SimpleNamespace(_h2_state=cli, _write_outgoing_data=write, _events=events)
+        for sid in (1, 3):
+            asyncio.run(upstream.cancel_open_stream(SimpleNamespace(stream=SimpleNamespace(_connection=conn, _stream_id=sid, _request=None))))
+        self.assertEqual(srv.outbound_flow_control_window, 65535)  # was: 17535 for good, until every stream of the connection stalled
+        self.assertEqual(events, {1: [], 3: []})

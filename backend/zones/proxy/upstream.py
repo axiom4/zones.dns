@@ -10,6 +10,7 @@ import socket
 import ssl
 
 import h2.errors
+import h2.events
 import httpcore
 
 from . import revocation
@@ -75,14 +76,24 @@ class _Backend(httpcore.AsyncNetworkBackend):
 async def cancel_open_stream(resp):
     """Tell the server to stop an HTTP/2 response the proxy gives up on (the client went away, the stream broke). httpcore frees its own
     slot but never resets the stream: it stays open in h2 and counts against the server's 100, the server keeps sending data nobody
-    reads, and enough of them fill the connection ('Max outbound streams is 100, 100 open', bodies that stall). Relies on httpcore's
-    private HTTP2ConnectionByteStream (_connection, _stream_id, _request): anything else is left alone."""
+    reads, and enough of them fill the connection ('Max outbound streams is 100, 100 open', bodies that stall). The data httpcore
+    received for the stream but nobody read is acknowledged too: httpcore credits the connection's flow-control window only for what is
+    read, so each abandoned body kept part of it; a few cancelled videos used up its 16 MB and every stream of the connection stalled at
+    0 bytes. Relies on httpcore's private HTTP2ConnectionByteStream (_connection, _stream_id, _request) and _events: anything else is left alone."""
     body = resp.stream
     conn, sid, request = (getattr(body, name, None) for name in ('_connection', '_stream_id', '_request'))
     try:
-        stream = conn._h2_state.streams.get(sid)
-        if stream is not None and stream.open:
-            conn._h2_state.reset_stream(sid, h2.errors.ErrorCodes.CANCEL)
+        h2s = conn._h2_state
+        events = getattr(conn, '_events', {}).get(sid) or []
+        unread = sum(e.flow_controlled_length or 0 for e in events if isinstance(e, h2.events.DataReceived))
+        events.clear()
+        stream = h2s.streams.get(sid)
+        reset = stream is not None and stream.open
+        if reset:
+            h2s.reset_stream(sid, h2.errors.ErrorCodes.CANCEL)
+        if unread:
+            h2s.acknowledge_received_data(unread, sid)  # a closed stream: the connection's window only
+        if reset or unread:
             await conn._write_outgoing_data(request)
     except Exception:  # not an HTTP/2 stream, or the connection is already gone
         pass
