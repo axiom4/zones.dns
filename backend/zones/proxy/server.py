@@ -106,14 +106,35 @@ def _shared_cache():
     return cache
 
 
+_mitm_gen_seen = ''
+
+
+def _mitm_gen():
+    """What the fallbacks were learned under: HTTPS inspection on or off and the Root CA that signs. Turning inspection off and on, or a new
+    Root CA (devices may now trust it), forgets them; any other change of the data (DNS records, blocklists, DHCP) keeps them."""
+    global _mitm_gen_seen
+    pem = ca._cached_ca[0] if ca._cached_ca is not None else None
+    if pem is None and _mitm_gen_seen:
+        return _mitm_gen_seen  # the CA is not loaded yet in this process: not a change
+    gen = hashlib.sha256(f'{bool(getattr(_cfg_data, "PROXY_HTTPS_MITM", False))}|{pem or ""}'.encode()).hexdigest()[:12]
+    if gen != _mitm_gen_seen:
+        with _mitm_lock:
+            if _mitm_gen_seen:  # the first look only sets it (each worker loads the Root CA before it serves)
+                _mitm_failed.clear()
+                _mitm_strikes.clear()
+            _mitm_gen_seen = gen
+    return gen
+
+
 def _mitm_key(client_ip, host):
-    return f'pxmitm:{_cfg_version}:{client_ip}:{host}'  # the settings version: a settings change forgets every fallback, as the in-process clear does
+    return f'pxmitm:{_mitm_gen()}:{client_ip}:{host}'
 
 
 def is_mitm_failed(client_ip, host):
     """True when `(client_ip, host)` recently failed a MITM TLS handshake (e.g. certificate pinning or missing CA on client).
     With Redis it also asks the other worker processes' answers; it may then wait on the network, so the event loop calls it through _run()."""
     key = (client_ip, host)
+    _mitm_gen()
     now = time.monotonic()
     with _mitm_lock:
         exp = _mitm_failed.get(key)
@@ -140,6 +161,7 @@ def is_mitm_failed(client_ip, host):
 def record_mitm_failure(client_ip, host):
     """Remember that `(client_ip, host)` rejected the MITM certificate so subsequent connections use direct CONNECT passthrough (every worker, with Redis)."""
     key = (client_ip, host)
+    _mitm_gen()
     with _mitm_lock:
         _mitm_strikes.pop(key, None)
         _mitm_failed[key] = time.monotonic() + _MITM_FAIL_TTL
@@ -161,9 +183,9 @@ def note_empty_mitm_session(client_ip, host):
     that is never used: only the second one within 10 minutes switches the host to a plain tunnel. With Redis the sessions are counted
     across the worker processes (an app that opens one connection per launch lands on a different worker each time)."""
     key = (client_ip, host)
+    rkey = f'pxstrike:{_mitm_gen()}:{client_ip}:{host}'
     n = None
     if (shared := _shared_cache()) is not None:
-        rkey = f'pxstrike:{client_ip}:{host}'
         try:
             shared.add(rkey, 0, int(_MITM_STRIKE_WINDOW))  # the window starts at the first session, as in-process
             n = shared.incr(rkey)
@@ -184,7 +206,7 @@ def note_empty_mitm_session(client_ip, host):
         record_mitm_failure(client_ip, host)
         if shared is not None:
             try:
-                shared.delete(f'pxstrike:{client_ip}:{host}')
+                shared.delete(rkey)
             except Exception:
                 pass
         return True
@@ -229,9 +251,7 @@ def cached_proxy_settings(base=None, force=False):
             try:
                 ver, fresh = pfilter.run_on_db_pool(_load_cfg_from_db, base or settings, force or _cfg_data is None, _cfg_version)
                 if fresh is not None:
-                    _cfg_data = fresh
-                    with _mitm_lock:
-                        _mitm_failed.clear()
+                    _cfg_data = fresh  # the MITM fallbacks are kept unless inspection or the Root CA changed: _mitm_gen()
                 _cfg_version = ver
             except DatabaseError:
                 if _cfg_data is None:

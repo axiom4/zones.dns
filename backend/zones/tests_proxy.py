@@ -703,6 +703,17 @@ class RfcAndSecurityTests(TestCase):
         self.assertTrue(is_mitm_failed('10.0.0.5', 'app.example'))
         _mitm_failed.clear()
 
+    def test_a_data_change_keeps_the_tunnel_fallback_a_new_root_ca_forgets_it(self):
+        from .proxy import server as ps
+        ca.ensure_ca()
+        ps._mitm_gen()
+        ps.record_mitm_failure('10.0.0.8', 'pinned.example')
+        DataVersion.bump()  # a DNS record, a blocklist import...
+        cached_proxy_settings(force=True)
+        self.assertTrue(is_mitm_failed('10.0.0.8', 'pinned.example'))
+        ca.ensure_ca(regenerate=True)  # devices may trust the new one: try inspecting again
+        self.assertFalse(is_mitm_failed('10.0.0.8', 'pinned.example'))
+
     @override_settings(REDIS_URL='redis://unused')
     def test_with_redis_the_worker_processes_share_the_tunnel_fallback(self):
         from django.core.cache import cache
