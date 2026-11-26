@@ -12,6 +12,7 @@ import ssl
 import h2.errors
 import h2.events
 import httpcore
+import httpcore._async.http2
 
 from . import revocation
 
@@ -71,6 +72,24 @@ class _Backend(httpcore.AsyncNetworkBackend):
 
     async def sleep(self, seconds):
         await asyncio.sleep(seconds)
+
+
+STREAM_WINDOW = 2**21      # what one response may receive before it is read (httpcore: 16 MB, as much as the whole connection)
+CONNECTION_WINDOW = 2**28  # what all the responses of a connection may (httpcore: 16 MB)
+_h2_init = httpcore._async.http2.AsyncHTTP2Connection._send_connection_init
+
+
+async def _send_connection_init(self, request):
+    """httpcore's HTTP/2 setup with other flow-control windows. With httpcore's, one response the browser stops reading (a video it has
+    buffered enough of) takes the whole window of the connection: every other stream of it, the pictures and the next videos, waited at
+    0 bytes until the server gave up. Here a paused response holds at most STREAM_WINDOW and the connection has room for many of them."""
+    h2s = self._h2_state
+    inc = h2s.increment_flow_control_window
+    h2s.increment_flow_control_window = lambda n, stream_id=None: inc(STREAM_WINDOW if stream_id else CONNECTION_WINDOW, stream_id)
+    await _h2_init(self, request)
+
+
+httpcore._async.http2.AsyncHTTP2Connection._send_connection_init = _send_connection_init
 
 
 async def cancel_open_stream(resp):

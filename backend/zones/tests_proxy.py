@@ -1507,3 +1507,33 @@ class CancelOpenStreamTests(TestCase):
             asyncio.run(upstream.cancel_open_stream(SimpleNamespace(stream=SimpleNamespace(_connection=conn, _stream_id=sid, _request=None))))
         self.assertEqual(srv.outbound_flow_control_window, 65535)  # was: 17535 for good, until every stream of the connection stalled
         self.assertEqual(events, {1: [], 3: []})
+
+    def test_a_paused_response_leaves_room_on_the_connection_for_the_others(self):
+        import h2.config, h2.connection
+        import httpcore
+        from httpcore._async.http2 import AsyncHTTP2Connection
+        from .proxy import upstream
+
+        class Net(httpcore.AsyncNetworkStream):
+            async def write(self, data, timeout=None):
+                srv.receive_data(data)
+
+            async def read(self, n, timeout=None):
+                return srv.data_to_send()
+        srv = h2.connection.H2Connection(h2.config.H2Configuration(client_side=False))
+        srv.initiate_connection()
+        conn = AsyncHTTP2Connection(httpcore.Origin(b'https', b'x', 443), Net())
+
+        async def main():
+            req = httpcore.Request('GET', 'https://x/', headers=[(b'Host', b'x')])
+            await conn._send_connection_init(req)
+            for sid in (1, 3):
+                conn._h2_state.get_next_available_stream_id()
+                await conn._send_request_headers(req, sid)
+        asyncio.run(main())
+        srv.send_headers(1, [(':status', '200')])
+        while srv.local_flow_control_window(1) > 0:  # stream 1: a video nobody reads any more
+            srv.send_data(1, b'v' * min(16384, srv.local_flow_control_window(1)))
+        self.assertEqual(srv.local_flow_control_window(1), 0)
+        self.assertGreater(srv.outbound_flow_control_window, 2**27)  # the connection: plenty left
+        self.assertGreater(srv.local_flow_control_window(3), 2**20)  # stream 3 can still be sent: was 0, the 16 MB were gone
