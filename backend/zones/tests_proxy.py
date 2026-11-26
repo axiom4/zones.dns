@@ -1537,3 +1537,29 @@ class CancelOpenStreamTests(TestCase):
         self.assertEqual(srv.local_flow_control_window(1), 0)
         self.assertGreater(srv.outbound_flow_control_window, 2**27)  # the connection: plenty left
         self.assertGreater(srv.local_flow_control_window(3), 2**20)  # stream 3 can still be sent: was 0, the 16 MB were gone
+
+
+class PopupGuardTests(TestCase):
+    """The injected popup guard, run in Node with a stand-in window: a blank window and sign-in popups open, ad URLs do not."""
+
+    def test_blank_and_sign_in_windows_open_ad_urls_do_not(self):
+        import json
+        import re
+        import shutil
+        import subprocess
+        import unittest
+        node = shutil.which('node')
+        if not node:
+            raise unittest.SkipTest('node is not installed')
+        js = re.search(r'<script id="zones-popup-blocker">(.*)</script>', pfilter.POPUP_BLOCKER_JS, re.S)[1]
+        harness = (
+            'var opened=[];var window={open:function(u){opened.push(String(u||""));return {};},addEventListener:function(){}};'
+            'var document={currentScript:null,addEventListener:function(){}};var console={debug:function(){}};'
+            + js +
+            ';var r=["","about:blank","https://www.facebook.com/dialog/oauth?display=popup","https://pop.example/popunder.php"]'
+            '.map(function(u){return window.open(u)!==null;});'
+            'process.stdout.write(JSON.stringify({r:r,intercom:typeof window.Intercom,gtm:typeof window.google_tag_manager}));'
+        )
+        out = json.loads(subprocess.run([node, '-e', harness], capture_output=True, text=True, timeout=20, check=True).stdout)
+        self.assertEqual(out['r'], [True, True, True, False])
+        self.assertEqual((out['intercom'], out['gtm']), ('undefined', 'undefined'))  # a site's own Intercom or GTM still loads
