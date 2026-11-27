@@ -1563,3 +1563,48 @@ class PopupGuardTests(TestCase):
         out = json.loads(subprocess.run([node, '-e', harness], capture_output=True, text=True, timeout=20, check=True).stdout)
         self.assertEqual(out['r'], [True, True, True, False])
         self.assertEqual((out['intercom'], out['gtm']), ('undefined', 'undefined'))  # a site's own Intercom or GTM still loads
+
+
+class MemoryWatchTests(TestCase):
+    """The worker's memory line, and the exit once it is over the limit (the Pi's kernel has no memory cgroup for MemoryMax)."""
+
+    def test_the_report_counts_clients_upstream_connections_and_unread_data(self):
+        import h2.events
+        from .proxy import memwatch
+        data = h2.events.DataReceived(stream_id=1)
+        data.data = b'x' * 2**20
+        h2conn = SimpleNamespace(_events={1: [data], 3: []})
+        server = SimpleNamespace(_total=3, _per_client={'10.0.0.2': 1, '10.0.0.1': 2},
+                                 _upstream_pool=SimpleNamespace(connections=[SimpleNamespace(_connection=h2conn), SimpleNamespace()]))
+
+        async def run():
+            return memwatch.report(server, 300 * 2**20)
+        line = asyncio.run(run())
+        self.assertIn(': 300 MB, 3 client connections (10.0.0.1 2, 10.0.0.2 1), 2 upstream connections, 2 HTTP/2 streams holding 1.0 MB unread', line)
+
+    def test_a_worker_over_the_limit_logs_where_it_allocated_and_exits(self):
+        import tracemalloc
+        from unittest import mock
+        from .proxy import memwatch
+        lines, readings = [], iter([memwatch.BIG, memwatch.LIMIT])
+        server = SimpleNamespace(_total=0, _per_client={}, _upstream_pool=None)
+
+        class Exited(Exception):
+            pass
+
+        def exit_(code):
+            raise Exited(code)
+
+        async def run():
+            with mock.patch.object(memwatch, 'EVERY', 0), mock.patch.object(memwatch, 'rss', lambda: next(readings)), \
+                    mock.patch.object(memwatch.os, '_exit', exit_):
+                await memwatch.watch(server, lines.append)
+        try:
+            with self.assertRaises(Exited):
+                asyncio.run(run())
+        finally:
+            tracemalloc.stop()
+        self.assertEqual(len(lines), 3)
+        self.assertNotIn('held since', lines[0])  # tracing has only just started
+        self.assertIn('held since tracing started: ', lines[1])
+        self.assertIn('MB limit: exiting', lines[2])

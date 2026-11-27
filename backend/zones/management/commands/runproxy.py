@@ -16,7 +16,7 @@ from django.utils import timezone
 
 from zones.dnsd import resolver
 from zones.models import DataVersion, ProxyLog
-from zones.proxy import ca, filter as pfilter, rules
+from zones.proxy import ca, filter as pfilter, memwatch, rules
 from zones.proxy.server import ProxyLogWriter, ProxyServer, cached_proxy_settings
 from zones.logfmt import stamp_output
 from zones import heartbeat
@@ -112,6 +112,7 @@ class Command(BaseCommand):
         await asyncio.to_thread(connections.close_all)
         if primary:
             heartbeat.start('proxy', run=pfilter.run_on_db_pool)  # the GUI's status line; on the pool: no database connection of its own
+        self.memwatch = asyncio.create_task(memwatch.watch(srv, lambda line: (self.stdout.write(line), self.stdout.flush())))
         self.stdout.write(
             f'Proxy listening on {bind_addr}:{bind_port} '
             f'(ads={"on" if s.PROXY_BLOCK_ADS else "off"}, '
