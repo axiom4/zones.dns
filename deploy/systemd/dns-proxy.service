@@ -12,6 +12,12 @@ ExecStart=/opt/dns/.venv/bin/python manage.py runproxy
 Restart=always
 RestartSec=3
 LimitNOFILE=65536
+# A proxy that grows without bound must not take the whole machine's RAM (it froze a Pi: ping answered, SSH, DHCP and DNS did not).
+# Past the limit the kernel kills the largest process of the unit, a worker, and the supervisor starts it again; the others go on.
+# No swap for it: swapping freezes the machine just the same. On a Raspberry Pi this needs cgroup_enable=memory in /boot/firmware/cmdline.txt.
+MemoryMax=3G
+MemorySwapMax=0
+OOMPolicy=continue
 CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
