@@ -1568,12 +1568,41 @@ class PopupGuardTests(TestCase):
 class MemoryWatchTests(TestCase):
     """The worker's memory line, and the exit once it is over the limit (the Pi's kernel has no memory cgroup for MemoryMax)."""
 
+    def watch(self, server, readings):
+        """Run memwatch.watch over `readings`, (loop time, RSS) pairs ending over the limit: the lines and the exit code."""
+        import tracemalloc
+        from unittest import mock
+        from .proxy import memwatch
+        lines, readings, clock = [], iter(readings), {'t': 0.0}
+
+        class Exited(Exception):
+            pass
+
+        def exit_(code):
+            raise Exited(code)
+
+        def rss():
+            clock['t'], r = next(readings)
+            return r
+
+        async def run():
+            asyncio.get_running_loop().time = lambda: clock['t']
+            with mock.patch.object(memwatch, 'EVERY', 0), mock.patch.object(memwatch, 'rss', rss), \
+                    mock.patch.object(memwatch.os, '_exit', exit_):
+                await memwatch.watch(server, lines.append)
+        try:
+            with self.assertRaises(Exited) as e:
+                asyncio.run(run())
+        finally:
+            tracemalloc.stop()
+        return lines, e.exception.args[0]
+
     def test_the_report_counts_clients_upstream_connections_and_unread_data(self):
         import h2.events
         from .proxy import memwatch
         data = h2.events.DataReceived(stream_id=1)
         data.data = b'x' * 2**20
-        h2conn = SimpleNamespace(_events={1: [data], 3: []})
+        h2conn = SimpleNamespace(_events={1: [data, h2.events.StreamEnded(stream_id=1)], 3: []})  # only the data counts
         server = SimpleNamespace(_total=3, _per_client={'10.0.0.2': 1, '10.0.0.1': 2},
                                  _upstream_pool=SimpleNamespace(connections=[SimpleNamespace(_connection=h2conn), SimpleNamespace()]))
 
@@ -1582,29 +1611,30 @@ class MemoryWatchTests(TestCase):
         line = asyncio.run(run())
         self.assertIn(': 300 MB, 3 client connections (10.0.0.1 2, 10.0.0.2 1), 2 upstream connections, 2 HTTP/2 streams holding 1.0 MB unread', line)
 
-    def test_a_worker_over_the_limit_logs_where_it_allocated_and_exits(self):
-        import tracemalloc
-        from unittest import mock
+    def test_lines_come_every_15_minutes_then_every_minute_or_100_mb_and_the_worker_exits_over_the_limit(self):
         from .proxy import memwatch
-        lines, readings = [], iter([memwatch.BIG, memwatch.LIMIT])
+        MB, BIG = 2**20, memwatch.BIG
         server = SimpleNamespace(_total=0, _per_client={}, _upstream_pool=None)
+        lines, code = self.watch(server, [
+            (0, 100 * MB),              # first reading: a line
+            (10, 100 * MB),             # small, 10 s later: none
+            (900, 100 * MB),            # 15 minutes later: a line
+            (910, BIG),                 # big: tracing starts, a line without allocations yet
+            (920, BIG + 10 * MB),       # 10 s and 10 MB later: none
+            (930, BIG + memwatch.STEP), # 100 MB more: a line
+            (995, BIG + memwatch.STEP), # a minute later: a line
+            (1000, 100 * MB),           # small again: tracing stops, no line
+            (1010, memwatch.LIMIT),     # over the limit: tracing starts anew, a line, the exit
+        ])
+        self.assertEqual([line.split(': ', 1)[1].split(' MB')[0] for line in lines[:-1]],
+                         ['100', '100', str(BIG // MB), str((BIG + memwatch.STEP) // MB), str((BIG + memwatch.STEP) // MB), str(memwatch.LIMIT // MB)])
+        held = ['held since tracing started: ' in line for line in lines[:-1]]
+        self.assertEqual(held, [False, False, False, True, True, False])  # the last: tracing was stopped below BIG and started again
+        self.assertIn('MB limit: exiting', lines[-1])
+        self.assertNotEqual(code, 0)  # 0 would tell the supervisor the proxy was switched off: it would stop every worker
 
-        class Exited(Exception):
-            pass
-
-        def exit_(code):
-            raise Exited(code)
-
-        async def run():
-            with mock.patch.object(memwatch, 'EVERY', 0), mock.patch.object(memwatch, 'rss', lambda: next(readings)), \
-                    mock.patch.object(memwatch.os, '_exit', exit_):
-                await memwatch.watch(server, lines.append)
-        try:
-            with self.assertRaises(Exited):
-                asyncio.run(run())
-        finally:
-            tracemalloc.stop()
-        self.assertEqual(len(lines), 3)
-        self.assertNotIn('held since', lines[0])  # tracing has only just started
-        self.assertIn('held since tracing started: ', lines[1])
-        self.assertIn('MB limit: exiting', lines[2])
+    def test_a_report_that_fails_does_not_stop_the_watch(self):
+        from .proxy import memwatch
+        lines, code = self.watch(SimpleNamespace(), [(0, 100 * 2**20), (10, memwatch.LIMIT)])  # no _per_client: report() raises
+        self.assertIn('memory report failed', lines[0])
+        self.assertIn('MB limit: exiting', lines[-1])
