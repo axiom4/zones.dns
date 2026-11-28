@@ -1512,7 +1512,7 @@ class CancelOpenStreamTests(TestCase):
         import h2.config, h2.connection
         import httpcore
         from httpcore._async.http2 import AsyncHTTP2Connection
-        from .proxy import upstream
+        from .proxy import upstream  # noqa: F401 -- importing it patches the windows of AsyncHTTP2Connection
 
         class Net(httpcore.AsyncNetworkStream):
             async def write(self, data, timeout=None):
