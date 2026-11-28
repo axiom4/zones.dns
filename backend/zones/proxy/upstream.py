@@ -99,7 +99,7 @@ async def cancel_open_stream(resp):
     received for the stream but nobody read is acknowledged too: httpcore credits the connection's flow-control window only for what is
     read, so each abandoned body kept part of it; a few cancelled videos used up its 16 MB and every stream of the connection stalled at
     0 bytes. Relies on httpcore's private HTTP2ConnectionByteStream (_connection, _stream_id, _request) and _events: anything else is left alone."""
-    body = resp.stream
+    body = getattr(resp.stream, '_stream', resp.stream)  # the pool wraps the connection's stream in a PoolByteStream
     conn, sid, request = (getattr(body, name, None) for name in ('_connection', '_stream_id', '_request'))
     try:
         h2s = conn._h2_state

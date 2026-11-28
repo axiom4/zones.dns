@@ -1538,6 +1538,50 @@ class CancelOpenStreamTests(TestCase):
         self.assertGreater(srv.outbound_flow_control_window, 2**27)  # the connection: plenty left
         self.assertGreater(srv.local_flow_control_window(3), 2**20)  # stream 3 can still be sent: was 0, the 16 MB were gone
 
+    def test_a_response_from_the_pool_is_reset_too(self):
+        """The proxy's responses come from httpcore's pool, which wraps the connection's body stream in a PoolByteStream: the reset
+        must reach through it. It did not, and every response given up left its stream open until 100 of them blocked the connection."""
+        import h2.config, h2.connection, h2.events
+        import httpcore
+        from .proxy import upstream
+        srv = h2.connection.H2Connection(h2.config.H2Configuration(client_side=False))
+        srv.initiate_connection()
+        reset = []
+
+        class Net(httpcore.AsyncNetworkStream):
+            async def write(self, data, timeout=None):
+                for e in srv.receive_data(data):
+                    if isinstance(e, h2.events.RequestReceived):
+                        srv.send_headers(e.stream_id, [(':status', '200')])
+                        srv.send_data(e.stream_id, b'v' * 1000)  # and more to come: the stream stays open
+                    elif isinstance(e, h2.events.StreamReset):
+                        reset.append(e.stream_id)
+
+            async def read(self, n, timeout=None):
+                for _ in range(1000):
+                    if data := srv.data_to_send():
+                        return data
+                    await asyncio.sleep(0)
+                return b''  # nothing more: a closed connection, so a test that went wrong fails instead of hanging
+
+            async def aclose(self):
+                pass
+
+            def get_extra_info(self, info):
+                return None
+
+        class Backend(httpcore.AsyncNetworkBackend):
+            async def connect_tcp(self, *a, **k):
+                return Net()
+
+        async def main():
+            async with httpcore.AsyncConnectionPool(http1=False, http2=True, network_backend=Backend()) as pool:
+                async with pool.stream('GET', 'http://x/', headers=[(b'Host', b'x')]) as resp:
+                    await upstream.cancel_open_stream(resp)
+                return pool.connections[0]._connection._h2_state.open_outbound_streams
+        self.assertEqual(asyncio.run(main()), 0)
+        self.assertEqual(reset, [1])
+
 
 class PopupGuardTests(TestCase):
     """The injected popup guard, run in Node with a stand-in window: a blank window and sign-in popups open, ad URLs do not."""
