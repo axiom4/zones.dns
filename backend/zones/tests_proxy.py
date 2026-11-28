@@ -1610,36 +1610,35 @@ class PopupGuardTests(TestCase):
 
 
 class MemoryWatchTests(TestCase):
-    """The worker's memory line, and the exit once it is over the limit (the Pi's kernel has no memory cgroup for MemoryMax)."""
+    """The worker's memory lines, and the guard thread that writes where a stuck event loop is and exits over the limit."""
 
     def watch(self, server, readings):
-        """Run memwatch.watch over `readings`, (loop time, RSS) pairs ending over the limit: the lines and the exit code."""
+        """Run memwatch.watch over `readings`, (loop time, RSS) pairs: the lines it wrote."""
         import tracemalloc
         from unittest import mock
         from .proxy import memwatch
         lines, readings, clock = [], iter(readings), {'t': 0.0}
 
-        class Exited(Exception):
+        class Done(Exception):
             pass
 
-        def exit_(code):
-            raise Exited(code)
-
         def rss():
-            clock['t'], r = next(readings)
+            try:
+                clock['t'], r = next(readings)
+            except StopIteration:
+                raise Done
             return r
 
         async def run():
             asyncio.get_running_loop().time = lambda: clock['t']
-            with mock.patch.object(memwatch, 'EVERY', 0), mock.patch.object(memwatch, 'rss', rss), \
-                    mock.patch.object(memwatch.os, '_exit', exit_):
+            with mock.patch.object(memwatch, 'EVERY', 0), mock.patch.object(memwatch, 'rss', rss):
                 await memwatch.watch(server, lines.append)
         try:
-            with self.assertRaises(Exited) as e:
+            with self.assertRaises(Done):
                 asyncio.run(run())
         finally:
             tracemalloc.stop()
-        return lines, e.exception.args[0]
+        return lines
 
     def test_the_report_counts_clients_upstream_connections_and_unread_data(self):
         import h2.events
@@ -1655,11 +1654,11 @@ class MemoryWatchTests(TestCase):
         line = asyncio.run(run())
         self.assertIn(': 300 MB, 3 client connections (10.0.0.1 2, 10.0.0.2 1), 2 upstream connections, 2 HTTP/2 streams holding 1.0 MB unread', line)
 
-    def test_lines_come_every_15_minutes_then_every_minute_or_100_mb_and_the_worker_exits_over_the_limit(self):
+    def test_lines_come_every_15_minutes_then_every_minute_or_100_mb_with_the_allocations(self):
         from .proxy import memwatch
         MB, BIG = 2**20, memwatch.BIG
         server = SimpleNamespace(_total=0, _per_client={}, _upstream_pool=None)
-        lines, code = self.watch(server, [
+        lines = self.watch(server, [
             (0, 100 * MB),              # first reading: a line
             (10, 100 * MB),             # small, 10 s later: none
             (900, 100 * MB),            # 15 minutes later: a line
@@ -1668,17 +1667,59 @@ class MemoryWatchTests(TestCase):
             (930, BIG + memwatch.STEP), # 100 MB more: a line
             (995, BIG + memwatch.STEP), # a minute later: a line
             (1000, 100 * MB),           # small again: tracing stops, no line
-            (1010, memwatch.LIMIT),     # over the limit: tracing starts anew, a line, the exit
+            (1010, BIG),                # big again: tracing starts anew, a line without allocations
         ])
-        self.assertEqual([line.split(': ', 1)[1].split(' MB')[0] for line in lines[:-1]],
-                         ['100', '100', str(BIG // MB), str((BIG + memwatch.STEP) // MB), str((BIG + memwatch.STEP) // MB), str(memwatch.LIMIT // MB)])
-        held = ['held since tracing started: ' in line for line in lines[:-1]]
-        self.assertEqual(held, [False, False, False, True, True, False])  # the last: tracing was stopped below BIG and started again
-        self.assertIn('MB limit: exiting', lines[-1])
-        self.assertNotEqual(code, 0)  # 0 would tell the supervisor the proxy was switched off: it would stop every worker
+        self.assertEqual([line.split(': ', 1)[1].split(' MB')[0] for line in lines],
+                         ['100', '100', str(BIG // MB), str((BIG + memwatch.STEP) // MB), str((BIG + memwatch.STEP) // MB), str(BIG // MB)])
+        self.assertEqual(['held since tracing started: ' in line for line in lines], [False, False, False, True, True, False])
 
     def test_a_report_that_fails_does_not_stop_the_watch(self):
-        from .proxy import memwatch
-        lines, code = self.watch(SimpleNamespace(), [(0, 100 * 2**20), (10, memwatch.LIMIT)])  # no _per_client: report() raises
+        lines = self.watch(SimpleNamespace(), [(0, 100 * 2**20), (10, 100 * 2**20)])  # no _per_client: report() raises
+        self.assertEqual(len(lines), 2)
         self.assertIn('memory report failed', lines[0])
-        self.assertIn('MB limit: exiting', lines[-1])
+
+    def test_the_guard_writes_where_a_stuck_event_loop_is_and_exits_over_the_limit(self):
+        import threading
+        import time
+        from unittest import mock
+        from .proxy import memwatch
+        MB = 2**20
+        done, ready = threading.Event(), threading.Event()
+
+        def stuck_in_a_loop():  # the event loop thread, busy in the proxy's code
+            ready.set()
+            while not done.is_set():
+                pass
+        t = threading.Thread(target=stuck_in_a_loop)
+        t.start()
+        ready.wait()
+        lines, readings = [], iter([100 * MB, 200 * MB, 300 * MB, memwatch.LIMIT])
+
+        class Exited(Exception):
+            pass
+
+        def exit_(code):
+            raise Exited(code)
+        beat = [time.monotonic() - 2 * memwatch.STALL]  # the loop last ran 10 s ago
+        try:
+            with mock.patch.object(memwatch, 'rss', lambda: next(readings)), mock.patch.object(memwatch.os, '_exit', exit_), \
+                    self.assertRaises(Exited) as e:
+                memwatch.guard(t.ident, beat, lines.append, every=0)
+        finally:
+            done.set()
+            t.join()
+        self.assertEqual(len(lines), 3)  # once for the stall (not again at 200 and 300 MB), once over the limit, the exit
+        self.assertIn(': 100 MB, the event loop last ran 10 s ago; it is at ', lines[0])
+        self.assertIn('stuck_in_a_loop', lines[0])
+        self.assertIn('stuck_in_a_loop', lines[1])
+        self.assertIn('MB limit: exiting', lines[2])
+        self.assertNotEqual(e.exception.args[0], 0)  # 0 would tell the supervisor the proxy was switched off: it would stop every worker
+
+    def test_a_running_event_loop_gets_no_line(self):
+        import time
+        from unittest import mock
+        from .proxy import memwatch
+        lines, readings = [], iter([100 * 2**20, None])  # None: no /proc, the guard ends
+        with mock.patch.object(memwatch, 'rss', lambda: next(readings)):
+            memwatch.guard(0, [time.monotonic() + 3600], lines.append, every=0)
+        self.assertEqual(lines, [])

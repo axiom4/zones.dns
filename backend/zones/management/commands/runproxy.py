@@ -112,7 +112,7 @@ class Command(BaseCommand):
         await asyncio.to_thread(connections.close_all)
         if primary:
             heartbeat.start('proxy', run=pfilter.run_on_db_pool)  # the GUI's status line; on the pool: no database connection of its own
-        self.memwatch = asyncio.create_task(memwatch.watch(srv, lambda line: (self.stdout.write(line), self.stdout.flush())))
+        self.memwatch = memwatch.start(srv, lambda line: (self.stdout.write(line), self.stdout.flush()))
         self.stdout.write(
             f'Proxy listening on {bind_addr}:{bind_port} '
             f'(ads={"on" if s.PROXY_BLOCK_ADS else "off"}, '
